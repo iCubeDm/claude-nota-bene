@@ -69,11 +69,19 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     agent = null;
     try { a.close(); } catch (err) { reportError(hub, 'agent-close', err); }
     for (const finish of [...pending.values()]) finish(false);
+    emitErrorResult(e);
+  }
+
+  // shaped like SDKResultError: the text goes in errors[]; no aborted terminal_reason, so it shows as an error.
+  // With `answers` it names the send it stands in for (user_message_uuid(s)); without, it answers every waiting send.
+  function emitErrorResult(e: unknown, answers?: string): void {
     const message = e instanceof Error ? e.message : String(e);
     hub.emit({
       kind: 'sdk',
-      // shaped like SDKResultError: the text goes in errors[]; no aborted terminal_reason, so it shows as an error
-      m: { type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: [message] } as unknown as SDKMessage,
+      m: {
+        type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: [message],
+        ...(answers ? { user_message_uuid: answers, user_message_uuids: [answers] } : {}),
+      } as unknown as SDKMessage,
     });
   }
 
@@ -109,6 +117,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
           ensureAgent().send({ uuid: id, text, priority: force ? 'now' : 'next' });
         } catch (e) {
           reportError(hub, 'send', e);
+          emitErrorResult(e, id); // the user event is already out: answer it or the feed waits forever
         }
       });
     },

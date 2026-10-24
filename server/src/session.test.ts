@@ -316,3 +316,67 @@ describe('session manager', () => {
     expect(events.some((e) => e.kind === 'resumed')).toBe(false);
   });
 });
+
+// the web reducer decides what the user sees; loaded by variable path so the server project does not compile web sources
+async function feedOf(events: ServerEvent[]): Promise<{ busy: boolean; waiting: string[] }> {
+  const href = new URL('../../web/src/store/feed.ts', import.meta.url).href;
+  const { reduce, emptyFeed } = (await import(/* @vite-ignore */ href)) as { reduce: (s: unknown, e: ServerEvent) => never; emptyFeed: unknown };
+  return events.reduce(reduce as never, emptyFeed as never) as never;
+}
+
+describe('busy cannot get stuck', () => {
+  it('a failed agent.send answers the send with a stored error result', async () => {
+    const inner = fakeBackend([{ text: 'x' }]);
+    const backend: AgentBackend = {
+      history: inner.history,
+      start: (o) => {
+        const a = inner.start(o);
+        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), close: () => a.close() };
+      },
+    };
+    const { hub, events, make } = setup(backend);
+    const s = await make();
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 1);
+    const kinds = events.map((e) => e.kind);
+    expect(kinds.indexOf('server-error')).toBeLessThan(events.findIndex((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result'));
+    expect((sdkOf(events, 'result')[0] as { m: unknown }).m).toMatchObject({
+      subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: ['stdin closed'], user_message_uuid: 'u1', user_message_uuids: ['u1'],
+    });
+    const attached: ServerEvent[] = [];
+    hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
+    expect((await feedOf(attached)).busy).toBe(false);
+  });
+
+  it('a crash with a queued send leaves busy false', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let sent = 0;
+    const backend: AgentBackend = {
+      history: async () => [],
+      start: () => ({
+        messages: (async function* () {
+          yield { type: 'system', subtype: 'init', session_id: 'fake-session' } as never;
+          await gate;
+          throw new Error('dead');
+        })(),
+        send: () => { sent++; },
+        interrupt: async () => {},
+        close: () => {},
+      }),
+    };
+    const { hub, events, make } = setup(backend);
+    const s = await make();
+    s.send({ id: 'A', text: 'one' });
+    s.send({ id: 'B', text: 'two' });
+    await until(() => sent === 2);
+    release();
+    await until(() => sdkOf(events, 'result').length === 1);
+    const attached: ServerEvent[] = [];
+    hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
+    expect((sdkOf(events, 'result')[0] as { m: unknown }).m).toMatchObject({ is_error: true, errors: ['dead'] });
+    const f = await feedOf(attached);
+    expect(f.waiting).toEqual([]);
+    expect(f.busy).toBe(false);
+  });
+});

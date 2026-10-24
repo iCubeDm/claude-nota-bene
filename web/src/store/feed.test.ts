@@ -35,13 +35,18 @@ test('user while busy is marked duringWork', () => {
 });
 
 test('force keeps busy across the interrupted result; the next result clears it', () => {
-  const s1 = fold([user(), user({ id: 'u2', force: true }), result({ result: '', terminal_reason: 'aborted_streaming' })]);
+  const s1 = fold([user(), user({ id: 'u2', force: true }), result({ result: '', terminal_reason: 'aborted_streaming', user_message_uuids: ['u1'] })]);
   expect(s1.busy).toBe(true);
   expect(s1.forcePending).toBe(false);
   expect(s1.items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
-  const s2 = reduce(s1, result());
+  const s2 = reduce(s1, result({ user_message_uuids: ['u2'] }));
   expect(s2.busy).toBe(false);
   expect(s2.items.at(-1)).toMatchObject({ status: 'done' });
+  // nothing left waiting: only forcePending can keep busy here
+  const forced = result({ result: '', terminal_reason: 'aborted_streaming', user_message_uuids: ['u1', 'u2'] });
+  const s3 = fold([user(), user({ id: 'u2', force: true }), forced]);
+  expect(s3.waiting).toEqual([]);
+  expect(s3.busy).toBe(true);
 });
 
 test('tool_result is_error marks the tool red', () => {
@@ -122,7 +127,7 @@ test('two streamed text blocks are finalised in content order', () => {
 
 test('replay keeps the folded busy: mid-turn history is busy, finished is not', () => {
   expect(reduce(emptyFeed, { kind: 'replay', events: [user()] }).busy).toBe(true);
-  expect(reduce(emptyFeed, { kind: 'replay', events: [user(), result()] }).busy).toBe(false);
+  expect(reduce(emptyFeed, { kind: 'replay', events: [user(), result({ user_message_uuids: ['u1'] })] }).busy).toBe(false);
 });
 
 const lastDone = (s: FeedState) => s.items.filter((i) => i.kind === 'done').at(-1);
@@ -147,11 +152,11 @@ test('error results show their text; a crash is an error, not an interruption', 
 });
 
 test('a result with queued_turn_count > 0 keeps busy until the queued turn ends', () => {
-  const s1 = fold([user(), user({ id: 'u2' }), result({ queued_turn_count: 1 })]);
+  const s1 = fold([user(), user({ id: 'u2' }), result({ queued_turn_count: 1, user_message_uuids: ['u1', 'u2'] })]);
   expect(s1.busy).toBe(true);
   expect(lastDone(s1)).toMatchObject({ status: 'done' });
   expect(reduce(s1, result({ queued_turn_count: 0 })).busy).toBe(false);
-  expect(fold([user(), result()]).busy).toBe(false); // absent counts as 0
+  expect(fold([user(), result({ user_message_uuids: ['u1'] })]).busy).toBe(false); // absent counts as 0
 });
 
 test('busy follows unanswered sends: a result answers the sends named in user_message_uuids', () => {
@@ -161,11 +166,35 @@ test('busy follows unanswered sends: a result answers the sends named in user_me
   expect(reduce(s1, result({ user_message_uuids: ['u2'] })).busy).toBe(false);
   // one turn may consume several sends
   expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuids: ['u1', 'u2'] })]).busy).toBe(false);
-  // fallback without the list: user_message_uuid, else the oldest send (the server's crash result)
+  // fallback without the list: user_message_uuid; an error result naming nothing (crash) answers every waiting send; a success naming nothing answers none
   expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuid: 'u2' })]).busy).toBe(true);
   expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuid: 'u2' }), result({ user_message_uuid: 'u1' })]).busy).toBe(false);
-  expect(fold([user(), user({ id: 'u2' }), result()]).busy).toBe(true);
-  expect(fold([user(), user({ id: 'u2' }), result(), result()]).busy).toBe(false);
   // historic (transcript) sends are never waited for
   expect(fold([user({ historic: true }), user({ id: 'u2' }), result({ user_message_uuids: ['u2'] })]).busy).toBe(false);
+});
+
+test('a uuid-less result (crash) clears every waiting send, not just the oldest', () => {
+  const s = fold([user(), user({ id: 'u2' }), sdk({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: ['boom'] })]);
+  expect(s.waiting).toEqual([]);
+  expect(s.busy).toBe(false);
+});
+
+test('a uuid-less SUCCESS result (task-notification turn) answers no send; a uuid-less error result answers all', () => {
+  const s = fold([user(), result()]);
+  expect(s.busy).toBe(true);
+  expect(s.waiting).toEqual(['u1']);
+  const e = reduce(s, sdk({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: ['x'] }));
+  expect(e.waiting).toEqual([]);
+  expect(e.busy).toBe(false);
+});
+
+test('command_lifecycle cancelled removes that send from waiting', () => {
+  const s1 = fold([user()]);
+  expect(s1.busy).toBe(true);
+  const s2 = reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'u1', state: 'cancelled' }));
+  expect(s2.waiting).toEqual([]);
+  expect(s2.busy).toBe(false);
+  // other states and other ids change nothing
+  expect(reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'u1', state: 'started' }))).toBe(s1);
+  expect(reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'zz', state: 'cancelled' })).waiting).toEqual(['u1']);
 });

@@ -22,7 +22,7 @@ it('inbound frames reach the feed', () => {
   expect(f.connect).toHaveBeenCalledTimes(1);
   f.ev({ kind: 'user', id: 'u1', text: 'hi', ts: 1 });
   expect(selectBusy(store.getState())).toBe(true);
-  f.ev({ kind: 'sdk', ts: 2, m: { type: 'result', subtype: 'success', duration_ms: 5, is_error: false, result: 'ok' } as never });
+  f.ev({ kind: 'sdk', ts: 2, m: { type: 'result', subtype: 'success', duration_ms: 5, is_error: false, result: 'ok', user_message_uuid: 'u1' } as never });
   expect(selectBusy(store.getState())).toBe(false);
   expect(selectFeed(store.getState()).items).toHaveLength(2);
 });

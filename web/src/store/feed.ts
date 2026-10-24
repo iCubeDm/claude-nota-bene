@@ -39,6 +39,8 @@ type Sdk = {
   queued_turn_count?: number;
   user_message_uuid?: string;
   user_message_uuids?: string[];
+  command_uuid?: string;
+  state?: string;
 };
 
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
@@ -135,12 +137,21 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
         it.kind === 'assistant' && !it.final ? (it.text ? [{ ...it, final: true }] : []) : [it]);
       // A message sent mid-turn runs next as its own turn. The CLI was seen reporting queued_turn_count 0 with a
       // send already queued, so busy also follows the sends no result has named yet (user_message_uuids echoes
-      // the client ids; without it, user_message_uuid, else the oldest send, e.g. the server's crash result).
+      // the client ids, or user_message_uuid). A result naming neither is either an error (our crash / send-failure
+      // result, the CLI's zeroed delivery-failure result: it answers every waiting send) or a success from a
+      // synthetic turn (task notification, cron) or an older producer: that answers none of the user's sends.
       const answered = Array.isArray(m.user_message_uuids) ? m.user_message_uuids
         : typeof m.user_message_uuid === 'string' ? [m.user_message_uuid] : null;
-      const waiting = answered ? s.waiting.filter((id) => !answered.includes(id)) : s.waiting.slice(1);
+      const waiting = answered ? s.waiting.filter((id) => !answered.includes(id))
+        : m.is_error === true ? [] : s.waiting;
       const busy = s.forcePending || (m.queued_turn_count ?? 0) > 0 || waiting.length > 0;
       return { ...s, items: [...closed, done], busy, forcePending: false, waiting };
+    }
+    case 'command_lifecycle': {
+      // a queued send that was cancelled (e.g. Stop with cancel_queued) never gets a result of its own
+      if (m.state !== 'cancelled' || !m.command_uuid || !s.waiting.includes(m.command_uuid)) return s;
+      const waiting = s.waiting.filter((id) => id !== m.command_uuid);
+      return { ...s, waiting, busy: s.forcePending || waiting.length > 0 };
     }
     default:
       return s;
