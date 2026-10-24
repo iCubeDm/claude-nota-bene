@@ -1,0 +1,16 @@
+.md { color: oklch(0.90 0.01 260 / 0.9); font-size: 15px; line-height: 1.625; }
+.md p { margin: 0.5em 0; }
+.md h1, .md h2, .md h3 { line-height: 1.3; margin: 1em 0 0.4em; }
+.md pre { background: var(--code-bg); border: 1px solid var(--border-soft); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+.md code, .md pre code { font: 12.5px/1.5 var(--font-mono); }
+.md :not(pre) > code { background: var(--muted); padding: 1px 5px; border-radius: 4px; color: oklch(0.72 0.02 260); font-size: 12px; }
+.md pre code.hljs { background: none; padding: 0; }
+.md img, .md video { max-width: 100%; max-height: 380px; border-radius: 8px; display: block; margin: 8px 0; }
+.md audio { width: 100%; }
+.md table { border-collapse: collapse; }
+.md td, .md th { border: 1px solid var(--border); padding: 4px 8px; }
+.md a { color: var(--primary); }
+.md blockquote { border-left: 2px solid var(--border); margin: 0.5em 0; padding-left: 12px; color: var(--muted-fg); }
+.mermaid-out, .svg-out { background: oklch(0.97 0.005 260); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+.mermaid-out { background: oklch(0.19 0.02 260); border: 1px solid var(--border-soft); }
+
