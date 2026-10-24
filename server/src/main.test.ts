@@ -1,10 +1,19 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { invocationCwd, parseArgs } from './main.ts';
 
 const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-')));
+// --continue reads the session registry: keep it in a temp NOTA_BENE_HOME, never the real ~/.nota-bene
+const home = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-home-'));
+const prevHome = process.env.NOTA_BENE_HOME;
+beforeAll(() => { process.env.NOTA_BENE_HOME = home; });
+afterAll(() => {
+  if (prevHome === undefined) delete process.env.NOTA_BENE_HOME; else process.env.NOTA_BENE_HOME = prevHome;
+  fs.rmSync(cwd, { recursive: true, force: true });
+  fs.rmSync(home, { recursive: true, force: true });
+});
 
 describe('parseArgs', () => {
   it('defaults: cwd and 4777', () => {

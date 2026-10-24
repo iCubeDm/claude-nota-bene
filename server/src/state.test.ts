@@ -1,13 +1,18 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { lastSession, saveSession, stateDir } from './state.ts';
 
 let home: string;
+const prevHome = process.env.NOTA_BENE_HOME;
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-state-'));
   process.env.NOTA_BENE_HOME = home;
+});
+afterEach(() => {
+  if (prevHome === undefined) delete process.env.NOTA_BENE_HOME; else process.env.NOTA_BENE_HOME = prevHome;
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 describe('state', () => {
