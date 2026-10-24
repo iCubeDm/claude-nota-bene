@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 
 // The server rejects foreign Host headers, hence changeOrigin. The app opens its WebSocket on
 // location.host, so in dev it goes through this same proxy.
-const backend = { target: 'http://127.0.0.1:4777', changeOrigin: true };
+const backend = { target: 'http://127.0.0.1:4780', changeOrigin: true };
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

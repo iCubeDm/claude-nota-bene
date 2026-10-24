@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseArgs } from './main.ts';
+import { invocationCwd, parseArgs } from './main.ts';
 
 const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-')));
 
@@ -31,5 +31,12 @@ describe('parseArgs', () => {
     const r = parseArgs(['--allow-origin', 'http://a', '--allow-origin', 'http://b', '--continue'], cwd);
     expect(r.allowOrigins).toEqual(['http://a', 'http://b']);
     expect(r.continue).toBe(true);
+  });
+});
+
+describe('invocationCwd', () => {
+  it('prefers npm INIT_CWD, else cwd', () => {
+    expect(invocationCwd({ INIT_CWD: '/x' }, '/y')).toBe('/x');
+    expect(invocationCwd({}, '/y')).toBe('/y');
   });
 });

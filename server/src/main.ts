@@ -43,10 +43,15 @@ export function parseArgs(
   return { dir, port, resume, continue: cont, fake, allowOrigins };
 }
 
+// `npm start -- ../proj` runs with cwd = package root; INIT_CWD is where npm was invoked.
+export function invocationCwd(env: NodeJS.ProcessEnv, cwd: string): string {
+  return env.INIT_CWD || cwd;
+}
+
 async function main(): Promise<void> {
   let args: ReturnType<typeof parseArgs>;
   try {
-    args = parseArgs(process.argv.slice(2), process.cwd());
+    args = parseArgs(process.argv.slice(2), invocationCwd(process.env, process.cwd()));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(2);
