@@ -1,0 +1,85 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import WebSocket from 'ws';
+import type { ServerEvent } from '@nota-bene/shared';
+import { fakeBackend } from './agent/fake.ts';
+import { startServer } from './server.ts';
+
+let home: string;
+let dist: string;
+const prevHome = process.env.NOTA_BENE_HOME;
+const closers: (() => Promise<void>)[] = [];
+
+beforeEach(() => {
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-server-home-'));
+  dist = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-server-dist-'));
+  fs.writeFileSync(path.join(dist, 'index.html'), '<h1>x</h1>');
+  process.env.NOTA_BENE_HOME = home;
+});
+afterEach(async () => {
+  while (closers.length) await closers.pop()!();
+  if (prevHome === undefined) delete process.env.NOTA_BENE_HOME; else process.env.NOTA_BENE_HOME = prevHome;
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(dist, { recursive: true, force: true });
+});
+
+async function boot() {
+  const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist });
+  closers.push(s.close);
+  return s;
+}
+
+type Client = { ws: WebSocket; events: ServerEvent[] };
+async function connect(url: string): Promise<Client> {
+  const ws = new WebSocket(url.replace('http', 'ws'));
+  const events: ServerEvent[] = [];
+  ws.on('message', (d) => events.push(JSON.parse(String(d)) as ServerEvent));
+  await new Promise<void>((res, rej) => { ws.once('open', () => res()); ws.once('error', rej); });
+  closers.push(async () => { ws.terminate(); });
+  return { ws, events };
+}
+
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('timeout');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+const isResult = (e: ServerEvent) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result';
+
+describe('server', () => {
+  it('chat round-trip over ws', async () => {
+    const s = await boot();
+    const c = await connect(s.url);
+    c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
+    await until(() => c.events.some(isResult));
+    expect(c.events.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(true);
+  });
+
+  it('malformed message does not kill the server', async () => {
+    const s = await boot();
+    const c = await connect(s.url);
+    c.ws.send('{nope');
+    c.ws.send('{"type":"x"}');
+    await until(() => c.events.filter((e) => e.kind === 'server-error').length === 2);
+    const r = await fetch(`${s.url}/info`);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ root: '/proj' });
+  });
+
+  it('a second client gets the replay', async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
+    await until(() => a.events.some(isResult));
+    const b = await connect(s.url);
+    await until(() => b.events.length > 0);
+    const first = b.events[0]!;
+    expect(first.kind).toBe('replay');
+    if (first.kind === 'replay') expect(first.events.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(true);
+  });
+});
