@@ -1,0 +1,80 @@
+import { configureStore, createAction, createSlice, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
+import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
+import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import { connect as realConnect } from '../net/socket.ts';
+import { emptyFeed, reduce, type FeedState } from './feed.ts';
+
+/** The only way server data enters the store. */
+export const serverEvent = createAction<ServerEvent>('server/event');
+const connState = createAction<'open' | 'closed'>('conn/state');
+
+// reduce() is pure and returns a new object. Returning a new state from an Immer case reducer is
+// allowed, so we hand it the draft cast to FeedState: reduce only reads it and spreads/slices
+// (never mutates), and Immer drops the draft when a new value is returned. No current() needed.
+export const feedSlice = createSlice({
+  name: 'feed',
+  initialState: emptyFeed,
+  reducers: {},
+  extraReducers: (b) => b.addCase(serverEvent, (state, a) => reduce(state as FeedState, a.payload)),
+});
+
+export const connSlice = createSlice({
+  name: 'conn',
+  initialState: { state: 'closed' as 'open' | 'closed' },
+  reducers: {},
+  extraReducers: (b) => b.addCase(connState, (_s, a) => ({ state: a.payload })),
+});
+
+type Send = (m: ClientMessage) => boolean;
+
+/** Whether Redux DevTools are on: dev builds only. Read at call time so tests can stub it. */
+export const devToolsEnabled = (): boolean => import.meta.env.DEV;
+
+/**
+ * Creates the store and exactly one socket connection. The socket lives only in this closure
+ * (reached by thunks through the thunk `extra` argument), never in Redux state: it is not serializable.
+ */
+export function makeStore(o: { url: string; connect?: typeof realConnect }) {
+  const connectFn = o.connect ?? realConnect;
+  let conn: ReturnType<typeof realConnect> | null = null;
+  const send: Send = (m) => conn?.send(m) ?? false;
+  const store = configureStore({
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer },
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }),
+    devTools: devToolsEnabled(),
+  });
+  conn = connectFn(
+    o.url,
+    (ev) => store.dispatch(serverEvent(ev)),
+    (s) => store.dispatch(connState(s)),
+  );
+  return store;
+}
+
+export type AppStore = ReturnType<typeof makeStore>;
+export type RootState = ReturnType<AppStore['getState']>;
+export type AppDispatch = AppStore['dispatch'];
+export type AppThunk<R = void> = ThunkAction<R, RootState, { send: Send }, UnknownAction>;
+
+export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
+export const useAppDispatch: () => AppDispatch = useDispatch;
+
+export const selectFeed = (s: RootState): FeedState => s.feed;
+export const selectBusy = (s: RootState): boolean => s.feed.busy;
+export const selectConn = (s: RootState): 'open' | 'closed' => s.conn.state;
+
+export const sendMessage =
+  (text: string, force: boolean): AppThunk<boolean> =>
+  (_d, getState, { send }) => {
+    const st = getState();
+    if (selectConn(st) !== 'open') return false;
+    return send({ type: 'send', id: crypto.randomUUID(), text, force: force && selectBusy(st) });
+  };
+
+export const interrupt = (): AppThunk => (_d, getState, { send }) => {
+  if (selectBusy(getState())) send({ type: 'interrupt' });
+};
+
+export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _g, { send }) => {
+  send({ type: 'permission', id, allow });
+};
