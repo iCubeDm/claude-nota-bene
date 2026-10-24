@@ -35,13 +35,13 @@ test('user while busy is marked duringWork', () => {
 });
 
 test('force keeps busy across the interrupted result; the next result clears it', () => {
-  const s1 = fold([user(), user({ id: 'u2', force: true }), result({ subtype: 'error_during_execution', is_error: true, result: '' })]);
+  const s1 = fold([user(), user({ id: 'u2', force: true }), result({ result: '', terminal_reason: 'aborted_streaming' })]);
   expect(s1.busy).toBe(true);
   expect(s1.forcePending).toBe(false);
-  expect(s1.items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, interrupted: true });
+  expect(s1.items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
   const s2 = reduce(s1, result());
   expect(s2.busy).toBe(false);
-  expect(s2.items.at(-1)).toMatchObject({ interrupted: false });
+  expect(s2.items.at(-1)).toMatchObject({ status: 'done' });
 });
 
 test('tool_result is_error marks the tool red', () => {
@@ -95,7 +95,7 @@ test('a conversation with init every turn shows no notice; replayed history plus
 test('interrupted stream is closed at result; a later assistant without a start stays separate', () => {
   const s = fold([
     user(), start(), delta('part'),
-    result({ subtype: 'error_during_execution', is_error: true, result: '' }),
+    result({ result: '', terminal_reason: 'aborted_streaming' }),
     user({ id: 'u2' }),
     assistant([{ type: 'text', text: 'fresh' }], 'a9'),
   ]);
@@ -123,4 +123,33 @@ test('two streamed text blocks are finalised in content order', () => {
 test('replay keeps the folded busy: mid-turn history is busy, finished is not', () => {
   expect(reduce(emptyFeed, { kind: 'replay', events: [user()] }).busy).toBe(true);
   expect(reduce(emptyFeed, { kind: 'replay', events: [user(), result()] }).busy).toBe(false);
+});
+
+const lastDone = (s: FeedState) => s.items.filter((i) => i.kind === 'done').at(-1);
+
+test('interrupt results: the CLI ends the turn with subtype success and an aborted terminal_reason', () => {
+  expect(lastDone(fold([user(), result({ result: '', terminal_reason: 'aborted_streaming' })]))).toMatchObject({ status: 'interrupted' });
+  expect(lastDone(fold([user(), result({ result: '', terminal_reason: 'aborted_tools' })]))).toMatchObject({ status: 'interrupted' });
+  expect(lastDone(fold([user(), result({ subtype: 'error_during_execution', is_error: false, errors: [] })]))).toMatchObject({ status: 'interrupted' });
+  expect(lastDone(fold([user(), result({ terminal_reason: 'completed' })]))).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'done' });
+});
+
+test('error results show their text; a crash is an error, not an interruption', () => {
+  const crash = lastDone(fold([user(), result({ subtype: 'error_during_execution', is_error: true, result: undefined, errors: ['agent session ended'] })]));
+  expect(crash).toMatchObject({ status: 'failed', error: 'agent session ended' });
+  const two = lastDone(fold([user(), result({ subtype: 'error_max_turns', is_error: true, result: undefined, errors: ['a', 'b'] })]));
+  expect(two).toMatchObject({ status: 'failed', error: 'a\nb' });
+  const api = lastDone(fold([user(), result({ is_error: true, result: 'API Error: 500', terminal_reason: 'api_error' })]));
+  expect(api).toMatchObject({ status: 'failed', error: 'API Error: 500' });
+  const bare = lastDone(fold([user(), result({ subtype: 'error_max_budget_usd', is_error: true, result: undefined, errors: [] })]));
+  expect(bare).toMatchObject({ status: 'failed' });
+  expect(bare).not.toHaveProperty('error');
+});
+
+test('a result with queued_turn_count > 0 keeps busy until the queued turn ends', () => {
+  const s1 = fold([user(), user({ id: 'u2' }), result({ queued_turn_count: 1 })]);
+  expect(s1.busy).toBe(true);
+  expect(lastDone(s1)).toMatchObject({ status: 'done' });
+  expect(reduce(s1, result({ queued_turn_count: 0 })).busy).toBe(false);
+  expect(fold([user(), result()]).busy).toBe(false); // absent counts as 0
 });

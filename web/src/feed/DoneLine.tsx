@@ -9,7 +9,7 @@ export function DoneLine({ item }: { item: Extract<FeedItem, { kind: 'done' }> }
   const time = item.ts === 0 ? '' : ` · ${timeOf(item.ts)}`;
   return (
     <div data-kind="done" className={LINE}>
-      {t(item.interrupted ? 'interrupted' : 'done')} · {item.secs}s{time}
+      {t(item.status)} · {item.secs}{t('secondsSuffix')}{time}
       {item.error ? <span className="whitespace-pre-wrap text-destructive"> · {item.error}</span> : null}
     </div>
   );

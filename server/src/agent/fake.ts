@@ -12,8 +12,9 @@ export type FakeTurn = {
 
 /**
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
- * parent_tool_use_id, message.content, event, duration_ms, is_error, result). The rest of the
- * real SDK shape is deliberately not invented, so the objects are cast once, here.
+ * parent_tool_use_id, message.content, event, duration_ms, is_error, result, terminal_reason,
+ * queued_turn_count), with the values the real CLI uses (server/test/fixtures/real-frames.json).
+ * The rest of the real SDK shape is deliberately not invented, so the objects are cast once, here.
  */
 function sdk(m: Record<string, unknown>): SDKMessage {
   return m as unknown as SDKMessage;
@@ -88,6 +89,7 @@ class FakeSession implements AgentSession {
     const n = ++this.turnNo;
     const started = Date.now();
     const ctl = (this.turnCtl = new AbortController());
+    let inTools = false;
     try {
       // like the CLI: init at the start of every turn
       yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}` });
@@ -117,18 +119,24 @@ class FakeSession implements AgentSession {
             ],
           },
         });
-        if (t.ask) await Promise.race([this.ask(t.ask.toolName, t.ask.input, ctl.signal), whenAborted(ctl.signal)]);
+        if (t.ask) {
+          inTools = true;
+          await Promise.race([this.ask(t.ask.toolName, t.ask.input, ctl.signal), whenAborted(ctl.signal)]);
+        }
       }
       if (this.closed) return;
       const interrupted = ctl.signal.aborted;
+      // like the CLI: an interrupt still ends with subtype success; terminal_reason says why
       yield sdk({
         type: 'result',
-        subtype: interrupted ? 'error_during_execution' : 'success',
+        subtype: 'success',
         session_id: this.sessionId,
         uuid: `fake-r-${n}`,
         duration_ms: Date.now() - started,
-        is_error: interrupted,
+        is_error: false,
         result: interrupted ? '' : t.text,
+        terminal_reason: interrupted ? (inTools ? 'aborted_tools' : 'aborted_streaming') : 'completed',
+        queued_turn_count: this.pending, // sends that arrived during this turn run next, each as its own turn
       });
     } finally {
       this.turnCtl = null;

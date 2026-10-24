@@ -125,7 +125,7 @@ describe('session manager', () => {
     await until(() => events.some((e) => e.kind === 'server-error'));
     await until(() => sdkOf(events, 'result').length === 1);
     expect((sdkOf(events, 'result')[0] as { m: unknown }).m).toMatchObject({
-      subtype: 'error_during_execution', is_error: true, result: 'fake backend crash',
+      subtype: 'error_during_execution', is_error: true, errors: ['fake backend crash'],
     });
     s.send({ id: 'u2', text: 'again' });
     await until(() => sdkOf(events, 'result').length === 2);
@@ -192,7 +192,7 @@ describe('session manager', () => {
     s.send({ id: 'u2', text: 'again' });
     await until(() => sdkOf(events, 'result').length === 3);
     expect(resumes).toEqual([undefined, 'fake-session']);
-    expect(sdkOf(events, 'result')[1]).toMatchObject({ m: { is_error: true, result: 'agent session ended' } });
+    expect(sdkOf(events, 'result')[1]).toMatchObject({ m: { is_error: true, errors: ['agent session ended'] } });
   });
 
   it('crash with a pending permission denies it and closes the agent', async () => {

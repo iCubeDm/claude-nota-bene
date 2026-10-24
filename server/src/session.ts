@@ -72,7 +72,8 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     const message = e instanceof Error ? e.message : String(e);
     hub.emit({
       kind: 'sdk',
-      m: { type: 'result', subtype: 'error_during_execution', is_error: true, result: message } as unknown as SDKMessage,
+      // shaped like SDKResultError: the text goes in errors[]; no aborted terminal_reason, so it shows as an error
+      m: { type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: [message] } as unknown as SDKMessage,
     });
   }
 

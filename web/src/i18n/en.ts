@@ -14,6 +14,8 @@ export const en: Dict = {
   reply: (n, at) => `reply #${n} · ${at}`,
   working: 'agent is working…',
   done: 'done',
+  failed: 'error', // a turn that ended with an error (new in M0)
+  secondsSuffix: 's', // after the duration on the done line
   interrupted: 'interrupted',
   send: 'Send',
   sendN: (n) => `Send (${n})`,

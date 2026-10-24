@@ -4,7 +4,7 @@ export type FeedItem =
   | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean }
   | { kind: 'assistant'; id: string; text: string; final: boolean } // `${uuid}:${blockIndex}`; while streaming `stream:${n}`
   | { kind: 'tool'; id: string; name: string; arg: string; sub: boolean; error?: boolean }
-  | { kind: 'done'; secs: number; ts: number; interrupted: boolean; error?: string }
+  | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
   | { kind: 'notice'; text: string };
 
@@ -20,7 +20,7 @@ export type FeedState = {
 
 export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, streamN: 0 };
 
-// Loose view of the SDK message: only the fields the feed reads (see server/src/agent/fake.ts).
+// Loose view of the SDK message: only the fields the feed reads (real shapes: server/test/fixtures/real-frames.json).
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean };
 type Sdk = {
   type?: string;
@@ -32,6 +32,9 @@ type Sdk = {
   duration_ms?: number;
   is_error?: boolean;
   result?: unknown;
+  errors?: unknown;
+  terminal_reason?: string;
+  queued_turn_count?: number;
 };
 
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
@@ -109,17 +112,26 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
       return items === s.items ? s : { ...s, items };
     }
     case 'result': {
+      // the CLI ends an interrupted turn with subtype success and terminal_reason aborted_streaming | aborted_tools
+      const interrupted = s.forcePending || !!m.terminal_reason?.startsWith('aborted')
+        || (m.subtype === 'error_during_execution' && !m.is_error);
+      const failed = !interrupted && (!!m.is_error || (m.subtype !== undefined && m.subtype !== 'success'));
+      // success + is_error carries the text in result; SDKResultError (and the server's crash result) in errors[]
+      const text = (typeof m.result === 'string' && m.result)
+        || (Array.isArray(m.errors) ? m.errors.filter((e) => typeof e === 'string').join('\n') : '');
       const done: FeedItem = {
         kind: 'done',
         secs: Math.round((m.duration_ms ?? 0) / 1000),
         ts,
-        interrupted: m.subtype === 'error_during_execution' || s.forcePending,
-        ...(m.is_error && typeof m.result === 'string' && m.result ? { error: m.result } : {}),
+        status: interrupted ? 'interrupted' : failed ? 'failed' : 'done',
+        ...(failed && text ? { error: text } : {}),
       };
       // a stream still open at result was cut short: keep its partial text as final, drop it if empty
       const closed = s.items.flatMap((it): FeedItem[] =>
         it.kind === 'assistant' && !it.final ? (it.text ? [{ ...it, final: true }] : []) : [it]);
-      return { ...s, items: [...closed, done], busy: s.forcePending, forcePending: false };
+      // queued_turn_count > 0: a message sent mid-turn runs next as its own turn, so the agent keeps working
+      const busy = s.forcePending || (m.queued_turn_count ?? 0) > 0;
+      return { ...s, items: [...closed, done], busy, forcePending: false };
     }
     default:
       return s;

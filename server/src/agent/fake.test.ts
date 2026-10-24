@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { fakeBackend, type FakeTurn } from './fake.ts';
@@ -55,7 +56,7 @@ describe('fake backend', () => {
     s.close();
   });
 
-  it('interrupt mid-turn ends with result subtype error_during_execution', async () => {
+  it('interrupt mid-turn ends like the CLI: subtype success, terminal_reason aborted_streaming', async () => {
     const { s, it, next } = run([{ text: 'a'.repeat(100), chunk: 1, delayMs: 5 }]);
     s.send(send);
     await next(); // init
@@ -70,7 +71,7 @@ describe('fake backend', () => {
     }
     expect(rest.filter((m) => m.type === 'stream_event').length).toBeLessThan(5);
     expect(rest.some((m) => m.type === 'assistant')).toBe(false);
-    expect((rest.at(-1) as unknown as { subtype: string }).subtype).toBe('error_during_execution');
+    expect(rest.at(-1)).toMatchObject({ type: 'result', subtype: 'success', is_error: false, terminal_reason: 'aborted_streaming' });
     s.close();
   });
 
@@ -112,6 +113,52 @@ describe('fake backend', () => {
     await it.next(); // block start
     await it.next(); // first delta
     await expect(it.next()).rejects.toThrow('fake backend crash');
+    s.close();
+  });
+
+  it('a send during a running turn: that result carries queued_turn_count 1, the next 0', async () => {
+    const { s, it } = run([{ text: 'a'.repeat(20), chunk: 1, delayMs: 2 }]);
+    s.send(send);
+    const results: SDKMessage[] = [];
+    let sent = false;
+    while (results.length < 2) {
+      const m = (await it.next()).value as SDKMessage;
+      if (!sent && m.type === 'stream_event') { s.send({ ...send, uuid: 'u2' }); sent = true; }
+      if (m.type === 'result') results.push(m);
+    }
+    expect(results.map((r) => (r as { queued_turn_count?: number }).queued_turn_count)).toEqual([1, 0]);
+    expect(results[0]).toMatchObject({ subtype: 'success', terminal_reason: 'completed' });
+    s.close();
+  });
+
+  it('interrupt during a permission ask ends with terminal_reason aborted_tools', async () => {
+    const ask: PermissionAsk = () => new Promise(() => {});
+    const { s, it } = run([{ text: 'x', ask: { toolName: 'Bash', input: {} } }], ask);
+    s.send(send);
+    while (((await it.next()).value as SDKMessage).type !== 'assistant');
+    await s.interrupt();
+    expect((await it.next()).value).toMatchObject({ type: 'result', subtype: 'success', terminal_reason: 'aborted_tools' });
+    s.close();
+  });
+
+  it('result shapes match the real-CLI fixture (type, subtype, is_error, terminal_reason, queued_turn_count)', async () => {
+    const pick = (m: unknown) => {
+      const r = m as Record<string, unknown>;
+      return { type: r.type, subtype: r.subtype, is_error: r.is_error, terminal_reason: r.terminal_reason, queued: typeof r.queued_turn_count };
+    };
+    const fixture = JSON.parse(fs.readFileSync(new URL('../../test/fixtures/real-frames.json', import.meta.url), 'utf8')) as { events: { kind: string; m?: { type?: string; terminal_reason?: string } }[] };
+    const real = fixture.events.flatMap((e) => (e.kind === 'sdk' && e.m?.type === 'result' ? [e.m] : []));
+    const realOk = real.find((m) => m.terminal_reason === 'completed');
+    const realAborted = real.find((m) => m.terminal_reason === 'aborted_streaming');
+    const ok = (await collectTurn([{ text: 'hi' }])).at(-1);
+    expect(pick(ok)).toEqual(pick(realOk));
+    const { s, it, next } = run([{ text: 'a'.repeat(100), chunk: 1, delayMs: 5 }]);
+    s.send(send);
+    await next(); await next(); await next();
+    await s.interrupt();
+    let m: SDKMessage;
+    do m = (await it.next()).value as SDKMessage; while (m.type !== 'result');
+    expect(pick(m)).toEqual(pick(realAborted));
     s.close();
   });
 });

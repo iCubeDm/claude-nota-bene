@@ -11,6 +11,8 @@ export const ru = {
   reply: (n: number, at: string) => `ответ #${n} · ${at}`,
   working: 'агент работает…',
   done: 'готово',
+  failed: 'ошибка', // a turn that ended with an error (new in M0)
+  secondsSuffix: 'с', // after the duration on the done line
   interrupted: 'прервано',
   send: 'Отправить',
   sendN: (n: number) => `Отправить (${n})`,

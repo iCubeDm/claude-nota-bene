@@ -47,9 +47,12 @@ test('mid-turn send is marked while working @slow', async ({ page }) => {
   await send(page, b);
   await expect(bubble(page, b)).toContainText(/while working|во время работы/);
   await expect(bubble(page, a)).not.toContainText(/while working|во время работы/);
+  // the second message runs as its own turn: the agent keeps working after the first done line
+  await expect(donesAfter(page, a)).toHaveCount(1, { timeout: 20_000 });
+  await expect(donesAfter(page, a).nth(0)).toHaveText(DONE);
+  await expect(page.getByText(WORKING)).toBeVisible();
   // both turns end, each with a normal done line after the first bubble
   await expect(donesAfter(page, a)).toHaveCount(2, { timeout: 20_000 });
-  await expect(donesAfter(page, a).nth(0)).toHaveText(DONE);
   await expect(donesAfter(page, a).nth(1)).toHaveText(DONE);
   await expect(page.getByText(WORKING)).toBeHidden();
 });
