@@ -18,9 +18,11 @@ export const feedSlice = createSlice({
   extraReducers: (b) => b.addCase(serverEvent, (state, a) => reduce(state as FeedState, a.payload)),
 });
 
+export type ConnState = 'connecting' | 'open' | 'closed'; // connecting = never open yet; closed = dropped after an open
+
 export const connSlice = createSlice({
   name: 'conn',
-  initialState: { state: 'closed' as 'open' | 'closed' },
+  initialState: { state: 'connecting' as ConnState },
   reducers: {},
   extraReducers: (b) => b.addCase(connState, (_s, a) => ({ state: a.payload })),
 });
@@ -61,7 +63,8 @@ export const useAppDispatch: () => AppDispatch = useDispatch;
 
 export const selectFeed = (s: RootState): FeedState => s.feed;
 export const selectBusy = (s: RootState): boolean => s.feed.busy;
-export const selectConn = (s: RootState): 'open' | 'closed' => s.conn.state;
+export const selectConn = (s: RootState): ConnState => s.conn.state;
+export const selectSession = (s: RootState) => s.feed.session;
 
 export const sendMessage =
   (text: string, force: boolean): AppThunk<boolean> =>

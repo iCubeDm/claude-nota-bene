@@ -21,6 +21,11 @@ export function Composer() {
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  // a send that failed while offline is forgotten once the socket is back, so a later drop shows no stale label
+  useEffect(() => {
+    if (conn === 'open') setFailed(false);
+  }, [conn]);
+
   // Esc interrupts while busy, unless something else already handled it
   useEffect(() => {
     if (!busy) return;

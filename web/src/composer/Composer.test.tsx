@@ -83,6 +83,15 @@ it('offline label disappears when the socket reconnects, text stays', async () =
   expect(box.value).toBe('hello');
 });
 
+it('a failed send is forgotten once the socket reopens: a later drop shows no stale offline label', async () => {
+  const { box, flip } = setup(false);
+  await userEvent.type(box, 'hello{Enter}');
+  expect(screen.getByText('no connection to the server…')).toBeVisible();
+  flip('open');
+  flip('closed');
+  expect(screen.queryByText('no connection to the server…')).toBeNull();
+});
+
 it('Ctrl+Shift+Enter forces', async () => {
   const { sent, store, box } = setup(true);
   act(() => {
