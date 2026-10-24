@@ -29,7 +29,12 @@ describe('parseArgs', () => {
 
   it('parses --port --resume --fake', () => {
     const r = parseArgs(['.', '--port', '4790', '--resume', 'abc', '--fake', 's.json'], cwd);
-    expect(r).toMatchObject({ dir: cwd, port: 4790, resume: 'abc', fake: 's.json', continue: false });
+    expect(r).toMatchObject({ dir: cwd, port: 4790, resume: 'abc', fake: path.join(cwd, 's.json'), continue: false });
+  });
+
+  it('resolves --fake against the invocation cwd, like the project dir', () => {
+    expect(parseArgs(['--fake', 'f/s.json'], cwd).fake).toBe(path.join(cwd, 'f/s.json'));
+    expect(parseArgs(['--fake', '/abs/s.json'], cwd).fake).toBe('/abs/s.json');
   });
 
   it('rejects a non-numeric port', () => {

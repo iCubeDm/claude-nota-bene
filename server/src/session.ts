@@ -75,7 +75,15 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     return a;
   }
 
-  if (o.resume) hub.reset(await backend.history(o.resume, cwd));
+  if (o.resume) {
+    let history: Awaited<ReturnType<AgentBackend['history']>> = [];
+    try {
+      history = await backend.history(o.resume, cwd);
+    } catch (e) {
+      reportError(hub, 'history', e); // an unreadable transcript must not stop the server: start with an empty feed
+    }
+    hub.reset(history);
+  }
   ensureAgent();
 
   return {

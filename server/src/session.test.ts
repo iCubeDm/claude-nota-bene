@@ -269,4 +269,17 @@ describe('session manager', () => {
     expect(delivered).toEqual(['1:queued']);
     expect(resumes).toEqual([undefined, 'fake-session']);
   });
+
+  it('a failing transcript read on resume is reported and starts with empty history', async () => {
+    const inner = fakeBackend([{ text: 'fine' }]);
+    const backend: AgentBackend = { start: inner.start, history: async () => { throw new Error('transcript gone'); } };
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj', resume: 'old' });
+    expect(events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'history', message: 'transcript gone' });
+    const replayed: ServerEvent[] = [];
+    hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') replayed.push(...e.events); } });
+    expect(replayed.some((e) => e.kind === 'user' || e.kind === 'sdk')).toBe(false);
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 1);
+  });
 });

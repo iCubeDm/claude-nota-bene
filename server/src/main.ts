@@ -32,7 +32,7 @@ export function parseArgs(
       port = Number(v);
     } else if (a === '--resume') resume = value(++i);
     else if (a === '--continue') cont = true;
-    else if (a === '--fake') fake = value(++i);
+    else if (a === '--fake') fake = path.resolve(cwd, value(++i)); // same base as the project dir
     else if (a === '--allow-origin') allowOrigins.push(value(++i));
     else if (a.startsWith('--')) throw new Error(`${USAGE}\nUnknown option: ${a}`);
     else if (dirArg === undefined) dirArg = a;
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const backend = args.fake
-    ? fakeBackend(JSON.parse(fs.readFileSync(path.resolve(args.fake), 'utf8')))
+    ? fakeBackend(JSON.parse(fs.readFileSync(args.fake, 'utf8')))
     : sdkBackend();
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   const { url, close } = await startServer({
