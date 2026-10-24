@@ -17,6 +17,8 @@ type Msg = { type?: string; subtype?: string; session_id?: string };
 export async function createSessionManager(o: { hub: EventHub; backend: AgentBackend; cwd: string; resume?: string }): Promise<SessionManager> {
   const { hub, backend, cwd } = o;
   let sessionId: string | null = o.resume ?? null;
+  let announced: string | null | undefined; // last id sent as a `session` event
+  let saved: string | null = null; // last id written to the registry
   let agent: AgentSession | null = null;
   let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
   const pending = new Map<string, (allow: boolean) => void>();
@@ -43,16 +45,23 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
         if (agent !== a) return;
         hub.emit({ kind: 'sdk', m });
         const { type, subtype, session_id } = m as Msg;
+        // the CLI sends init at the start of every turn: act only when the id is new
         if (type === 'system' && subtype === 'init' && session_id) {
           sessionId = session_id;
-          saveSession(cwd, session_id);
-          hub.emit({ kind: 'session', id: session_id, root: cwd });
+          if (saved !== session_id) { saved = session_id; saveSession(cwd, session_id); }
+          announce(session_id);
         }
       }
       if (agent === a) died(a, new Error('agent session ended'));
     } catch (e) {
       if (agent === a) died(a, e);
     }
+  }
+
+  function announce(id: string | null): void {
+    if (id === announced) return;
+    announced = id;
+    hub.emit({ kind: 'session', id, root: cwd });
   }
 
   function died(a: AgentSession, e: unknown): void {
@@ -83,7 +92,9 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
       reportError(hub, 'history', e); // an unreadable transcript must not stop the server: start with an empty feed
     }
     hub.reset(history);
+    hub.emit({ kind: 'resumed', id: o.resume });
   }
+  announce(sessionId); // header gets the root (and a resumed id) before the first turn's init
   ensureAgent();
 
   return {

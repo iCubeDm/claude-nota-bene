@@ -68,15 +68,28 @@ test('subagent tool lines are sub; subagent text is not added', () => {
   expect(s.items).toEqual([{ kind: 'tool', id: 't2', name: 'Read', arg: '/a', sub: true }]);
 });
 
-test('session notice, server-error, immutability', () => {
+test('session only sets the session; the resumed marker alone adds the notice; server-error, immutability', () => {
   const frozen = Object.freeze({ ...emptyFeed, items: Object.freeze([]) as never });
   expect(reduce(frozen, { kind: 'session', id: 'abcdefghij', root: '/r' })).toMatchObject({ items: [], session: { id: 'abcdefghij', root: '/r' } });
   const withItem = fold([user()]);
   Object.freeze(withItem); Object.freeze(withItem.items);
-  expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
+  // the CLI sends init (-> session) every turn: it must never add a notice
+  expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r' }).items).toEqual(withItem.items);
+  expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
+  expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ kind: 'notice', text: 'abcdefgh' }]);
   expect(reduce(withItem, { kind: 'server-error', where: 'w', message: 'm' })).toBe(withItem);
   expect(() => reduce(withItem, start())).not.toThrow();
   expect(() => reduce(withItem, result())).not.toThrow();
+});
+
+test('a conversation with init every turn shows no notice; replayed history plus marker shows exactly one', () => {
+  const init = (id: string) => sdk({ type: 'system', subtype: 'init', session_id: id });
+  const session = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r' });
+  const live = fold([session('s1'), user(), init('s1'), result(), user({ id: 'u2' }), init('s1'), session('s1'), result()]);
+  expect(live.items.some((i) => i.kind === 'notice')).toBe(false);
+  const resumed = reduce(emptyFeed, { kind: 'replay', events: [user({ historic: true }), { kind: 'resumed', id: 's1' }, session('s1')] });
+  const after = fold([user({ id: 'u3' }), init('s1'), result()], resumed);
+  expect(after.items.filter((i) => i.kind === 'notice')).toHaveLength(1);
 });
 
 test('interrupted stream is closed at result; a later assistant without a start stays separate', () => {

@@ -12,6 +12,8 @@ export type ServerEvent =
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; ts: number }
   | { kind: 'permission-done'; id: string; allow: boolean; ts: number }
   | { kind: 'session'; id: string | null; root: string }
+  /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */
+  | { kind: 'resumed'; id: string }
   | { kind: 'server-error'; where: string; message: string };
 
 type Obj = Record<string, unknown>;

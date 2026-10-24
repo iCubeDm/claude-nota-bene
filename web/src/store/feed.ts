@@ -153,11 +153,10 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       if (!cur || cur.kind !== 'permission') return s;
       return { ...s, items: replaceAt(s.items, i, { ...cur, answer: ev.allow }) };
     }
-    case 'session': {
-      const session = { id: ev.id, root: ev.root };
-      if (ev.id === null || s.items.length === 0) return { ...s, session };
-      return { ...s, session, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
-    }
+    case 'session': // sent again whenever the id changes; never a notice (the CLI inits every turn)
+      return { ...s, session: { id: ev.id, root: ev.root } };
+    case 'resumed':
+      return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
     case 'server-error':
       return s;
     default: {

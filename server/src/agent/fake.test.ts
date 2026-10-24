@@ -74,9 +74,29 @@ describe('fake backend', () => {
     s.close();
   });
 
+  it('emits init at the start of every turn, like the CLI, and keeps the resumed id', async () => {
+    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', resume: 'r1', ask: yes });
+    const it = s.messages[Symbol.asyncIterator]();
+    const types: string[] = [];
+    const ids = new Set<string>();
+    for (const uuid of ['u1', 'u2']) {
+      s.send({ ...send, uuid });
+      while (true) {
+        const m = (await it.next()).value as SDKMessage;
+        types.push(m.type === 'system' ? `system:${(m as { subtype: string }).subtype}` : m.type);
+        ids.add((m as { session_id: string }).session_id);
+        if (m.type === 'result') break;
+      }
+    }
+    expect(types.filter((t) => t === 'system:init')).toHaveLength(2);
+    expect(types[0]).toBe('system:init');
+    expect(types[types.indexOf('result') + 1]).toBe('system:init');
+    expect([...ids]).toEqual(['r1']);
+    s.close();
+  });
+
   it('interrupt while idle resolves and emits nothing', async () => {
-    const { s, it, next } = run([{ text: 'x' }]);
-    await next(); // init
+    const { s, it } = run([{ text: 'x' }]);
     await expect(s.interrupt()).resolves.toBeUndefined();
     const pending = it.next();
     const raced = await Promise.race([pending.then(() => 'emitted'), new Promise((r) => setTimeout(() => r('quiet'), 30))]);

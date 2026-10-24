@@ -104,7 +104,8 @@ describe('session manager', () => {
   it('saves the session id on init', async () => {
     const { events, make } = setup(fakeBackend([{ text: 'a' }]));
     const s = await make();
-    await until(() => events.some((e) => e.kind === 'session'));
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => events.some((e) => e.kind === 'session' && e.id !== null));
     expect(lastSession('/proj')).toBe('fake-session');
     expect(s.info()).toEqual({ id: 'fake-session', root: '/proj' });
   });
@@ -281,5 +282,37 @@ describe('session manager', () => {
     expect(replayed.some((e) => e.kind === 'user' || e.kind === 'sdk')).toBe(false);
     s.send({ id: 'u1', text: 'hi' });
     await until(() => sdkOf(events, 'result').length === 1);
+  });
+
+  it('resume: history, then exactly one resumed marker, then live events; one session per distinct id', async () => {
+    const inner = fakeBackend([{ text: 'a' }]);
+    const old: ServerEvent[] = [{ kind: 'user', id: 'h1', text: 'before', ts: 1, historic: true }];
+    const backend: AgentBackend = { start: inner.start, history: async () => old };
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj', resume: 'old-session' });
+    const replayed: ServerEvent[] = [];
+    hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') replayed.push(...e.events); } });
+    expect(replayed.map((e) => e.kind)).toEqual(['user', 'resumed', 'session']);
+    expect(replayed[1]).toEqual({ kind: 'resumed', id: 'old-session' });
+    expect(replayed[2]).toEqual({ kind: 'session', id: 'old-session', root: '/proj' });
+    s.send({ id: 'u1', text: 'one' });
+    await until(() => sdkOf(events, 'result').length === 1);
+    s.send({ id: 'u2', text: 'two' });
+    await until(() => sdkOf(events, 'result').length === 2);
+    expect(sdkOf(events, 'system')).toHaveLength(2); // the CLI sends init at the start of every turn
+    expect(events.filter((e) => e.kind === 'resumed')).toHaveLength(1);
+    expect(events.filter((e) => e.kind === 'session')).toHaveLength(1); // same id: no new session event
+    expect(lastSession('/proj')).toBe('old-session');
+  });
+
+  it('fresh start: a session event with null id, then one more when the first init names the id', async () => {
+    const { events, make } = setup(fakeBackend([{ text: 'a' }]));
+    const s = await make();
+    s.send({ id: 'u1', text: 'one' });
+    await until(() => sdkOf(events, 'result').length === 1);
+    s.send({ id: 'u2', text: 'two' });
+    await until(() => sdkOf(events, 'result').length === 2);
+    expect(events.filter((e) => e.kind === 'session').map((e) => (e as { id: string | null }).id)).toEqual([null, 'fake-session']);
+    expect(events.some((e) => e.kind === 'resumed')).toBe(false);
   });
 });
