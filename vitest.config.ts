@@ -10,6 +10,15 @@ export default defineConfig({
           include: ['shared/**/*.test.ts', 'server/**/*.test.ts'],
         },
       },
+      {
+        extends: './web/vite.config.ts',
+        test: {
+          name: 'web',
+          environment: 'jsdom',
+          include: ['web/src/**/*.test.{ts,tsx}'],
+          setupFiles: ['./web/src/test-setup.ts'],
+        },
+      },
     ],
   },
 });
