@@ -13,7 +13,7 @@ export type FakeTurn = {
 /**
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
  * parent_tool_use_id, message.content, event, duration_ms, is_error, result, terminal_reason,
- * queued_turn_count), with the values the real CLI uses (server/test/fixtures/real-frames.json).
+ * queued_turn_count, user_message_uuid(s)), with the values the real CLI uses (server/test/fixtures/real-frames.json).
  * The rest of the real SDK shape is deliberately not invented, so the objects are cast once, here.
  */
 function sdk(m: Record<string, unknown>): SDKMessage {
@@ -40,7 +40,7 @@ function whenAborted(signal: AbortSignal): Promise<void> {
 
 class FakeSession implements AgentSession {
   readonly messages: AsyncIterable<SDKMessage>;
-  private pending = 0; // sends not yet started
+  private pending: string[] = []; // uuids of sends not yet started
   private wake: (() => void) | null = null;
   private closed = false;
   private turnCtl: AbortController | null = null; // set only while a turn runs
@@ -56,9 +56,9 @@ class FakeSession implements AgentSession {
     this.messages = { [Symbol.asyncIterator]: () => this.run() };
   }
 
-  send(_m: { uuid: string; text: string; priority: 'next' | 'now' }): void {
+  send(m: { uuid: string; text: string; priority: 'next' | 'now' }): void {
     if (this.closed) return;
-    this.pending++;
+    this.pending.push(m.uuid);
     this.wake?.();
   }
 
@@ -74,18 +74,18 @@ class FakeSession implements AgentSession {
 
   private async *run(): AsyncGenerator<SDKMessage> {
     while (true) {
-      while (this.pending === 0 && !this.closed) {
+      while (this.pending.length === 0 && !this.closed) {
         await new Promise<void>((r) => { this.wake = r; });
         this.wake = null;
       }
       if (this.closed) return;
-      this.pending--;
-      yield* this.turn(this.turns[Math.min(this.turnNo, this.turns.length - 1)] ?? { text: '' });
+      const uuid = this.pending.shift()!;
+      yield* this.turn(this.turns[Math.min(this.turnNo, this.turns.length - 1)] ?? { text: '' }, uuid);
       if (this.closed) return;
     }
   }
 
-  private async *turn(t: FakeTurn): AsyncGenerator<SDKMessage> {
+  private async *turn(t: FakeTurn, sendUuid: string): AsyncGenerator<SDKMessage> {
     const n = ++this.turnNo;
     const started = Date.now();
     const ctl = (this.turnCtl = new AbortController());
@@ -136,7 +136,11 @@ class FakeSession implements AgentSession {
         is_error: false,
         result: interrupted ? '' : t.text,
         terminal_reason: interrupted ? (inTools ? 'aborted_tools' : 'aborted_streaming') : 'completed',
-        queued_turn_count: this.pending, // sends that arrived during this turn run next, each as its own turn
+        // sends that arrived during this turn run next, each as its own turn; the real CLI was seen reporting
+        // 0 here even then, so the fake does too and the UI must rely on user_message_uuids
+        queued_turn_count: 0,
+        user_message_uuid: sendUuid,
+        user_message_uuids: [sendUuid],
       });
     } finally {
       this.turnCtl = null;

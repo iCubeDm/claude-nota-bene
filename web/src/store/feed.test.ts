@@ -153,3 +153,19 @@ test('a result with queued_turn_count > 0 keeps busy until the queued turn ends'
   expect(reduce(s1, result({ queued_turn_count: 0 })).busy).toBe(false);
   expect(fold([user(), result()]).busy).toBe(false); // absent counts as 0
 });
+
+test('busy follows unanswered sends: a result answers the sends named in user_message_uuids', () => {
+  // the real CLI reports queued_turn_count 0 even with a send queued, so busy cannot rely on it
+  const s1 = fold([user(), user({ id: 'u2' }), result({ queued_turn_count: 0, user_message_uuids: ['u1'] })]);
+  expect(s1.busy).toBe(true);
+  expect(reduce(s1, result({ user_message_uuids: ['u2'] })).busy).toBe(false);
+  // one turn may consume several sends
+  expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuids: ['u1', 'u2'] })]).busy).toBe(false);
+  // fallback without the list: user_message_uuid, else the oldest send (the server's crash result)
+  expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuid: 'u2' })]).busy).toBe(true);
+  expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuid: 'u2' }), result({ user_message_uuid: 'u1' })]).busy).toBe(false);
+  expect(fold([user(), user({ id: 'u2' }), result()]).busy).toBe(true);
+  expect(fold([user(), user({ id: 'u2' }), result(), result()]).busy).toBe(false);
+  // historic (transcript) sends are never waited for
+  expect(fold([user({ historic: true }), user({ id: 'u2' }), result({ user_message_uuids: ['u2'] })]).busy).toBe(false);
+});

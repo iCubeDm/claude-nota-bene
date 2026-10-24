@@ -14,11 +14,13 @@ export type FeedState = {
   session: { id: string | null; root: string } | null;
   /** a forced user message was sent: the next result ends the interrupted turn but not the new one. */
   forcePending: boolean;
+  /** ids of live sends no result has answered yet (results name them in user_message_uuids). */
+  waiting: string[];
   /** counter behind the streaming ids `stream:${n}`; kept in state so reduce stays pure and replay is deterministic. */
   streamN: number;
 };
 
-export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, streamN: 0 };
+export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0 };
 
 // Loose view of the SDK message: only the fields the feed reads (real shapes: server/test/fixtures/real-frames.json).
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean };
@@ -35,6 +37,8 @@ type Sdk = {
   errors?: unknown;
   terminal_reason?: string;
   queued_turn_count?: number;
+  user_message_uuid?: string;
+  user_message_uuids?: string[];
 };
 
 const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
@@ -129,9 +133,14 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
       // a stream still open at result was cut short: keep its partial text as final, drop it if empty
       const closed = s.items.flatMap((it): FeedItem[] =>
         it.kind === 'assistant' && !it.final ? (it.text ? [{ ...it, final: true }] : []) : [it]);
-      // queued_turn_count > 0: a message sent mid-turn runs next as its own turn, so the agent keeps working
-      const busy = s.forcePending || (m.queued_turn_count ?? 0) > 0;
-      return { ...s, items: [...closed, done], busy, forcePending: false };
+      // A message sent mid-turn runs next as its own turn. The CLI was seen reporting queued_turn_count 0 with a
+      // send already queued, so busy also follows the sends no result has named yet (user_message_uuids echoes
+      // the client ids; without it, user_message_uuid, else the oldest send, e.g. the server's crash result).
+      const answered = Array.isArray(m.user_message_uuids) ? m.user_message_uuids
+        : typeof m.user_message_uuid === 'string' ? [m.user_message_uuid] : null;
+      const waiting = answered ? s.waiting.filter((id) => !answered.includes(id)) : s.waiting.slice(1);
+      const busy = s.forcePending || (m.queued_turn_count ?? 0) > 0 || waiting.length > 0;
+      return { ...s, items: [...closed, done], busy, forcePending: false, waiting };
     }
     default:
       return s;
@@ -155,6 +164,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
         items: [...s.items, item],
         busy: ev.historic ? s.busy : true,
         forcePending: ev.force ? true : s.forcePending,
+        waiting: ev.historic ? s.waiting : [...s.waiting, ev.id],
       };
     }
     case 'permission':

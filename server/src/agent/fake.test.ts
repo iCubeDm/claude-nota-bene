@@ -116,7 +116,7 @@ describe('fake backend', () => {
     s.close();
   });
 
-  it('a send during a running turn: that result carries queued_turn_count 1, the next 0', async () => {
+  it('a send during a running turn runs as its own turn; each result names its send, queued_turn_count 0 as the CLI reports', async () => {
     const { s, it } = run([{ text: 'a'.repeat(20), chunk: 1, delayMs: 2 }]);
     s.send(send);
     const results: SDKMessage[] = [];
@@ -126,7 +126,8 @@ describe('fake backend', () => {
       if (!sent && m.type === 'stream_event') { s.send({ ...send, uuid: 'u2' }); sent = true; }
       if (m.type === 'result') results.push(m);
     }
-    expect(results.map((r) => (r as { queued_turn_count?: number }).queued_turn_count)).toEqual([1, 0]);
+    expect(results.map((r) => (r as { queued_turn_count?: number }).queued_turn_count)).toEqual([0, 0]);
+    expect(results.map((r) => (r as { user_message_uuids?: string[] }).user_message_uuids)).toEqual([['u1'], ['u2']]);
     expect(results[0]).toMatchObject({ subtype: 'success', terminal_reason: 'completed' });
     s.close();
   });
@@ -144,7 +145,10 @@ describe('fake backend', () => {
   it('result shapes match the real-CLI fixture (type, subtype, is_error, terminal_reason, queued_turn_count)', async () => {
     const pick = (m: unknown) => {
       const r = m as Record<string, unknown>;
-      return { type: r.type, subtype: r.subtype, is_error: r.is_error, terminal_reason: r.terminal_reason, queued: typeof r.queued_turn_count };
+      return {
+        type: r.type, subtype: r.subtype, is_error: r.is_error, terminal_reason: r.terminal_reason,
+        queued: r.queued_turn_count, uuids: Array.isArray(r.user_message_uuids) ? r.user_message_uuids.length : r.user_message_uuids,
+      };
     };
     const fixture = JSON.parse(fs.readFileSync(new URL('../../test/fixtures/real-frames.json', import.meta.url), 'utf8')) as { events: { kind: string; m?: { type?: string; terminal_reason?: string } }[] };
     const real = fixture.events.flatMap((e) => (e.kind === 'sdk' && e.m?.type === 'result' ? [e.m] : []));
