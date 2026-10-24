@@ -1,4 +1,4 @@
 {
   "files": [],
-  "references": [{ "path": "shared" }, { "path": "server" }, { "path": "web" }]
+  "references": [{ "path": "shared" }, { "path": "server" }, { "path": "web" }, { "path": "e2e" }]
 }
