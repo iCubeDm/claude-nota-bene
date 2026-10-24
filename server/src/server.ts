@@ -5,7 +5,7 @@ import { parseClientMessage } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { EventHub } from './hub.ts';
-import { httpHandler } from './http.ts';
+import { httpHandler, isAllowedHost } from './http.ts';
 import { createSessionManager } from './session.ts';
 
 // Process-wide handlers are registered once; each running server's hub is in this set.
@@ -29,6 +29,7 @@ export async function startServer(o: {
   backend: AgentBackend;
   resume?: string;
   webDist: string;
+  allowedOrigins?: string[];
 }): Promise<{ url: string; close(): Promise<void> }> {
   const hub = new EventHub();
   installProcessHandlers();
@@ -40,15 +41,27 @@ export async function startServer(o: {
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
     });
+    const allowedHosts: string[] = []; // filled after listen, once the port is known
     const server = http.createServer(httpHandler({
       hub,
+      allowedHosts,
       webDist: o.webDist,
       info: () => {
         const { id, root } = manager.info();
         return { root, session: id };
       },
     }));
-    const wss = new WebSocketServer({ server });
+    const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
+    const wss = new WebSocketServer({
+      server,
+      verifyClient: ({ req }, done) => {
+        const origin = req.headers.origin;
+        const ok = isAllowedHost(req.headers.host, allowedHosts)
+          && (origin === undefined || allowedOrigins.includes(origin));
+        if (ok) done(true);
+        else done(false, 403, 'forbidden');
+      },
+    });
 
     wss.on('connection', (ws) => {
       const detach = hub.attach({ send: (d) => ws.send(d) });
@@ -82,6 +95,10 @@ export async function startServer(o: {
       });
     });
 
+    const port = (server.address() as AddressInfo).port;
+    allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
+    allowedOrigins.push(`http://127.0.0.1:${port}`, `http://localhost:${port}`);
+
     let closing: Promise<void> | null = null;
     const close = () => (closing ??= new Promise<void>((resolve) => {
       hubs.delete(hub);
@@ -91,7 +108,7 @@ export async function startServer(o: {
         server.closeAllConnections();
       });
     }));
-    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close };
+    return { url: `http://127.0.0.1:${port}`, close };
   } catch (e) {
     hubs.delete(hub);
     throw e;

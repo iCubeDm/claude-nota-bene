@@ -11,6 +11,7 @@ let dist: string;
 let server: http.Server;
 let port: number;
 const hub = new EventHub();
+const allowedHosts: string[] = [];
 
 beforeAll(async () => {
   dist = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-http-'));
@@ -20,6 +21,7 @@ beforeAll(async () => {
     httpHandler({
       hub,
       webDist: dist,
+      allowedHosts,
       info: () => ({ name: 'nb' }),
       extra: {
         '/boom': () => {
@@ -30,6 +32,7 @@ beforeAll(async () => {
   );
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   port = (server.address() as AddressInfo).port;
+  allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
 });
 
 afterAll(async () => {
@@ -38,10 +41,10 @@ afterAll(async () => {
 });
 
 // raw request so the path is not normalised by fetch
-function raw(method: string, p: string): Promise<{ status: number; type: string; body: string }> {
+function raw(method: string, p: string, headers?: Record<string, string>): Promise<{ status: number; type: string; body: string }> {
   return new Promise((resolve, reject) => {
     http
-      .request({ host: '127.0.0.1', port, method, path: p }, (res) => {
+      .request({ host: '127.0.0.1', port, method, path: p, ...(headers ? { headers } : {}) }, (res) => {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (c) => (body += c));

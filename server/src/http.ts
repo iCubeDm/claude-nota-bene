@@ -30,10 +30,15 @@ function statFile(p: string): fs.Stats | null {
   }
 }
 
+export function isAllowedHost(host: string | undefined, allowed: readonly string[]): boolean {
+  return host !== undefined && allowed.includes(host.toLowerCase());
+}
+
 export function httpHandler(o: {
   hub: EventHub;
   webDist: string;
   info: () => object;
+  allowedHosts: string[]; // read per request, so the caller may fill it after listen()
   extra?: Record<string, RequestListener>;
 }): RequestListener {
   const root = path.resolve(o.webDist);
@@ -58,6 +63,10 @@ export function httpHandler(o: {
 
   return (req, res) => {
     try {
+      if (!isAllowedHost(req.headers.host, o.allowedHosts)) {
+        text(res, 403, 'forbidden host');
+        return;
+      }
       const raw = req.url ?? '/';
       const qi = raw.indexOf('?');
       const rawPath = qi === -1 ? raw : raw.slice(0, qi);
