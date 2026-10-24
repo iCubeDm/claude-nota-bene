@@ -1,6 +1,8 @@
 import { render, waitFor } from '@testing-library/react';
 import hljs from 'highlight.js';
+import mermaid from 'mermaid';
 import { describe, expect, it, vi } from 'vitest';
+import { setLang } from '@/i18n/index.ts';
 import { Markdown } from './Markdown';
 
 vi.mock('mermaid', () => ({
@@ -50,5 +52,12 @@ describe('Markdown', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(container.querySelector('.hljs-keyword .hljs-keyword')).toBeNull();
     spy.mockRestore();
+  });
+
+  it('a mermaid failure is shown through t() in the current language', async () => {
+    setLang('ru');
+    vi.mocked(mermaid.render).mockRejectedValueOnce(new Error('bad graph'));
+    const { container } = render(<Markdown text={MERMAID} final />);
+    await waitFor(() => expect(container.querySelector('.mermaid-out')).toHaveTextContent('ошибка mermaid: bad graph'));
   });
 });

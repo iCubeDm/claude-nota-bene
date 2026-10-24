@@ -3,6 +3,7 @@ import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.min.css';
 import { marked } from 'marked';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { t } from '@/i18n/index.ts';
 import './markdown.css';
 
 const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
@@ -65,7 +66,7 @@ function postProcess(root: HTMLElement, final: boolean) {
           out.innerHTML = svg;
         })
         .catch((e: unknown) => {
-          out.textContent = `mermaid error: ${e instanceof Error ? e.message : String(e)}`;
+          out.textContent = t('mermaidError', e instanceof Error ? e.message : String(e));
         });
     } else if (final && lang === 'svg') {
       const out = document.createElement('div');

@@ -24,5 +24,6 @@ export const ru = {
   deny: 'Запретить',
   allowed: '✓ разрешено',
   denied: '✕ запрещено',
+  mermaidError: (msg: string) => `ошибка mermaid: ${msg}`, // new in M0 (the prototype had it in English only)
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
 };

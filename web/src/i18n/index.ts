@@ -39,7 +39,11 @@ function subscribe(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-/** Subscribes to language changes; the returned `t` is a new function per language so memoised children update. */
+/**
+ * Re-renders the calling component when the language changes. The returned `t` is the same module-level
+ * function every time, so it does NOT change identity: memoised children that call t() themselves need
+ * their own useT() (or another prop that changes) to pick up a new language.
+ */
 export function useT(): typeof t {
   useSyncExternalStore(subscribe, getLang);
   return t;

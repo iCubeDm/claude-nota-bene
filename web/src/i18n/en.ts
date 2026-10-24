@@ -27,5 +27,6 @@ export const en: Dict = {
   deny: 'Deny',
   allowed: '✓ allowed',
   denied: '✕ denied',
+  mermaidError: (msg) => `mermaid error: ${msg}`,
   resumed: (id) => `↻ resumed session ${id}`,
 };
