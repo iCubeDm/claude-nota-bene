@@ -4,6 +4,7 @@ import 'highlight.js/styles/github-dark.min.css';
 import { marked } from 'marked';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { t } from '@/i18n/index.ts';
+import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
 import './markdown.css';
 
 // external links in agent replies open in a new browser tab instead of replacing the app
@@ -14,28 +15,16 @@ DOMPurify.addHook('afterSanitizeAttributes', (n) => {
   }
 });
 
-const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
-const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
-
-// The /file route arrives in M2.
-const fileUrl = (p: string) => {
-  if (/^(https?:|data:|blob:)/.test(p)) return p;
-  let decoded = p;
-  try {
-    decoded = decodeURI(p);
-  } catch {
-    // keep raw
-  }
-  return `/file?path=${encodeURIComponent(decoded)}`;
-};
-
 const escAttr = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+// marked renderers are global and parse is synchronous, so the current render's baseDir lives here
+let currentBase: string | undefined;
 
 marked.use({
   gfm: true,
   renderer: {
     image(href: string, _title: string | null, text: string) {
-      const src = escAttr(fileUrl(href));
+      const src = escAttr(fileUrl(href, currentBase));
       if (VIDEO.test(href)) return `<video controls preload="metadata" src="${src}"></video>`;
       if (AUDIO.test(href)) return `<audio controls src="${src}"></audio>`;
       return `<img src="${src}" alt="${escAttr(text || '')}">`;
@@ -89,20 +78,26 @@ function postProcess(root: HTMLElement, final: boolean) {
 }
 
 export const Markdown = memo(
-  function Markdown({ text, final }: { text: string; final: boolean }) {
+  function Markdown({ text, final, baseDir }: { text: string; final: boolean; baseDir?: string }) {
     const ref = useRef<HTMLDivElement>(null);
     const html = useMemo(
-      () =>
-        DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
-          ADD_TAGS: ['video', 'audio'],
-          ADD_ATTR: ['controls', 'preload'],
-        }),
-      [text],
+      () => {
+        currentBase = baseDir;
+        try {
+          return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
+            ADD_TAGS: ['video', 'audio'],
+            ADD_ATTR: ['controls', 'preload'],
+          });
+        } finally {
+          currentBase = undefined;
+        }
+      },
+      [text, baseDir],
     );
     useLayoutEffect(() => {
       if (ref.current) postProcess(ref.current, final);
     }, [html, final]);
     return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
   },
-  (a, b) => a.text === b.text && a.final === b.final,
+  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir,
 );

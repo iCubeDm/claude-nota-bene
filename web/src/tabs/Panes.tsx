@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useAppSelector } from '@/store/store.ts';
+import { FileView } from '@/files/FileView.tsx';
 import { selectTabs } from './slice.ts';
 
 /**
@@ -14,12 +15,7 @@ export function Panes({ chat }: { chat: ReactNode }) {
         {chat}
       </main>
       {open.map((tab) =>
-        tab.kind === 'file' ? (
-          // placeholder until M3-08 (FileView)
-          <div key={tab.id} data-pane={tab.id} hidden={active !== tab.id} className="grid-pane relative min-h-0 flex-1 overflow-auto p-4 font-mono text-xs text-muted-foreground">
-            {tab.path}
-          </div>
-        ) : null,
+        tab.kind === 'file' ? <FileView key={tab.id} path={tab.path} active={active === tab.id} /> : null,
       )}
     </>
   );

@@ -1,15 +1,11 @@
 import type { ReactNode } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
+import { AUDIO, IMAGE, VIDEO } from '@/files/kinds.ts';
 import { revealInTree } from '@/tree/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
 import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
-
-// copied from the prototype
-const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
-const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
-const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
 export const Svg = ({ children, size = 14 }: { children: ReactNode; size?: number }) => (
   <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width={size} height={size} className="flex-none">{children}</svg>

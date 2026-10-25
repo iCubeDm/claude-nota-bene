@@ -94,4 +94,11 @@ export const en: Dict = {
   refresh: 'Refresh',
   filterPh: 'Filter files…',
   fileTree: 'File tree',
+  // file viewers (M3-08)
+  tooLarge: 'File is too large to show (over 2 MB)',
+  binary: 'Binary file, not shown',
+  fileGone: 'This file no longer exists',
+  openRaw: 'Open raw',
+  noHighlight: 'not highlighted: large file',
+  reload: 'Reload',
 };
