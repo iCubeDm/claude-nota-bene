@@ -29,9 +29,14 @@ export function setLang(l: Lang): void {
   for (const fn of listeners) fn();
 }
 
-export function t(key: keyof typeof ru, ...args: unknown[]): string {
-  const v = DICTS[lang][key] ?? DICTS.en[key] ?? key;
+/** Translate into an explicit language (for text that must not follow the UI language, e.g. a sent batch). */
+export function tIn(l: Lang, key: keyof typeof ru, ...args: unknown[]): string {
+  const v = DICTS[l][key] ?? DICTS.en[key] ?? key;
   return typeof v === 'function' ? String(v(...args)) : String(v);
+}
+
+export function t(key: keyof typeof ru, ...args: unknown[]): string {
+  return tIn(lang, key, ...args);
 }
 
 function subscribe(fn: () => void): () => void {

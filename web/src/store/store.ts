@@ -2,6 +2,7 @@ import { configureStore, createAction, createSlice, type ThunkAction, type Unkno
 import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
+import { t } from '../i18n/index.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
@@ -87,4 +88,21 @@ export const interrupt = (): AppThunk => (_d, getState, { send }) => {
 
 export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _g, { send }) => {
   send({ type: 'permission', id, allow });
+};
+
+/**
+ * Where a comment's source sits, for the batch text: "reply #n" for a FINAL assistant item (n = 1-based among final
+ * assistant items in feed order), "my message" for a user item, null otherwise. The feed keeps no time per assistant
+ * item, so the " · time" part of `reply` is dropped rather than invented.
+ */
+export const selectReplyLabel = (s: RootState, messageId: string): string | null => {
+  let n = 0;
+  for (const it of s.feed.items) {
+    if (it.kind === 'assistant' && it.final) n++;
+    if ((it.kind === 'assistant' || it.kind === 'user') && it.id === messageId) {
+      if (it.kind === 'user') return t('srcMine');
+      return it.final ? t('reply', n, '').replace(/\s*·\s*$/, '') : null;
+    }
+  }
+  return null;
 };

@@ -29,5 +29,7 @@ export const en: Dict = {
   allowed: '✓ allowed',
   denied: '✕ denied',
   mermaidError: (msg) => `mermaid error: ${msg}`,
+  srcMine: 'my message',
+  batchHead: 'Comments on fragments:',
   resumed: (id) => `↻ resumed session ${id}`,
 };
