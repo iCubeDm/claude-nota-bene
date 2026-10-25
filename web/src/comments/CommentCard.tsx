@@ -1,6 +1,7 @@
 import type { Comment } from '@nota-bene/shared';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { rangeForAnchor } from '@/anchors/text.ts';
+import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
@@ -167,6 +168,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
       >
         {c.text}
       </div>
+      {c.images?.length ? <Attachments ids={c.images} /> : null}
       {label && (
         <span className="mt-1.5 inline-block rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80">
           {label.emoji} {labelText(label.id)}
@@ -208,7 +210,7 @@ export function CommentCardPopover() {
       dispatch(closeCommentCard());
     };
     const onDown = (e: MouseEvent) => {
-      if (root.current?.contains(e.target as Node)) return;
+      if (root.current?.contains(e.target as Node) || (e.target as Element).closest?.('[data-lightbox]')) return; // the lightbox is portalled out
       const a = document.activeElement as HTMLElement | null;
       if (a && root.current?.contains(a)) a.blur(); // "click outside = save" before the card unmounts
       dispatch(closeCommentCard());

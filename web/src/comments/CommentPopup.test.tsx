@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientMessage } from '@nota-bene/shared';
@@ -136,4 +136,24 @@ it('⌘Enter in the popup does not reach the composer', async () => {
   expect(seen).not.toHaveBeenCalled();
   expect(sent.filter((m) => m.type === 'send')).toHaveLength(0);
   expect(screen.getByPlaceholderText(/Message the agent/)).toHaveValue('draft');
+});
+
+vi.mock('@/attachments/image.ts', async (orig) => ({
+  ...(await orig<typeof import('@/attachments/image.ts')>()),
+  prepareImage: async (f: File) => f,
+  uploadImage: async () => ({ id: 'e'.repeat(64), mediaType: 'image/png' }),
+}));
+
+it('a pasted image is saved on the comment (images-only is enough)', async () => {
+  URL.createObjectURL = vi.fn(() => 'blob:x');
+  URL.revokeObjectURL = vi.fn();
+  const { comments, onClose } = setup();
+  const f = new File(['x'], 'a.png', { type: 'image/png' });
+  const ev = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(ev, 'clipboardData', { value: { files: [f], items: [] } });
+  act(() => void box().dispatchEvent(ev));
+  await waitFor(() => expect(document.querySelector('img[src^="/attach/"]:not([data-pending])')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  expect(comments()[0]).toMatchObject({ text: '', images: ['e'.repeat(64)] });
+  expect(onClose).toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { Attachments } from '@/attachments/Attachments.tsx';
 import { getLang, useT } from '@/i18n/index.ts';
 import { en } from '@/i18n/en.ts';
 import { ru } from '@/i18n/ru.ts';
@@ -41,6 +42,7 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
           p.text
         ),
       )}
+      {item.images && <Attachments ids={item.images.map((i) => i.id)} />}
       {(sent.length > 0 || raw) && (
         <details data-anchor-skip className="mt-1.5 text-[13px] text-muted-foreground">
           <summary className="cursor-pointer">{sent.length ? t('nComments', sent.length) : t('commentsLc')}</summary>

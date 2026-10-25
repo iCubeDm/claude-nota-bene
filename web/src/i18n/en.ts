@@ -103,4 +103,14 @@ export const en: Dict = {
   openRaw: 'Open raw',
   noHighlight: 'not highlighted: large file',
   reload: 'Reload',
+  // image attachments (M3-12)
+  attach: 'Attach an image\nor paste from the clipboard ⌘V / drop into the window',
+  remove: 'Remove',
+  imgLabel: (k: number) => `[image ${k}]`,
+  imgLabelC: (k: number, ci: number) => `[image ${k} · for comment ${ci}]`,
+  imgRef: (ks: number[]) => `📎 images: ${ks.join(', ')}`,
+  onlyImages: 'Only images can be attached',
+  uploadWait: 'Wait for the image to finish uploading',
+  attachHere: 'Attach an image (or paste / drop here)',
+  imgFail: 'Could not read the image',
 };

@@ -187,3 +187,12 @@ it('popover uses the popover background only', () => {
   expect(card).toHaveClass('bg-popover');
   expect(card).not.toHaveClass('bg-card/50');
 });
+
+it('thumbnails of the comment sit outside the anchor text', () => {
+  const H = 'a'.repeat(64);
+  const { view } = setup(comment({ images: [H] }));
+  const img = view.container.querySelector(`img[src="/attach/${H}"]`)!;
+  expect(img).toBeTruthy();
+  expect(img.closest('[data-anchor-skip]')).toBeTruthy();
+  expect(img.getAttribute('loading')).toBe('lazy');
+});

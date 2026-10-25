@@ -1,6 +1,6 @@
 import { configureStore, createAction, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, useStore, type TypedUseSelectorHook } from 'react-redux';
-import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
@@ -144,13 +144,14 @@ export const selectTurnSeq = (s: RootState): number => s.feed.turnSeq;
 export const selectSession = (s: RootState) => s.feed.session;
 
 export const sendMessage =
-  (text: string, force: boolean, commentIds?: string[]): AppThunk<boolean> =>
+  (text: string, force: boolean, commentIds?: string[], images?: ImageRef[]): AppThunk<boolean> =>
   (_d, getState, { send }) => {
     const st = getState();
     if (selectConn(st) !== 'open') return false;
     return send({
       type: 'send', id: crypto.randomUUID(), text, force: force && selectBusy(st),
       ...(commentIds?.length ? { commentIds } : {}),
+      ...(images?.length ? { images } : {}),
     });
   };
 

@@ -8,6 +8,7 @@ import { Composer } from '@/composer/Composer.tsx';
 import { Feed } from '@/feed/Feed.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent, useAppDispatch } from '@/store/store.ts';
+import { addImage, uploadFinished, uploadStarted } from '@/composer/slice.ts';
 import { sendBatch } from './send.ts';
 import { CommentsPanel } from './CommentsPanel.tsx';
 
@@ -186,4 +187,49 @@ it('with sent comments server-owned, the echo of a racing stale set reports them
   await userEvent.type(box, 'again{Enter}');
   expect(sent).toHaveLength(2);
   expect(sentOf(sent[1]!).commentIds).toBeUndefined();
+});
+
+it('images: composer first, then comment images; labels and the batch line', async () => {
+  const A = 'a'.repeat(64), B = 'b'.repeat(64);
+  const { sent, store, box } = setup([cm('c1', { images: [B] })]);
+  act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
+  await userEvent.type(box, 'see{Enter}');
+  const m = sentOf(sent[0]!);
+  expect(m.images).toEqual([
+    { id: A, mediaType: 'image/png', label: '[image 1]' },
+    { id: B, mediaType: expect.any(String), label: '[image 2 · for comment 1]' },
+  ]);
+  expect(m.text).toContain('→ text c1\n📎 images: 2');
+  expect(store.getState().composer.images).toEqual([]);
+});
+
+it('images only, no text and no comments, still sends; an upload in flight blocks the send', async () => {
+  const A = 'a'.repeat(64);
+  const { sent, store, box } = setup();
+  act(() => void store.dispatch(uploadStarted()));
+  act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
+  await userEvent.type(box, '{Enter}');
+  expect(sent).toHaveLength(0);
+  act(() => void store.dispatch(uploadFinished()));
+  await userEvent.type(box, '{Enter}');
+  expect(sentOf(sent[0]!)).toMatchObject({ text: '', images: [{ id: A, label: '[image 1]' }] });
+});
+
+it('only comment images: the ref sits on the comment that owns them, numbering is global', async () => {
+  const B = 'b'.repeat(64);
+  const { sent, box } = setup([cm('c1'), cm('c2', { images: [B] })]);
+  await userEvent.type(box, '{Enter}');
+  const m = sentOf(sent[0]!);
+  expect(m.images).toMatchObject([{ id: B, label: '[image 1 · for comment 2]' }]);
+  expect(m.text).toMatch(/1\. \[[^\]]*\]\n> quote c1\n→ text c1\n\n2\. \[[^\]]*\]\n> quote c2\n→ text c2\n📎 images: 1$/);
+});
+
+it('labels follow the language at send time, not at add time', async () => {
+  const A = 'a'.repeat(64);
+  const { sent, store, box } = setup([cm('c1')]);
+  setLang('ru');
+  act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
+  setLang('en');
+  await userEvent.type(box, 'x{Enter}');
+  expect(sentOf(sent[0]!).images?.[0]?.label).toBe('[image 1]');
 });

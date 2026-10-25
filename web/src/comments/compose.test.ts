@@ -33,3 +33,10 @@ it('a quick label adds its emoji, text and instruction', () => {
 it('no comments → general text unchanged', () => {
   expect(composeBatch('just text', [], 'en', none, where, () => undefined)).toBe('just text');
 });
+
+it('refs append the imgRef line under the comment, in the batch language', () => {
+  const out = composeBatch('', [c('a', 'q', 'y'), c('b', 'q2', 'z')], 'en', none, where, () => undefined, [[2, 3], []]);
+  expect(out).toContain('→ y\n📎 images: 2, 3\n\n2. ');
+  expect(out).not.toContain('z\n📎');
+  expect(composeBatch('', [c('a', 'q', 'y')], 'ru', none, where, () => undefined, [[1]])).toContain('→ y\n📎 изображения: 1');
+});

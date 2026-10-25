@@ -1,7 +1,7 @@
-import type { ServerEvent } from '@nota-bene/shared';
+import type { ImageRef, ServerEvent } from '@nota-bene/shared';
 
 export type FeedItem =
-  | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean }
+  | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean; images?: ImageRef[] }
   | { kind: 'assistant'; id: string; text: string; final: boolean } // `${uuid}:${blockIndex}`; while streaming `stream:${n}`
   | {
       kind: 'tool'; id: string; name: string; arg: string; sub: boolean;
@@ -195,6 +195,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       const item: FeedItem = {
         kind: 'user', id: ev.id, text: ev.text, ts: ev.ts,
         ...(ev.force ? { force: true } : {}),
+        ...(ev.images?.length ? { images: ev.images } : {}),
         ...(!ev.historic && s.busy ? { duringWork: true } : {}),
       };
       return {

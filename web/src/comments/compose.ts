@@ -15,13 +15,15 @@ export function composeBatch(
   labelOf: (c: Comment) => string,
   whereOf: (c: Comment) => string,
   instructionOf: (c: Comment) => string | undefined,
+  /** refs[i] = the global numbers of comment i's images; adds the `imgRef` line under that comment */
+  refs: number[][] = [],
 ): string {
   if (!items.length) return general;
   const blocks = items.map((c, i) => {
     const quote = c.anchor.quote.split('\n').map((l) => '> ' + l).join('\n');
     const body = [labelOf(c), c.text.trim()].filter(Boolean).join(' ');
     const instr = instructionOf(c);
-    return `${i + 1}. [${whereOf(c)}]\n${quote}\n→ ${body}${instr ? `\n   ${instr}` : ''}`;
+    return `${i + 1}. [${whereOf(c)}]\n${quote}\n→ ${body}${instr ? `\n   ${instr}` : ''}${refs[i]?.length ? '\n' + tIn(lang, 'imgRef', refs[i]) : ''}`;
   });
   return `${general ? general + '\n\n' : ''}${tIn(lang, 'batchHead')}\n\n${blocks.join('\n\n')}`;
 }

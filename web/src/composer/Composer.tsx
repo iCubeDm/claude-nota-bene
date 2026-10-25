@@ -5,7 +5,9 @@ import { useT } from '@/i18n/index.ts';
 import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
 import { MentionPicker } from './MentionPicker.tsx';
-import { selectDraft, setDraft } from './slice.ts';
+import { Attachments } from '@/attachments/Attachments.tsx';
+import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
+import { addImage, removeImage, selectDraft, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from './slice.ts';
 import { interrupt, selectBusy, selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
 
 export function Composer() {
@@ -15,8 +17,58 @@ export function Composer() {
   const conn = useAppSelector(selectConn);
   const nPending = useAppSelector(selectPending).length;
   const text = useAppSelector(selectDraft);
+  const images = useAppSelector(selectImages);
+  const uploading = useAppSelector(selectUploading) > 0;
   const [failed, setFailed] = useState(false);
+  const [note, setNote] = useState('');
+  const [dropping, setDropping] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileIn = useRef<HTMLInputElement>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // the same status spot as "offline": a short-lived note (onlyImages / imgFail)
+  const flash = (msg: string) => {
+    setNote(msg);
+    clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setNote(''), 3000);
+  };
+  useEffect(() => () => clearTimeout(noteTimer.current), []);
+  const intake = useImageIntake({
+    onUploaded: (im) => void dispatch(addImage(im)),
+    notify: flash,
+    onBusy: (d) => void dispatch(d > 0 ? uploadStarted() : uploadFinished()),
+  });
+
+  // drop anywhere in the window attaches to the message (a drop inside an open comment popup is taken there first)
+  const addRef = useRef(intake.add);
+  addRef.current = intake.add;
+  useEffect(() => {
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDropping(true);
+    };
+    const leave = (e: DragEvent) => { if (!e.relatedTarget) setDropping(false); };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDropping(false);
+      addRef.current(e.dataTransfer?.files ?? []);
+    };
+    // capture: a drop taken (and stopped) by the comment popup must still clear the highlight
+    const clear = () => setDropping(false);
+    document.addEventListener('drop', clear, true);
+    document.addEventListener('dragend', clear, true);
+    document.addEventListener('dragover', over);
+    document.addEventListener('dragleave', leave);
+    document.addEventListener('drop', drop);
+    return () => {
+      document.removeEventListener('drop', clear, true);
+      document.removeEventListener('dragend', clear, true);
+      document.removeEventListener('dragover', over);
+      document.removeEventListener('dragleave', leave);
+      document.removeEventListener('drop', drop);
+    };
+  }, []);
 
   // autosize; max-height (40vh) is applied by CSS
   useLayoutEffect(() => {
@@ -43,6 +95,7 @@ export function Composer() {
   }, [busy, dispatch]);
 
   const submit = (force: boolean) => {
+    if (uploading) return;
     const r = dispatch(sendBatch(force));
     if (r === 'empty') return;
     setFailed(r === 'offline');
@@ -67,8 +120,15 @@ export function Composer() {
           </>
         )}
         {failed && conn !== 'open' && <span className="text-warn">{t('offline')}</span>}
+        {note && <span className="text-warn">{note}</span>}
       </div>
-      <div className="flex items-end gap-2 pt-2.5 pb-1.5">
+      <Attachments
+        data-testid="composer-thumbs"
+        ids={images.map((i) => i.id)}
+        pending={intake.pending}
+        onRemove={(id) => void dispatch(removeImage(id))}
+      />
+      <div data-dropping={dropping || undefined} className="flex items-end gap-2 pt-2.5 pb-1.5 data-[dropping]:rounded-[10px] data-[dropping]:outline data-[dropping]:outline-2 data-[dropping]:outline-dashed data-[dropping]:outline-primary">
         <textarea
           ref={ref}
           rows={1}
@@ -79,12 +139,15 @@ export function Composer() {
             setFailed(false);
           }}
           onKeyDown={onKeyDown}
+          onPaste={intake.onPaste}
           className="max-h-[40vh] min-h-10 flex-1 resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)]"
         />
         <MentionPicker target={ref} />
-        <Button type="button" className="h-10" onClick={() => submit(false)}>
-          {nPending ? t('sendN', nPending) : t('send')}
-        </Button>
+        <span className="inline-flex" title={uploading ? t('uploadWait') : undefined}>
+          <Button type="button" className="h-10" disabled={uploading} onClick={() => submit(false)}>
+            {nPending ? t('sendN', nPending) : t('send')}
+          </Button>
+        </span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -104,6 +167,28 @@ export function Composer() {
         </Tooltip>
       </div>
       <div className="flex min-h-[30px] items-center gap-2 pb-2">
+        <input
+          ref={fileIn}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          data-testid="file-input"
+          onChange={(e) => {
+            intake.add(e.target.files ?? []);
+            e.target.value = '';
+          }}
+        />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={t('attach')} onClick={() => fileIn.current?.click()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+              </svg>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="whitespace-pre-line">{t('attach')}</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button type="button" variant="ghost" size="icon-sm" aria-label={t('keysTip')}>
