@@ -58,6 +58,8 @@
 @layer base {
   * { border-color: var(--border-soft); }
   html, body, #root { height: 100%; }
+  /* the app is a fixed-height shell: the document itself never scrolls (a popup past the edge used to move the UI) */
+  html { overflow: hidden; }
   body {
     margin: 0;
     display: flex;

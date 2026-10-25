@@ -339,3 +339,30 @@ test('the comment popup takes focus with the tree open and closed: typing lands 
   await expect(page.locator('#tree-sheet')).toBeHidden();
   await expect(page.locator('#toggleTree')).toBeFocused();
 });
+
+test('the @ picker with 30 hits stays inside the viewport and never scrolls the document @files', async ({ page }) => {
+  const hits = Array.from({ length: 30 }, (_, i) => `many/file-${String(i).padStart(2, '0')}.ts`);
+  await page.route('**/complete?*', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(hits) }));
+  await start(page);
+  await composer(page).click();
+  await composer(page).pressSequentially('@fil');
+  const list = page.getByRole('listbox');
+  await expect(list.getByRole('option')).toHaveCount(30);
+  const inView = async () => {
+    const b = (await list.boundingBox())!;
+    const vp = page.viewportSize()!;
+    return b.y >= 0 && b.x >= 0 && b.y + b.height <= vp.height && b.x + b.width <= vp.width;
+  };
+  await expect.poll(inView).toBe(true);
+  expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0);
+  // the last option (ArrowUp wraps): the list scrolls to it, the document does not move
+  await composer(page).press('ArrowUp');
+  const last = list.getByRole('option').last();
+  await expect(last).toHaveAttribute('aria-selected', 'true');
+  await expect(last).toBeInViewport();
+  expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0);
+  expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(inView).toBe(true);
+  await composer(page).press('Escape');
+  await expect(list).toHaveCount(0);
+});

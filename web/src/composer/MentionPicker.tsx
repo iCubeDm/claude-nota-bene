@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { useT } from '@/i18n/index.ts';
 import { setValueAndCaret } from '@/comments/insertText.ts';
 import { ICONS, Svg, iconForPath } from '@/tabs/TabStrip.tsx';
+import { placeListFor, revealSelected } from './placeList.ts';
 
 // copied from the prototype: `@` at a word start, up to the caret
 export const AT_RE = /(^|\s)@("[^"]*|[^\s"]*)$/;
@@ -111,17 +112,16 @@ export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElemen
     };
   }, [target]);
 
-  // above the field when there is room, else below
+  // above the field when it fits, else the roomier side, height capped to that side (placeList)
   useLayoutEffect(() => {
     const ta = target.current;
     if (!state || !ta || !menu.current) return;
-    const r = ta.getBoundingClientRect();
-    const { offsetWidth: w, offsetHeight: h } = menu.current;
-    setPos({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)),
-      top: r.top - h - 6 >= 8 ? r.top - h - 6 : r.bottom + 6,
-    });
+    setPos(placeListFor(menu.current, ta));
   }, [state?.items, target]);
+  // the selected option scrolls into view inside the list only: scrollIntoView would scroll the document too
+  useLayoutEffect(() => {
+    if (menu.current) revealSelected(menu.current);
+  }, [state?.sel, state?.items, pos]);
 
   if (!state) return null;
   const pick = (k: number) => {
@@ -132,7 +132,7 @@ export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElemen
     <div
       ref={menu}
       role="listbox"
-      className="fixed z-20 w-80 max-w-[90vw] rounded-[10px] border border-border bg-popover p-1 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
+      className="fixed z-20 max-h-[min(20rem,40vh)] overflow-y-auto w-80 max-w-[90vw] rounded-[10px] border border-border bg-popover p-1 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       {state.items.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">{t('atNone')}</div>}
@@ -147,8 +147,7 @@ export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElemen
             aria-selected={k === state.sel}
             onMouseDown={(e) => e.preventDefault() /* keep focus in the textarea */}
             onClick={() => pick(k)}
-            ref={k === state.sel ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}
-            className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12.5px] text-foreground ${k === state.sel ? 'bg-primary/15' : 'hover:bg-accent'}`}
+              className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12.5px] text-foreground ${k === state.sel ? 'bg-primary/15' : 'hover:bg-accent'}`}
           >
             <Svg>{dir ? ICONS.dir : iconForPath(p)}</Svg>
             <span className="flex-none">{highlight(clean.slice(cut) + (dir ? '/' : ''), state.q)}</span>
