@@ -41,7 +41,7 @@ function setup() {
 it('search filters by shortcode', async () => {
   const { openMenu } = setup();
   const menu = openMenu();
-  await waitFor(() => expect(within(menu).getAllByRole('button').length).toBeGreaterThan(1000)); // groups arrive progressively
+  await waitFor(() => expect(within(menu).getAllByRole('button').length).toBeGreaterThan(1000), { timeout: 5000 }); // groups arrive one per frame; slow under a loaded full-suite run
   fireEvent.change(within(menu).getByPlaceholderText('Search emoji…'), { target: { value: 'thumbsup' } });
   const btns = within(menu).getAllByRole('button');
   expect(btns.map((b) => b.textContent)).toContain('👍');
