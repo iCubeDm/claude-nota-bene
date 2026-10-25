@@ -342,8 +342,20 @@ function reportError(where, e) {
 process.on('uncaughtException', (e) => reportError('server', e));
 process.on('unhandledRejection', (e) => reportError('server', e));
 
+// only our own page may talk to us. The server binds 127.0.0.1, but a browser lets any site open
+// ws://127.0.0.1:<port> or POST to /switch, and a DNS-rebinding domain can reach it by name — the agent runs
+// commands, so: Host must be ours (HTTP + WebSocket), and Origin, when a browser sends one, must be ours too
+const OWN_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+const OWN_ORIGINS = new Set([...OWN_HOSTS].map((h) => `http://${h}`));
+const hostOk = (req) => OWN_HOSTS.has(String(req.headers.host || '').toLowerCase());
+const originOk = (req) => !req.headers.origin || OWN_ORIGINS.has(req.headers.origin);
+
 // a throwing route answers 500 with the message (the page shows it) instead of killing the process
 const server = http.createServer((req, res) => {
+  // reads stay open to our own Origin-less loads (img/video tags); anything that changes state needs our Origin
+  if (!hostOk(req) || (req.method !== 'GET' && req.method !== 'HEAD' && !originOk(req))) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('forbidden');
+  }
   try { route(req, res); } catch (e) {
     reportError(req.url, e);
     if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -415,7 +427,7 @@ function route(req, res) {
   res.writeHead(404); res.end();
 }
 
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, verifyClient: ({ req }) => hostOk(req) && originOk(req) });
 wss.on('connection', (ws) => {
   clients.add(ws);
   ws.send(JSON.stringify({ kind: 'replay', events: history }));
