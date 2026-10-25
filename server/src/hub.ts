@@ -32,12 +32,25 @@ export class EventHub {
     return () => void this.socks.delete(sock);
   }
 
+  /**
+   * Replaces the history and sends it to every connected socket as a new replay (the web reducer rebuilds its feed
+   * from a replay, so `reset()` empties every feed). Used when the conversation changes under the sockets: a switch,
+   * a restart, the startup resume.
+   */
   reset(events: ServerEvent[] = []): void {
     this.history = [...events];
+    const frame = JSON.stringify({ kind: 'replay', events: this.history });
+    for (const s of [...this.socks]) {
+      try {
+        s.send(frame);
+      } catch {
+        this.socks.delete(s);
+      }
+    }
   }
 
   private stamp(ev: EmitInput): ServerEvent {
-    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'comments') return ev;
+    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode') return ev;
     return { ...ev, ts: ev.ts ?? Date.now() } as ServerEvent;
   }
 }

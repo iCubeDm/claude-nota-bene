@@ -45,12 +45,28 @@ describe('EventHub', () => {
     expect(JSON.parse(s.frames[0]!).events).toEqual([user('z')]);
   });
 
+  it('reset sends every connected socket the new replay, so its feed empties', () => {
+    const hub = new EventHub();
+    const a = sock();
+    const b = sock();
+    hub.attach(a);
+    hub.attach(b);
+    hub.emit(user('old'));
+    hub.reset();
+    hub.reset([user('h')]);
+    for (const s of [a, b]) {
+      expect(s.frames.slice(2).map((f) => JSON.parse(f))).toEqual([{ kind: 'replay', events: [] }, { kind: 'replay', events: [user('h')] }]);
+    }
+    hub.emit(user('live'));
+    expect(JSON.parse(a.frames.at(-1)!)).toEqual(user('live'));
+  });
+
   it('stamps ts only when absent and only on kinds that have it', () => {
     const hub = new EventHub();
     const s = sock();
     hub.attach(s);
     hub.emit({ kind: 'user', id: 'a', text: 'a' });
-    hub.emit({ kind: 'session', id: null, root: '/r' });
+    hub.emit({ kind: 'session', id: null, root: '/r', title: null, model: null });
     expect(typeof JSON.parse(s.frames[1]!).ts).toBe('number');
     expect(JSON.parse(s.frames[2]!)).not.toHaveProperty('ts');
   });

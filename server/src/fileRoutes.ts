@@ -116,7 +116,8 @@ export async function complete(
 }
 
 export function fileRoutes(o: {
-  root: string;
+  /** read once per request: the root changes when the session switches to another project */
+  root: () => string;
   hub: EventHub;
   complete: (q: string) => Promise<string[]>;
 }): Record<string, RequestListener> {
@@ -136,10 +137,11 @@ export function fileRoutes(o: {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
     res.end(req.method === 'HEAD' ? undefined : JSON.stringify(body));
   };
-  /** Runs `fn` with the request's source; 400 for an unknown one. */
-  const withSource = (req: IncomingMessage, res: ServerResponse, fn: (src: Source | 'here') => Promise<void> | void) => {
-    sourceOf(req, o.root).then(
-      (src) => (src === null ? plain(res, 400, 'unknown source') : fn(src)),
+  /** Runs `fn` with the request's source and the root as of the request; 400 for an unknown source. */
+  const withSource = (req: IncomingMessage, res: ServerResponse, fn: (src: Source | 'here', root: string) => Promise<void> | void) => {
+    const root = o.root();
+    sourceOf(req, root).then(
+      (src) => (src === null ? plain(res, 400, 'unknown source') : fn(src, root)),
       (e) => fail(req, res, e),
     ).catch((e) => fail(req, res, e));
   };
@@ -190,17 +192,17 @@ export function fileRoutes(o: {
    * above the cap, like GET). No Range means branch media cannot seek: Chrome still plays it, Safari refuses video
    * without range support. Worktree media is served by serveFs and keeps Range.
    */
-  const serveBlob = async (req: IncomingMessage, res: ServerResponse, src: Source) => {
+  const serveBlob = async (req: IncomingMessage, res: ServerResponse, root: string, src: Source) => {
     const rel = queryPath(req);
     const head = { 'content-type': typeOf(rel), ...SAFETY };
     if (req.method === 'HEAD') {
-      const size = await blobSize(o.root, src, rel);
+      const size = await blobSize(root, src, rel);
       if (size === null) return plain(res, 404, 'not found');
       res.writeHead(200, { ...head, 'content-length': size });
       res.end();
       return;
     }
-    const buf = await readFile(o.root, src, rel);
+    const buf = await readFile(root, src, rel);
     if (buf === null) return plain(res, 404, 'not found');
     res.writeHead(200, { ...head, 'content-length': buf.length });
     res.end(buf);
@@ -209,19 +211,19 @@ export function fileRoutes(o: {
   return {
     '/sources': (req, res) => {
       if (!getOnly(req, res)) return;
-      listSources(o.root).then((list) => json(req, res, 200, list), (e) => fail(req, res, e));
+      listSources(o.root()).then((list) => json(req, res, 200, list), (e) => fail(req, res, e));
     },
 
     '/tree': (req, res) => {
       if (!getOnly(req, res)) return;
-      withSource(req, res, async (src) => {
+      withSource(req, res, async (src, root) => {
         if (src === 'here') {
-          const abs = resolveInRoot(o.root, queryPath(req));
+          const abs = resolveInRoot(root, queryPath(req));
           if (abs === null) return plain(res, 403, 'outside project');
-          return listDir(abs, o.root).then((list) => json(req, res, 200, list), () => json(req, res, 404, []));
+          return listDir(abs, root).then((list) => json(req, res, 200, list), () => json(req, res, 404, []));
         }
         try {
-          json(req, res, 200, await readTree(o.root, src, queryPath(req)));
+          json(req, res, 200, await readTree(root, src, queryPath(req)));
         } catch (e) {
           if (e instanceof SourceError && e.status === 403) return plain(res, 403, e.message);
           json(req, res, 404, []); // a missing folder, like for this checkout
@@ -231,22 +233,22 @@ export function fileRoutes(o: {
 
     '/file': (req, res) => {
       if (!getOnly(req, res)) return;
-      withSource(req, res, async (src) => {
-        if (src === 'here') return serveFs(req, res, o.root);
+      withSource(req, res, async (src, root) => {
+        if (src === 'here') return serveFs(req, res, root);
         if (src.kind === 'worktree' && src.dir) return serveFs(req, res, src.dir);
-        await serveBlob(req, res, src).catch((e) => sourceFail(req, res, e));
+        await serveBlob(req, res, root, src).catch((e) => sourceFail(req, res, e));
       });
     },
 
     '/complete': (req, res) => {
       if (!getOnly(req, res)) return;
       const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '';
-      withSource(req, res, (src) => {
+      withSource(req, res, (src, root) => {
         // another source: our own file search over it (the CLI only knows this checkout)
         const run = src === 'here' ? o.complete(q)
           : complete({
-            session: { fileSuggestions: async () => [] }, root: src.dir ?? o.root,
-            files: src.kind === 'branch' ? () => branchFiles(o.root, src) : undefined,
+            session: { fileSuggestions: async () => [] }, root: src.dir ?? root,
+            files: src.kind === 'branch' ? () => branchFiles(root, src) : undefined,
           }, q);
         run.then((hits) => json(req, res, 200, hits.slice(0, 30)), (e) => fail(req, res, e));
       });

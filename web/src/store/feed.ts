@@ -10,15 +10,17 @@ export type FeedItem =
       /** from the tool_result with the same tool_use_id; absent while the tool still runs */
       result?: { text: string; isError: boolean };
     }
+  /** a one-line mark in the transcript: the context was compacted (pre = tokens before) or cleared; ts 0 = no time */
+  | { kind: 'marker'; what: 'compacted' | 'cleared'; pre?: number; ts: number }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
-  /** `text`: the resumed session id, or for tone 'error' the server's message (`where` = the failing part); translated at render */
-  | { kind: 'notice'; text: string; tone?: 'error'; where?: string };
+  /** `text`: the resumed session id; translated at render. (Server errors are toasts, not feed items: R-M4-5.) */
+  | { kind: 'notice'; text: string };
 
 export type FeedState = {
   items: FeedItem[];
   busy: boolean;
-  session: { id: string | null; root: string } | null;
+  session: { id: string | null; root: string; title: string | null; model: string | null } | null;
   /** a forced user message was sent: the next result ends the interrupted turn but not the new one. */
   forcePending: boolean;
   /** ids of live sends no result has answered yet (results name them in user_message_uuids). */
@@ -50,6 +52,7 @@ type Sdk = {
   user_message_uuids?: string[];
   command_uuid?: string;
   state?: string;
+  compact_metadata?: { pre_tokens?: number };
 };
 
 export const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
@@ -101,6 +104,11 @@ function blocks(m: Sdk): Block[] {
 function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
   const sub = !!m.parent_tool_use_id;
   switch (m.type) {
+    case 'conversation_reset': // live only (never stored): the server's replay [] came first, this adds the line
+      return { ...emptyFeed, session: s.session, turnSeq: s.turnSeq, items: [{ kind: 'marker', what: 'cleared', ts }] };
+    case 'system':
+      if (m.subtype !== 'compact_boundary') return s;
+      return { ...s, items: [...s.items, { kind: 'marker', what: 'compacted', pre: m.compact_metadata?.pre_tokens ?? 0, ts }] };
     case 'stream_event': {
       if (sub) return s;
       const ev = m.event;
@@ -215,12 +223,13 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       return { ...s, items: replaceAt(s.items, i, { ...cur, answer: ev.allow }) };
     }
     case 'session': // sent again whenever the id changes; never a notice (the CLI inits every turn)
-      return { ...s, session: { id: ev.id, root: ev.root } };
+      return { ...s, session: { id: ev.id, root: ev.root, title: ev.title, model: ev.model } };
     case 'resumed':
       return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
-    case 'server-error': // shown to the user, never swallowed (M0 error policy); live only, not stored in the replay
-      return { ...s, items: [...s.items, { kind: 'notice', text: ev.message, tone: 'error', where: ev.where }] };
     case 'comments': // handled by the comments store, not the feed
+    case 'stats': // handled by the stats store (M4)
+    case 'mode':
+    case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
     default: {
       const never: never = ev;

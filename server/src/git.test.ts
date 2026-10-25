@@ -59,7 +59,7 @@ beforeAll(async () => {
   server = http.createServer(
     httpHandler({
       hub, webDist: dir, allowedHosts, allowedOrigins: [], info: () => ({}),
-      extra: fileRoutes({ root, hub, complete: async (q) => [q] }),
+      extra: fileRoutes({ root: () => root, hub, complete: async (q) => [q] }),
     }),
   );
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));

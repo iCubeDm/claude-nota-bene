@@ -71,6 +71,20 @@ describe('server', () => {
     expect(await r.json()).toMatchObject({ root: '/proj' });
   });
 
+  it('a new socket gets the current stats, and stats never enter the replay', async () => {
+    const hot = { used: 180000, max: 200000, pct: 90 };
+    const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello', context: hot }]), webDist: dist });
+    closers.push(s.close);
+    const a = await connect(s.url);
+    a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
+    await until(() => a.events.some((e) => e.kind === 'stats' && e.stats.context?.pct === 90));
+    const b = await connect(s.url);
+    await until(() => b.events.some((e) => e.kind === 'stats'));
+    expect(b.events.find((e) => e.kind === 'stats')).toMatchObject({ stats: { context: hot } });
+    const replay = b.events.find((e) => e.kind === 'replay') as Extract<ServerEvent, { kind: 'replay' }>;
+    expect(replay.events.some((e) => e.kind === 'stats')).toBe(false);
+  });
+
   it('a second client gets the replay', async () => {
     const s = await boot();
     const a = await connect(s.url);
@@ -81,5 +95,35 @@ describe('server', () => {
     const first = b.events[0]!;
     expect(first.kind).toBe('replay');
     if (first.kind === 'replay') expect(first.events.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(true);
+  });
+
+  it('every new socket gets the mode, and a mode message is applied and broadcast', async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    await until(() => a.events.some((e) => e.kind === 'mode'));
+    expect(a.events.find((e) => e.kind === 'mode')).toEqual({ kind: 'mode', mode: 'auto' });
+    a.ws.send(JSON.stringify({ type: 'mode', mode: 'plan' }));
+    await until(() => a.events.filter((e) => e.kind === 'mode').length === 2);
+    const b = await connect(s.url);
+    await until(() => b.events.some((e) => e.kind === 'mode'));
+    expect(b.events.find((e) => e.kind === 'mode')).toEqual({ kind: 'mode', mode: 'plan' });
+    const replay = b.events[0]!;
+    if (replay.kind === 'replay') expect(replay.events.some((e) => e.kind === 'mode')).toBe(false); // live state, not history
+  });
+
+  it('an allow that carries a modified input still runs the original input', async () => {
+    const seen: unknown[] = [];
+    const base = fakeBackend([{ text: 'ok', ask: { toolName: 'Bash', input: { command: 'ls' } } }]);
+    // the agent side: what the backend's ask resolves with is what the SDK adapter turns into updatedInput
+    const backend = { ...base, start: (o: Parameters<typeof base.start>[0]) => base.start({ ...o, ask: async (...a) => { const r = await o.ask(...a); seen.push(r); return r; } }) };
+    const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist });
+    closers.push(s.close);
+    const c = await connect(s.url);
+    c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'run' }));
+    await until(() => c.events.some((e) => e.kind === 'permission'));
+    const p = c.events.find((e) => e.kind === 'permission') as Extract<ServerEvent, { kind: 'permission' }>;
+    c.ws.send(JSON.stringify({ type: 'permission', id: p.id, allow: true, input: { command: 'rm -rf /' } }));
+    await until(() => seen.length === 1);
+    expect(seen[0]).toBe(true); // a plain allow: the adapter echoes the ORIGINAL input
   });
 });

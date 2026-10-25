@@ -81,7 +81,7 @@ describe('comment sync', () => {
   it('comments never enter the replay history', async () => {
     const s = await boot();
     const a = await connect(s.url);
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a')] }));
     await until(() => lastComments(a)?.length === 1);
     const b = await connect(s.url);
     await until(() => b.events.length >= 2);
@@ -95,7 +95,7 @@ describe('comment sync', () => {
     const a = await connect(s.url);
     const b = await connect(s.url);
     await until(() => lastComments(a) !== undefined && lastComments(b) !== undefined);
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a')] }));
     await until(() => lastComments(b)?.length === 1);
     expect(lastComments(b)).toEqual([c('a')]);
     expect(lastComments(a)).toEqual([c('a')]);
@@ -105,7 +105,7 @@ describe('comment sync', () => {
     const s = await boot();
     const a = await connect(s.url);
     const b = await connect(s.url);
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a'), c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a'), c('b')] }));
     await until(() => lastComments(b)?.length === 2);
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi', commentIds: ['a'] }));
     await until(() => a.events.some(isResult));
@@ -120,7 +120,7 @@ describe('comment sync', () => {
   it('comments made before init are persisted under the session id after it', async () => {
     const s = await boot();
     const a = await connect(s.url);
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a')] }));
     await until(() => lastComments(a)?.length === 1);
     expect(store().get('fake-session')).toEqual([]);
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
@@ -141,6 +141,7 @@ describe('comment sync', () => {
     store().set('other-id', [c('o')]);
     const inner = fakeBackend([{ text: 'hello' }]);
     const backend: AgentBackend = {
+      ...inner,
       history: inner.history,
       start: (o) => inner.start({ ...o, resume: 'other-id' }),
     };
@@ -153,16 +154,16 @@ describe('comment sync', () => {
   it('a racing client cannot turn a sent comment back to pending or drop it', async () => {
     const s = await boot();
     const a = await connect(s.url);
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a'), c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a'), c('b')] }));
     await until(() => lastComments(a)?.length === 2);
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi', commentIds: ['a'] }));
     await until(() => lastComments(a)?.find((x) => x.id === 'a')?.status === 'sent');
     // a stale full set from another window: 'a' still pending
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a', { text: 'stale' }), c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: 'fake-session', items: [c('a', { text: 'stale' }), c('b')] }));
     await until(() => lastComments(a)?.find((x) => x.id === 'a')?.text === 't-a' && a.events.filter((e) => e.kind === 'comments').length >= 4);
     expect(lastComments(a)!.find((x) => x.id === 'a')).toMatchObject({ status: 'sent', sentIn: 'u1', text: 't-a' });
     // a set that lacks the sent comment keeps it
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: 'fake-session', items: [c('b')] }));
     await until(() => a.events.filter((e) => e.kind === 'comments').length >= 5);
     expect(lastComments(a)!.map((x) => [x.id, x.status])).toEqual([['b', 'pending'], ['a', 'sent']]);
   });
@@ -175,9 +176,10 @@ describe('comment sync', () => {
     const dir = path.join(home, 'comments');
     fs.chmodSync(dir, 0o555);
     closers.push(async () => { fs.chmodSync(dir, 0o755); });
-    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a'), c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: 'sess-ro', items: [c('a'), c('b')] }));
     await until(() => a.events.some((e) => e.kind === 'server-error'));
     expect(a.events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'comments' });
+    expect(a.events.find((e) => e.kind === 'server-error')).not.toMatchObject({ message: 'stale session' });
     expect(store().get('sess-ro')).toEqual([c('a')]);
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
     await until(() => a.events.some(isResult));

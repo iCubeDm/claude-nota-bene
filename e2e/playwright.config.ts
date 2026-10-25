@@ -28,6 +28,8 @@ const fixtures = [
   { name: 'ask', port: 4793 },
   // all of 4791-4793 are taken, so files takes 4794 (free: 4777-4781 are live windows, 4790 is the manual smoke)
   { name: 'files', port: 4794 },
+  // 4795: session and agent controls (M4-16)
+  { name: 'controls', port: 4795 },
 ];
 
 export default defineConfig({
@@ -40,7 +42,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: 'list',
   use: { channel: 'chrome', headless: true, locale: 'en-US' },
-  // Each project runs only tests whose title carries its @tag (@chat / @slow / @ask / @files).
+  // Each project runs only tests whose title carries its @tag (@chat / @slow / @ask / @files / @controls).
   // A test without a tag runs nowhere, so chat.spec.ts must tag every test.
   projects: fixtures.map((f) => ({
     name: f.name,

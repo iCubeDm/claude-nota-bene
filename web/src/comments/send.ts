@@ -8,7 +8,7 @@ import { clearImages, selectDraft, selectImages, selectUploading, setDraft } fro
 import { markSending, selectPending } from './slice.ts';
 import { activate } from '../tabs/slice.ts';
 
-export type SendResult = 'empty' | 'sent' | 'offline';
+export type SendResult = 'empty' | 'sent' | 'offline' | 'switching';
 
 /** A file source as the batch and the card name it: `path`, or `path @ ref` for another branch or worktree (M3-16). */
 export const whereOfFile = (src: Extract<AnchorSource, { kind: 'file' }>): string => (src.ref ? `${src.path} @ ${src.ref}` : src.path);
@@ -29,6 +29,8 @@ export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0])
  */
 export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState) => {
   const st = getState();
+  // the server refuses sends mid-switch; the draft and the comments stay for the new session
+  if (st.controls.switching) return 'switching';
   const pending = selectPending(st);
   const body = selectDraft(st).trim();
   const own = selectImages(st);

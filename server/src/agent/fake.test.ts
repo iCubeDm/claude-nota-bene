@@ -8,7 +8,7 @@ const send = { uuid: 'u1', text: 'hi', priority: 'next' } as const;
 const yes: PermissionAsk = async () => true;
 
 function run(turns: FakeTurn[], ask: PermissionAsk = yes) {
-  const s = fakeBackend(turns).start({ cwd: '/tmp', ask });
+  const s = fakeBackend(turns).start({ cwd: '/tmp', permissionMode: 'auto', ask });
   const it = s.messages[Symbol.asyncIterator]();
   return { s, it, next: async () => (await it.next()).value as SDKMessage };
 }
@@ -91,7 +91,7 @@ describe('fake backend', () => {
   });
 
   it('emits init at the start of every turn, like the CLI, and keeps the resumed id', async () => {
-    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', resume: 'r1', ask: yes });
+    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', resume: 'r1', permissionMode: 'auto', ask: yes });
     const it = s.messages[Symbol.asyncIterator]();
     const types: string[] = [];
     const ids = new Set<string>();
@@ -179,5 +179,57 @@ describe('fake backend', () => {
     do m = (await it.next()).value as SDKMessage; while (m.type !== 'result');
     expect(pick(m)).toEqual(pick(realAborted));
     s.close();
+  });
+  describe('M4-16 script fields', () => {
+    it('a turn with `match` runs for a prompt containing it and does not use up the sequence', async () => {
+      const turns: FakeTurn[] = [{ text: 'first' }, { text: 'boom reply', match: 'boom' }, { text: 'second' }];
+      const { s, it } = run(turns);
+      const replies: string[] = [];
+      for (const text of ['one', 'go boom', 'two']) {
+        s.send({ uuid: text, text, priority: 'next' });
+        let m: SDKMessage;
+        do {
+          m = (await it.next()).value as SDKMessage;
+          if (m.type === 'result') replies.push((m as unknown as { result: string }).result);
+        } while (m.type !== 'result');
+      }
+      expect(replies).toEqual(['first', 'boom reply', 'second']);
+      s.close();
+    });
+
+    it('frames follow init (with the session id) and a sleep step only waits', async () => {
+      const out = await collectTurn([{ text: 'x', frames: [
+        { type: 'system', subtype: 'task_started', task_id: 't1', description: 'job' },
+        { sleepMs: 1 },
+        { type: 'system', subtype: 'task_notification', task_id: 't1' },
+      ] }]);
+      expect(out.map((m) => (m as { subtype?: string }).subtype ?? m.type)).toEqual(['init', 'task_started', 'task_notification', 'stream_event', 'stream_event', 'assistant', 'success']);
+      expect(out[1]).toMatchObject({ session_id: 'fake-session', task_id: 't1' });
+    });
+
+    it('a suggestion is a prompt_suggestion frame after the result', async () => {
+      const { s, it } = run([{ text: 'x', suggestion: 'next step' }]);
+      s.send(send);
+      let m: SDKMessage;
+      do m = (await it.next()).value as SDKMessage; while (m.type !== 'result');
+      expect((await it.next()).value).toMatchObject({ type: 'prompt_suggestion', suggestion: 'next step', session_id: 'fake-session' });
+      s.close();
+    });
+
+    it('an allowed ask with onAllow announces the mode the CLI drops to; a denied one does not', async () => {
+      const turns: FakeTurn[] = [{ text: 'x', ask: { toolName: 'ExitPlanMode', input: { plan: 'p' }, onAllow: 'default' } }];
+      const allowed = await collectTurn(turns, async () => true);
+      expect(allowed.find((m) => (m as { subtype?: string }).subtype === 'status')).toMatchObject({ permissionMode: 'default' });
+      const denied = await collectTurn(turns, async () => false);
+      expect(denied.some((m) => (m as { subtype?: string }).subtype === 'status')).toBe(false);
+    });
+
+    it('historyDelayMs holds back history()', async () => {
+      const b = fakeBackend([], { sessions: [{ id: 's1', cwd: '/x', history: [{ role: 'user', text: 'hi' }] }], historyDelayMs: 60 });
+      const t0 = Date.now();
+      const h = await b.history('s1', '/x', undefined as never, () => {});
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(50);
+      expect(h).toHaveLength(1);
+    });
   });
 });

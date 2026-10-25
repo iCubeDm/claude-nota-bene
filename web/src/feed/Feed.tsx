@@ -3,7 +3,8 @@ import { useT } from '@/i18n/index.ts';
 import { refClick } from '@/refs/refs.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { Markdown } from './Markdown.tsx';
-import { DoneLine, NoticeLine } from './DoneLine.tsx';
+import { DoneLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
+import { PlanCard } from './PlanCard.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
 import { ToolLine } from './ToolLine.tsx';
 import { UserMessage } from './UserMessage.tsx';
@@ -61,7 +62,9 @@ export function Feed() {
           case 'done':
             return <DoneLine key={`done:${i}`} item={it} />;
           case 'permission':
-            return <PermissionCard key={it.id} item={it} />;
+            return it.toolName === 'ExitPlanMode' && typeof it.input.plan === 'string' ? <PlanCard key={it.id} item={it} /> : <PermissionCard key={it.id} item={it} />;
+          case 'marker':
+            return <MarkerLine key={`marker:${i}`} item={it} />;
           case 'notice':
             return <NoticeLine key={`notice:${i}`} item={it} />;
         }

@@ -5,7 +5,7 @@ import { AUDIO, IMAGE, VIDEO } from '@/files/kinds.ts';
 import { fileKey } from '@/files/sources.ts';
 import { SourceChip } from '@/files/SourcePicker.tsx';
 import { revealFile } from '@/tree/slice.ts';
-import { useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
+import { selectSession, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
 import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
 
@@ -28,7 +28,8 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
   const t = useT();
   const d = useAppDispatch();
   const badge = useAppSelector((s) => (tab.kind === 'file' ? selectPendingCountByPath(s)[fileKey(tab.path, tab.ref)] ?? 0 : 0));
-  const label = tab.kind === 'chat' ? t('chat') : basename(tab.path);
+  const title = useAppSelector((s) => selectSession(s)?.title ?? null);
+  const label = tab.kind === 'chat' ? title || t('chat') : basename(tab.path);
   const isChat = tab.kind === 'chat';
   return (
     <ContextMenu>
@@ -39,7 +40,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           aria-selected={active}
           data-tab={tab.id}
           data-playing={playing || undefined}
-          title={tab.kind === 'file' ? (tab.ref ? `${tab.path} @ ${tab.ref}` : tab.path) : undefined}
+          title={tab.kind === 'file' ? (tab.ref ? `${tab.path} @ ${tab.ref}` : tab.path) : title ?? t('chatTip')}
           onClick={() => d(activate(tab.id))}
           onAuxClick={(e) => {
             if (e.button === 1 && !isChat) { e.preventDefault(); d(closeTab(tab.id)); }

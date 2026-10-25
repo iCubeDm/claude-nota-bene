@@ -5,7 +5,8 @@ import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { selectActiveTab, openFile } from '@/tabs/slice.ts';
 import { ICONS, Svg, iconForPath } from '@/tabs/TabStrip.tsx';
 import { clearReveal, pickSource, selectTree, setDirs, setTreeOpen, toggleDir } from '@/tree/slice.ts';
-import { selectTurnSeq, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { selectTurnSeq, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
+import { useStore } from 'react-redux';
 import { fileKey, isFixed, loadSources, useSources } from './sources.ts';
 import { SourcePicker } from './SourcePicker.tsx';
 
@@ -29,6 +30,7 @@ const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 export function FileTree() {
   const t = useT();
   const d = useAppDispatch();
+  const store = useStore<RootState>();
   const { open, dirs, reveal, src } = useAppSelector(selectTree);
   const turnSeq = useAppSelector(selectTurnSeq);
   const counts = useAppSelector(selectPendingCountByPath);
@@ -91,8 +93,11 @@ export function FileTree() {
     busy.current = true;
     try {
       const paths = ['', ...dirs];
+      // the root it was asked for: an answer that lands after a switch to another root (same 'here' source, other
+      // folder) must not prune that root's folders with this one's listing
+      const gen = store.getState().tabs.rootGen;
       const results = await track(Promise.all(paths.map((p) => loadDir(p, src))));
-      if (shown.current !== src) return;
+      if (shown.current !== src || store.getState().tabs.rootGen !== gen) return;
       const next: Record<string, TreeEntry[]> = {};
       const keep: string[] = [];
       let bad = false;
@@ -114,7 +119,7 @@ export function FileTree() {
     } finally {
       busy.current = false;
     }
-  }, [dirs, src, d, track]);
+  }, [dirs, src, d, track, store]);
 
   // refresh after every live turn (replay does not move turnSeq); the first value is not a change. A branch only
   // changes with a commit: no refresh for it

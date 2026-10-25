@@ -140,3 +140,25 @@ it('Esc with focus inside hands focus to the header toggle, so it is not left in
     toggle.remove();
   }
 });
+
+it('a refresh that resolves after a switch to another root does not prune that root\'s folders (M4-10)', async () => {
+  const store = setup();
+  live(store, { kind: 'session', id: null, root: '/r1', title: null, model: null });
+  fireEvent.click(await row('src'));
+  await row('main.ts');
+  localStorage.setItem('tree:/r2', JSON.stringify(['docs']));
+  // the next listing is held until after the switch; it says src is gone
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  delete fs.src;
+  const real = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { await held; return real(url); }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  live(store, { kind: 'replay', events: [] });
+  live(store, { kind: 'session', id: null, root: '/r2', title: null, model: null });
+  expect(store.getState().tree.dirs).toEqual(['docs']);
+  await act(async () => { release(); await new Promise((r) => setTimeout(r, 20)); });
+  expect(store.getState().tree.dirs).toEqual(['docs']);
+  expect(localStorage.getItem('tree:/r2')).toBe(JSON.stringify(['docs']));
+  expect(JSON.parse(localStorage.getItem('tree:/r1')!)).toEqual(['src']);
+});

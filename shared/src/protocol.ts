@@ -28,12 +28,28 @@ export type Comment = {
   images?: string[];
 };
 
+export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+export type Mode = (typeof MODES)[number];
+/** percent 0..100 */
+export type Limit = { utilization: number; resets_at: string | null };
+export type Stats = {
+  context: { used: number; max: number; pct: number } | null;
+  limits: { five_hour: Limit | null; seven_day: Limit | null } | null;
+  cost: number | null;
+};
+
 export type ClientMessage =
   | { type: 'send'; id: string; text: string; force?: boolean; commentIds?: string[]; images?: ImageRef[] }
   /** full replacement of this session's comment set */
-  | { type: 'comments'; items: Comment[] }
+  | { type: 'comments'; sessionId: string | null; items: Comment[] }
   | { type: 'interrupt' }
-  | { type: 'permission'; id: string; allow: boolean };
+  /** `input` is ignored by the server (an allow always runs the original input); no client sends it. */
+  | { type: 'permission'; id: string; allow: boolean; input?: Record<string, unknown> }
+  | { type: 'mode'; mode: Mode }
+  | { type: 'command'; name: 'compact' | 'clear' }
+  /** id null = a new session in dir; dir is absolute */
+  | { type: 'switch'; id: string | null; dir: string }
+  | { type: 'restart' };
 
 export type ServerEvent =
   | { kind: 'replay'; events: ServerEvent[] }
@@ -43,7 +59,11 @@ export type ServerEvent =
   | { kind: 'permission-done'; id: string; allow: boolean; ts: number }
   /** full comment set; never stored in history, so no ts */
   | { kind: 'comments'; items: Comment[] }
-  | { kind: 'session'; id: string | null; root: string }
+  | { kind: 'session'; id: string | null; root: string; title: string | null; model: string | null }
+  /** never stored in history */
+  | { kind: 'stats'; stats: Stats }
+  /** never stored in history */
+  | { kind: 'mode'; mode: Mode }
   /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */
   | { kind: 'resumed'; id: string }
   | { kind: 'server-error'; where: string; message: string };
@@ -100,8 +120,12 @@ function isComment(v: unknown): v is Comment {
 }
 
 function isPermission(o: Obj): boolean {
-  return typeof o.id === 'string' && typeof o.allow === 'boolean';
+  return typeof o.id === 'string' && typeof o.allow === 'boolean' && (o.input === undefined || isObj(o.input));
 }
+
+const SESSION_ID = /^[0-9a-f-]{36}$/i;
+const isMode = (v: unknown): v is Mode => (MODES as readonly unknown[]).includes(v);
+const isSessionId = (v: unknown): v is string => typeof v === 'string' && SESSION_ID.test(v);
 
 function toSource(s: AnchorSource): AnchorSource {
   if (s.kind === 'message') return { kind: 'message', id: s.id };
@@ -146,13 +170,29 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
         ...(m.images === undefined ? {} : { images: (m.images as ImageRef[]).map(toImageRef) }),
       };
     case 'comments':
+      if (m.sessionId !== null && typeof m.sessionId !== 'string') return { error: 'comments needs sessionId: string | null' };
       if (!Array.isArray(m.items) || !m.items.every(isComment)) return { error: 'comments needs items: valid Comment[]' };
-      return { type: 'comments', items: (m.items as Comment[]).map(toComment) };
+      return { type: 'comments', sessionId: m.sessionId, items: (m.items as Comment[]).map(toComment) };
     case 'interrupt':
       return { type: 'interrupt' };
     case 'permission':
       if (!isPermission(m)) return { error: 'permission needs string id and boolean allow' };
-      return { type: 'permission', id: m.id as string, allow: m.allow as boolean };
+      return {
+        type: 'permission', id: m.id as string, allow: m.allow as boolean,
+        ...(m.input === undefined ? {} : { input: m.input as Record<string, unknown> }),
+      };
+    case 'mode':
+      if (!isMode(m.mode)) return { error: `mode must be one of ${MODES.join(', ')}` };
+      return { type: 'mode', mode: m.mode };
+    case 'command':
+      if (m.name !== 'compact' && m.name !== 'clear') return { error: 'command name must be compact or clear' };
+      return { type: 'command', name: m.name };
+    case 'switch':
+      if (m.id !== null && !isSessionId(m.id)) return { error: 'switch needs id: session uuid or null' };
+      if (typeof m.dir !== 'string' || !m.dir.startsWith('/')) return { error: 'switch needs an absolute dir' };
+      return { type: 'switch', id: m.id, dir: m.dir };
+    case 'restart':
+      return { type: 'restart' };
     default:
       return { error: `unknown message type: ${String(m.type)}` };
   }

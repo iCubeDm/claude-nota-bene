@@ -144,8 +144,8 @@ it('renders only the first 20000 characters of a long output until show all', ()
   expect(screen.queryByRole('button', { name: 'show all' })).toBeNull();
 });
 
-it('a server error shows up in the chat', () => {
+it('a server error is not a chat item (it is a toast)', () => {
   const { store, view } = setup();
   act(() => void store.dispatch(serverEvent({ kind: 'server-error', where: 'ws', message: 'boom' })));
-  expect(view.container.querySelector('[data-kind="notice"]')).toHaveTextContent('Server error · ws: boom');
+  expect(view.container.querySelector('[data-kind="notice"]')).toBeNull();
 });

@@ -109,23 +109,22 @@ test('subagent tool lines are sub; subagent text is not added', () => {
 
 test('session only sets the session; the resumed marker alone adds the notice; server-error, immutability', () => {
   const frozen = Object.freeze({ ...emptyFeed, items: Object.freeze([]) as never });
-  expect(reduce(frozen, { kind: 'session', id: 'abcdefghij', root: '/r' })).toMatchObject({ items: [], session: { id: 'abcdefghij', root: '/r' } });
+  expect(reduce(frozen, { kind: 'session', id: 'abcdefghij', root: '/r', title: null, model: null })).toMatchObject({ items: [], session: { id: 'abcdefghij', root: '/r' } });
   const withItem = fold([user()]);
   Object.freeze(withItem); Object.freeze(withItem.items);
   // the CLI sends init (-> session) every turn: it must never add a notice
-  expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r' }).items).toEqual(withItem.items);
+  expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r', title: null, model: null }).items).toEqual(withItem.items);
   expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
   expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ kind: 'notice', text: 'abcdefgh' }]);
-  const err = reduce(withItem, { kind: 'server-error', where: 'comments', message: 'EACCES' });
-  expect(err.items.at(-1)).toEqual({ kind: 'notice', text: 'EACCES', tone: 'error', where: 'comments' });
-  expect(err.items.slice(0, -1)).toEqual(withItem.items);
+  // a server error is a toast (R-M4-5): the feed is untouched
+  expect(reduce(withItem, { kind: 'server-error', where: 'comments', message: 'EACCES' }).items).toEqual(withItem.items);
   expect(() => reduce(withItem, start())).not.toThrow();
   expect(() => reduce(withItem, result())).not.toThrow();
 });
 
 test('a conversation with init every turn shows no notice; replayed history plus marker shows exactly one', () => {
   const init = (id: string) => sdk({ type: 'system', subtype: 'init', session_id: id });
-  const session = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r' });
+  const session = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r', title: null, model: null });
   const live = fold([session('s1'), user(), init('s1'), result(), user({ id: 'u2' }), init('s1'), session('s1'), result()]);
   expect(live.items.some((i) => i.kind === 'notice')).toBe(false);
   const resumed = reduce(emptyFeed, { kind: 'replay', events: [user({ historic: true }), { kind: 'resumed', id: 's1' }, session('s1')] });
@@ -242,4 +241,24 @@ test('turnSeq counts live results only; a replay keeps the live counter', () => 
   s = reduce(s, { kind: 'replay', events: [res, res] });
   expect(s.turnSeq).toBe(1);
   expect(reduce(s, res).turnSeq).toBe(2);
+});
+
+test('a live reset frame empties the feed and adds the cleared line, keeping the session', () => {
+  const s0 = fold([{ kind: 'session', id: 'old', root: '/r', title: null, model: null }, user(), result()]);
+  expect(s0.items.length).toBe(2);
+  const s = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7)], s0);
+  expect(s.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
+  expect(s.busy).toBe(false);
+  expect(s.session).toEqual({ id: 'old', root: '/r', title: null, model: null }); // the session event that follows updates it
+});
+
+test('a replay of the new session carries no cleared line', () => {
+  expect(reduce(emptyFeed, { kind: 'replay', events: [] }).items).toEqual([]);
+});
+
+test('compact_boundary adds a compacted line, live or replayed', () => {
+  const cb = sdk({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 12345 } }, 9);
+  const want = [{ kind: 'marker', what: 'compacted', pre: 12345, ts: 9 }];
+  expect(fold([cb]).items).toEqual(want);
+  expect(reduce(emptyFeed, { kind: 'replay', events: [cb] }).items).toEqual(want);
 });

@@ -203,3 +203,28 @@ it('thumbnails of the comment sit outside the anchor text', () => {
   expect(img.closest('[data-anchor-skip]')).toBeTruthy();
   expect(img.getAttribute('loading')).toBe('lazy');
 });
+
+it('popover re-clamps into the viewport when the card resizes while editing', () => {
+  let fire: () => void = () => {};
+  const disconnect = vi.fn();
+  vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { fire = cb; } observe() {} unobserve() {} disconnect = disconnect; });
+  let h = 100;
+  const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => h });
+  try {
+    const { store } = setup(comment(), true);
+    const view = render(<Provider store={store}><TooltipProvider><CommentCardPopover /></TooltipProvider></Provider>);
+    act(() => void store.dispatch({ type: 'comments/openCommentCard', payload: { id: 'c1', x: 10, y: window.innerHeight - 150 } }));
+    const dlg = view.container.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dlg.style.top).toBe(`${window.innerHeight - 150 + 6}px`); // fits below
+    h = 400; // the edit box grew
+    act(() => fire());
+    expect(dlg.style.top).toBe(`${window.innerHeight - 150 - 400 - 6}px`); // now flipped above the anchor
+    view.unmount();
+    expect(disconnect).toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+    if (desc) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', desc);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetHeight');
+  }
+});

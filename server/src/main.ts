@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fakeBackend } from './agent/fake.ts';
+import { fakeFromScript } from './agent/fake.ts';
 import { sdkBackend } from './agent/sdk.ts';
 import { startServer } from './server.ts';
 import { lastSession } from './state.ts';
@@ -38,7 +38,7 @@ export function parseArgs(
     else if (dirArg === undefined) dirArg = a;
     else throw new Error(`${USAGE}\nUnexpected argument: ${a}`);
   }
-  const dir = fs.realpathSync(path.resolve(cwd, dirArg ?? '.'));
+  const dir = fs.realpathSync.native(path.resolve(cwd, dirArg ?? '.'));
   if (cont) resume = lastSession(dir);
   return { dir, port, resume, continue: cont, fake, allowOrigins };
 }
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const backend = args.fake
-    ? fakeBackend(JSON.parse(fs.readFileSync(args.fake, 'utf8')))
+    ? fakeFromScript(JSON.parse(fs.readFileSync(args.fake, 'utf8')), args.dir)
     : sdkBackend();
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   const { url, close } = await startServer({

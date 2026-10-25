@@ -39,7 +39,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function setup() {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
-  act(() => void store.dispatch(serverEvent({ kind: 'session', id: null, root: '/p/main' })));
+  act(() => void store.dispatch(serverEvent({ kind: 'session', id: null, root: '/p/main', title: null, model: null })));
   store.dispatch(setTreeOpen(true));
   render(<Provider store={store}><FileTree /></Provider>);
   return store;

@@ -11,6 +11,7 @@ const TTL = 5_000;
 let list: Source[] = [HERE];
 let at = 0;
 let inflight: Promise<Source[]> | null = null;
+let seq = 0; // the latest request: only its answer is applied
 const listeners = new Set<() => void>();
 
 export const getSources = (): Source[] => list;
@@ -32,6 +33,7 @@ export function resetSources(): void {
   list = [HERE];
   at = 0;
   inflight = null;
+  seq++; // an answer in flight belongs to the old state
   for (const fn of listeners) fn();
 }
 
@@ -48,22 +50,28 @@ const isSource = (v: unknown): v is Source => {
     && (s.alias === undefined || typeof s.alias === 'string');
 };
 
-/** GET /sources, cached for 5 s (`force` skips the cache). A failure keeps the last list. */
+/**
+ * GET /sources, cached for 5 s. A failure keeps the last list. `force` skips the cache and starts a fresh request: an
+ * answer still in flight is dropped (after a switch to another root it lists the old root's sources).
+ */
 export function loadSources(force = false): Promise<Source[]> {
   if (!force && at && Date.now() - at < TTL) return Promise.resolve(list);
-  inflight ??= (async () => {
+  if (!force && inflight) return inflight;
+  const mine = ++seq;
+  const p = (async () => {
     try {
       const r = await fetch('/sources');
       const v: unknown = r.ok ? await r.json() : null;
-      if (Array.isArray(v) && v.every(isSource)) setSources(v);
+      if (mine === seq && Array.isArray(v) && v.every(isSource)) setSources(v);
     } catch {
       // offline or no server: keep what we have
     } finally {
-      inflight = null;
+      if (mine === seq) inflight = null; // a newer request owns `inflight` otherwise
     }
     return list;
   })();
-  return inflight;
+  inflight = p;
+  return p;
 }
 
 export const sourceById = (id: string): Source | undefined => list.find((s) => s.id === id);

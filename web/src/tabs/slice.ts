@@ -1,10 +1,15 @@
-import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { createAction, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../store/store.ts';
 
 /** `src`: the stable source id ('here', 'ref:<branch>', 'dir:<hash>'); `ref`: its branch, only when it is not 'here' (M3-16). */
 export type FileTab = { id: `file:${string}`; kind: 'file'; path: string; src: string; ref?: string };
 export type Tab = { id: 'chat'; kind: 'chat' } | FileTab;
-export type TabsState = { open: Tab[]; active: Tab['id'] }; // open[0] is always the chat
+/**
+ * open[0] is always the chat. `root`: the project the file tabs belong to (null until the first session event).
+ * `rootGen`: bumped on every root change after the first, so views keyed by it remount (the same path in another root
+ * is another file).
+ */
+export type TabsState = { open: Tab[]; active: Tab['id']; root: string | null; rootGen: number };
 /** A file to open: a path in this folder, or a path in another source. */
 export type FileArg = string | { path: string; src?: string; ref?: string };
 
@@ -24,11 +29,19 @@ const fileTab = (a: FileArg): FileTab => {
   return { id: fileTabId(f.path, f.src), kind: 'file', ...f };
 };
 
+/**
+ * The window's project root became known or changed (a switch to another folder, here or in another window). One action
+ * for every slice, so the tabs, the tree and the file state change together: the tabs become that root's saved ones
+ * (merged on the first root, replacing after), the tree shows its saved folders, the file load state is dropped.
+ * The saved state is read by the caller (the store's subscriber), before anything is persisted under the new root.
+ */
+export const enterRoot = createAction<{ root: string; first: boolean; tabs: SavedTabs | null; dirs: string[] | null }>('tabs/enterRoot');
+
 const idx = (s: TabsState, id: string) => s.open.findIndex((t) => t.id === id);
 
 export const tabsSlice = createSlice({
   name: 'tabs',
-  initialState: (): TabsState => ({ open: [CHAT], active: 'chat' }),
+  initialState: (): TabsState => ({ open: [CHAT], active: 'chat', root: null, rootGen: 0 }),
   reducers: {
     openFile: (s, a: PayloadAction<FileArg>) => {
       const tab = fileTab(a.payload);
@@ -60,14 +73,28 @@ export const tabsSlice = createSlice({
       s.active = 'chat';
     },
     /** Merge previously saved tabs in front of what is already open; the saved active tab wins if it exists. */
-    restoreTabs: (s, a: PayloadAction<SavedTabs>) => {
-      const have = new Set(s.open.map((t) => t.id));
-      const restored = a.payload.files.map(fileTab).filter((t) => !have.has(t.id) && have.add(t.id));
-      s.open = [CHAT, ...restored, ...s.open.slice(1)];
-      if (idx(s, a.payload.active) >= 0) s.active = a.payload.active as Tab['id'];
-    },
+    restoreTabs: (s, a: PayloadAction<SavedTabs>) => restore(s, a.payload, true),
   },
+  extraReducers: (b) =>
+    b.addCase(enterRoot, (s, a) => {
+      // the first root merges (tabs opened before the root was known stay); any later root replaces
+      const { first } = a.payload;
+      s.root = a.payload.root;
+      if (!first) {
+        s.rootGen++;
+        s.open = [CHAT];
+        s.active = 'chat';
+      }
+      if (a.payload.tabs) restore(s, a.payload.tabs, first);
+    }),
 });
+
+function restore(s: TabsState, saved: SavedTabs, merge: boolean): void {
+  const have = new Set(merge ? s.open.map((t) => t.id) : ['chat']);
+  const restored = saved.files.map(fileTab).filter((t) => !have.has(t.id) && have.add(t.id));
+  s.open = [CHAT, ...restored, ...(merge ? s.open.slice(1) : [])];
+  if (idx(s, saved.active) >= 0) s.active = saved.active as Tab['id'];
+}
 
 export const { openFile, activate, closeTab, closeOthers, closeRight, closeAll, restoreTabs } = tabsSlice.actions;
 

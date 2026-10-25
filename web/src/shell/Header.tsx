@@ -4,19 +4,24 @@ import { selectCommentsUi, selectPending, setPanelOpen } from '@/comments/slice.
 import { selectTree, setTreeOpen } from '@/tree/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { SessionPicker } from '@/controls/SessionPicker.tsx';
+import { restartAgent, selectRestarting, selectSwitching } from '@/controls/slice.ts';
 
 export function Header() {
   const t = useT();
   const other = getLang() === 'ru' ? 'en' : 'ru';
   const conn = useAppSelector(selectConn);
   const session = useAppSelector(selectSession);
+  const switching = useAppSelector(selectSwitching);
+  const restarting = useAppSelector(selectRestarting);
   const d = useAppDispatch();
   const panelOpen = useAppSelector(selectCommentsUi).panelOpen;
   const treeOpen = useAppSelector(selectTree).open;
   const pendingN = useAppSelector(selectPending).length;
   // the project, not the app, names the window: several windows on different projects must be told apart
   const project = session?.root.split('/').filter(Boolean).pop() ?? 'Nota Bene';
-  useEffect(() => { document.title = `${project} · Nota Bene`; }, [project]);
+  const title = session?.title ?? null;
+  useEffect(() => { document.title = `${title ? title + ' · ' : ''}${project} · Nota Bene`; }, [title, project]);
   return (
     <header className="relative z-[6] flex h-12 flex-none items-center gap-3 border-b border-border-soft bg-chrome px-4 text-xs text-muted-foreground backdrop-blur-[24px]">
       <img id="logo" src="/icon.svg" alt="Nota Bene" className="-mr-1 size-6" />
@@ -35,8 +40,20 @@ export function Header() {
         <Svg size={16}>{ICONS.dir}</Svg>
       </button>
       <span className="flex-1" />
-      <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : ''}</span>
-      <span id="session" className="font-mono text-[11px]">{session?.id?.slice(0, 8) ?? ''}</span>
+      <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : switching ? t(restarting ? 'restarting' : 'switching') : ''}</span>
+      <SessionPicker />
+      {/* enabled while busy: the escape hatch for a stuck agent (R-M4-4); only a running switch/restart disables it */}
+      <button
+        type="button"
+        id="restartBtn"
+        title={t('restartTip')}
+        disabled={switching}
+        onClick={() => d(restartAgent())}
+        className="cursor-pointer rounded-md border border-border-soft px-2 py-0.5 text-[11px] font-medium hover:text-foreground disabled:cursor-default disabled:opacity-50"
+      >
+        {t('restart')}
+      </button>
+      <span id="session" className="font-mono text-[11px]">{[session?.model, session?.id?.slice(0, 8)].filter(Boolean).join(' · ')}</span>
       {/* moves into the tab strip in M2 */}
       <button
         type="button"

@@ -1,5 +1,5 @@
 import type { Comment } from '@nota-bene/shared';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
@@ -35,6 +35,10 @@ function IconButton({ label, className = '', noTitle = false, children, ...rest 
 /** The source item as the card needs it: missing (null), still streaming, or its text. undefined = not a message source. */
 function sourceState(s: RootState, src: Comment['anchor']['source'] | undefined): null | 'streaming' | string | undefined {
   if (src?.kind !== 'message') return undefined;
+  if (src.id.startsWith('plan:')) {
+    const p = s.feed.items.find((x) => x.kind === 'permission' && `plan:${x.id}` === src.id);
+    return p?.kind === 'permission' ? String(p.input.plan ?? '') : null;
+  }
   const it = s.feed.items.find((x) => (x.kind === 'assistant' || x.kind === 'user') && x.id === src.id);
   if (!it || (it.kind !== 'assistant' && it.kind !== 'user')) return null;
   return it.kind === 'assistant' && !it.final ? 'streaming' : it.text;
@@ -249,7 +253,7 @@ export function CommentCardPopover() {
     };
   }, [card, dispatch]);
 
-  useLayoutEffect(() => {
+  const place = useCallback(() => {
     if (!card || !root.current) return;
     const { offsetWidth: w, offsetHeight: h } = root.current;
     const below = card.y + 6 + h <= window.innerHeight;
@@ -257,7 +261,16 @@ export function CommentCardPopover() {
       left: Math.max(8, Math.min(card.x, window.innerWidth - w - 8)),
       top: Math.max(8, below ? card.y + 6 : card.y - h - 6),
     });
-  }, [card, items]);
+  }, [card]);
+  useLayoutEffect(place, [place, items]);
+  // the card grows while its text is edited: keep it inside the viewport
+  const shown = !!card && !!c;
+  useEffect(() => {
+    if (!shown || !root.current || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(place);
+    ro.observe(root.current);
+    return () => ro.disconnect();
+  }, [shown, place]);
 
   if (!card || !c) return null;
   return (
