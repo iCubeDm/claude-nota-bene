@@ -10,6 +10,8 @@ export type SessionManager = {
   interrupt(): void;
   answer(permissionId: string, allow: boolean): void;
   info(): { id: string | null; root: string };
+  /** Called whenever the session id changes to a real id (first init, or a different id after resume/restart). */
+  onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
 
 type Msg = { type?: string; subtype?: string; session_id?: string };
@@ -22,6 +24,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
   let agent: AgentSession | null = null;
   let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
   const pending = new Map<string, (allow: boolean) => void>();
+  const idListeners: ((id: string, prev: string | null) => void)[] = [];
 
   const ask: PermissionAsk = (toolName, input, signal) =>
     new Promise<boolean>((resolve) => {
@@ -60,8 +63,14 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
 
   function announce(id: string | null): void {
     if (id === announced) return;
+    const prev = announced ?? null;
     announced = id;
     hub.emit({ kind: 'session', id, root: cwd });
+    if (id !== null) {
+      for (const cb of idListeners) {
+        try { cb(id, prev); } catch (e) { reportError(hub, 'session-id', e); }
+      }
+    }
   }
 
   function died(a: AgentSession, e: unknown): void {
@@ -128,5 +137,8 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
       pending.get(permissionId)?.(allow);
     },
     info: () => ({ id: sessionId, root: cwd }),
+    onSessionId(cb) {
+      idListeners.push(cb);
+    },
   };
 }
