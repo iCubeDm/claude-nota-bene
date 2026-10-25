@@ -6,6 +6,7 @@ import { useAppDispatch } from '@/store/store.ts';
 import { instructionOf, labelText, QUICK_LABELS } from './labels.ts';
 import { EmojiMenu } from './EmojiMenu.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
+import { MentionPicker } from '@/composer/MentionPicker.tsx';
 import { ShortcodePicker } from './ShortcodePicker.tsx';
 import { addComment, setPanelOpen } from './slice.ts';
 
@@ -81,6 +82,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
         className="min-h-16 w-full resize-y rounded-md border border-border-soft bg-background px-2 py-1.5 text-[13px] leading-[1.45] text-foreground focus:border-primary focus:outline-none"
       />
       <ShortcodePicker target={area} />
+      <MentionPicker target={area} />
       <div className="mt-1.5 flex flex-wrap gap-1">
         {QUICK_LABELS.map((l) => (
           <button

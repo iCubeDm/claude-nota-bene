@@ -74,6 +74,7 @@ export const en: Dict = {
   'emojiSearchPh': 'Search emoji…',
   'emojiRecent': 'Recent',
   'emojiNone': 'Nothing found',
+  atNone: 'no matches',
   'emojiGroup_smileys-emotion': 'Smileys & emotion',
   'emojiGroup_people-body': 'People & body',
   'emojiGroup_animals-nature': 'Animals & nature',

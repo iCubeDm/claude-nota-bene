@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useT } from '@/i18n/index.ts';
 import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
+import { MentionPicker } from './MentionPicker.tsx';
 import { selectDraft, setDraft } from './slice.ts';
 import { interrupt, selectBusy, selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
 
@@ -80,6 +81,7 @@ export function Composer() {
           onKeyDown={onKeyDown}
           className="max-h-[40vh] min-h-10 flex-1 resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)]"
         />
+        <MentionPicker target={ref} />
         <Button type="button" className="h-10" onClick={() => submit(false)}>
           {nPending ? t('sendN', nPending) : t('send')}
         </Button>

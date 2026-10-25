@@ -71,6 +71,7 @@ export const ru = {
   'emojiSearchPh': 'Поиск эмодзи…',
   'emojiRecent': 'Недавние',
   'emojiNone': 'Ничего не найдено',
+  atNone: 'нет совпадений',
   'emojiGroup_smileys-emotion': 'Смайлики и эмоции',
   'emojiGroup_people-body': 'Люди и тело',
   'emojiGroup_animals-nature': 'Животные и природа',
