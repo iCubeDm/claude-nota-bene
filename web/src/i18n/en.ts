@@ -133,4 +133,13 @@ export const en: Dict = {
   mode_plan_desc: 'Only reads and thinks, changes nothing; ends with a plan to approve',
   mode_auto: 'Auto',
   mode_auto_desc: 'A classifier approves safe actions itself, asks about the rest',
+  // meters (M4-08)
+  ctx: 'context',
+  ctxTip: (u: string, m: string) => `${u} of ${m} tokens — auto-compact after that`,
+  h5: '5h',
+  h5Tip: '5-hour plan limit',
+  week: 'week',
+  weekTip: 'weekly plan limit',
+  costTip: 'API cost of this session',
+  resets: (at: string) => `resets ${at}`,
 };

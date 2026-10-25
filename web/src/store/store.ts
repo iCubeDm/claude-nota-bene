@@ -12,6 +12,7 @@ import { AUDIO, VIDEO } from '../files/kinds.ts';
 import { browserPip, MediaController, type PipApi } from '../media/mediaController.ts';
 import { filesSlice } from '../files/slice.ts';
 import { readSavedDirs, setDirs, treeKey, treeSlice } from '../tree/slice.ts';
+import { statsSlice } from '../stats/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** The only way server data enters the store. */
@@ -79,7 +80,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
     },
   });
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
