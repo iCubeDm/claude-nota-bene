@@ -3,7 +3,13 @@ import type { ServerEvent } from '@nota-bene/shared';
 export type FeedItem =
   | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean }
   | { kind: 'assistant'; id: string; text: string; final: boolean } // `${uuid}:${blockIndex}`; while streaming `stream:${n}`
-  | { kind: 'tool'; id: string; name: string; arg: string; sub: boolean; error?: boolean }
+  | {
+      kind: 'tool'; id: string; name: string; arg: string; sub: boolean;
+      /** the full tool input; the one-line `arg` is only its summary */
+      input: Record<string, unknown>;
+      /** from the tool_result with the same tool_use_id; absent while the tool still runs */
+      result?: { text: string; isError: boolean };
+    }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
   | { kind: 'notice'; text: string };
@@ -23,7 +29,7 @@ export type FeedState = {
 export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0 };
 
 // Loose view of the SDK message: only the fields the feed reads (real shapes: server/test/fixtures/real-frames.json).
-type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean };
+type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
 type Sdk = {
   type?: string;
   subtype?: string;
@@ -43,7 +49,7 @@ type Sdk = {
   state?: string;
 };
 
-const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
+export const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
 
 function toolArg(input: Record<string, unknown> | undefined): string {
   for (const k of ARG_KEYS) {
@@ -51,6 +57,19 @@ function toolArg(input: Record<string, unknown> | undefined): string {
     if (v) return String(v).split('\n')[0]!.slice(0, 160);
   }
   return '';
+}
+
+/** tool_result content: a string, or blocks (text joined, images shown as [image]). */
+function resultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const b of content as Block[]) {
+    if (b?.type === 'text') parts.push(b.text ?? '');
+    else if (b?.type === 'image') parts.push('[image]');
+    else if (b?.type) parts.push(`[${b.type}]`);
+  }
+  return parts.join('\n');
 }
 
 function firstOpenIndex(items: FeedItem[]): number {
@@ -102,18 +121,22 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
           const i = firstOpenIndex(items); // k-th text block takes the k-th open stream
           items = i >= 0 ? replaceAt(items, i, final) : [...items, final];
         } else if (b.type === 'tool_use') {
-          items = [...items, { kind: 'tool', id: b.id ?? '', name: b.name ?? '', arg: toolArg(b.input), sub }];
+          items = [...items, { kind: 'tool', id: b.id ?? '', name: b.name ?? '', arg: toolArg(b.input), sub, input: b.input ?? {} }];
         }
       });
       return items === s.items ? s : { ...s, items };
     }
     case 'user': {
+      // Never a bubble (user text arrives as `user` events); tool_result blocks attach to their tool item by id.
+      // A result whose tool item is not in the feed (should not happen) is ignored.
       let items = s.items;
       for (const b of blocks(m)) {
-        if (b.type !== 'tool_result' || !b.is_error) continue;
+        if (b.type !== 'tool_result') continue;
         const i = items.findIndex((it) => it.kind === 'tool' && it.id === b.tool_use_id);
         const cur = items[i];
-        if (cur && cur.kind === 'tool') items = replaceAt(items, i, { ...cur, error: true });
+        if (!cur || cur.kind !== 'tool') continue;
+        const isError = !!b.is_error;
+        items = replaceAt(items, i, { ...cur, result: { text: resultText(b.content), isError } });
       }
       return items === s.items ? s : { ...s, items };
     }

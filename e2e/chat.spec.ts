@@ -127,3 +127,23 @@ test('language toggle switches the placeholder @chat', async ({ page }) => {
   await page.locator('#langBtn').click();
   await expect(page.getByPlaceholder(en.composerPh)).toBeVisible();
 });
+
+test('tool line expands to the command and the output, also after a reload (hub replay) @chat', async ({ page }) => {
+  await open(page);
+  const text = uniq('run a tool');
+  await send(page, text);
+  await expect(donesAfter(page, text).first()).toHaveText(DONE);
+  const expand = async () => {
+    const line = page.getByRole('button', { name: /Bash · echo tool-cmd-marker/ }).last();
+    await line.click();
+    await expect(line).toHaveAttribute('aria-expanded', 'true');
+    const panel = page.getByTestId('tool-panel').last();
+    await expect(panel).toContainText('echo tool-cmd-marker');
+    await expect(panel).toContainText('tool-out-marker');
+    await expect(panel).toContainText('second line');
+  };
+  await expand();
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await expand();
+});

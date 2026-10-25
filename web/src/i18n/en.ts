@@ -76,4 +76,10 @@ export const en: Dict = {
   'emojiGroup_objects': 'Objects',
   'emojiGroup_symbols': 'Symbols',
   'emojiGroup_flags': 'Flags',
+  // expandable tool lines (M1-19)
+  toolRunning: 'running…',
+  showAll: 'show all',
+  toolInput: 'Input',
+  toolNoOutput: 'no output',
+  toolOutput: 'Output',
 };

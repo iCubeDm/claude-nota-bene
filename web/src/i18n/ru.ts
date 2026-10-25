@@ -73,4 +73,10 @@ export const ru = {
   'emojiGroup_objects': 'Предметы',
   'emojiGroup_symbols': 'Символы',
   'emojiGroup_flags': 'Флаги',
+  // expandable tool lines (M1-19)
+  toolRunning: 'выполняется…',
+  showAll: 'показать всё',
+  toolInput: 'Вход',
+  toolNoOutput: 'нет вывода',
+  toolOutput: 'Результат',
 };

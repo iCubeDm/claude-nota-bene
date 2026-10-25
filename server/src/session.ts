@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk } from './agent/types.ts';
+import { stripUserFrameImages } from './agent/transcript.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { saveSession } from './state.ts';
@@ -46,7 +47,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     try {
       for await (const m of a.messages) {
         if (agent !== a) return;
-        hub.emit({ kind: 'sdk', m });
+        hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) });
         const { type, subtype, session_id } = m as Msg;
         // the CLI sends init at the start of every turn: act only when the id is new
         if (type === 'system' && subtype === 'init' && session_id) {
