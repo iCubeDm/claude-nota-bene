@@ -84,6 +84,15 @@ const errors = (c: Client) => c.events.filter((e): e is Extract<ServerEvent, { k
 const switched = (c: Client, id: string | null) => lastOf(c, 'session')?.id === id && lastOf(c, 'comments') !== undefined
   && c.events.findLastIndex((e) => e.kind === 'comments') > c.events.findLastIndex((e) => e.kind === 'session');
 
+/** After `mark`: a replay, then session(id), then comments, all received by this client (not merely server-side state). */
+function switchedSince(c: Client, mark: number, id: string | null): boolean {
+  const ev = c.events.slice(mark);
+  const r = ev.findIndex((e) => e.kind === 'replay');
+  if (r < 0) return false;
+  const se = ev.findIndex((e, i) => i > r && e.kind === 'session' && e.id === id);
+  return se > r && ev.some((e, i) => i > se && e.kind === 'comments');
+}
+
 const comment = (id: string): Comment => ({
   id, text: `t-${id}`, status: 'pending', createdAt: 1,
   anchor: { source: { kind: 'message', id: 'm1' }, quote: 'q', prefix: '', suffix: '', start: 0, end: 1 },
@@ -238,8 +247,9 @@ describe('restart', () => {
     const s = await boot({ resume: SA });
     const c = await connect(s.url);
     await until(() => lastOf(c, 'comments') !== undefined);
+    const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
-    await until(() => s.backend.starts.length === 2 && switched(c, SA));
+    await until(() => s.backend.starts.length === 2 && switchedSince(c, mark, SA));
     expect(s.backend.starts[1]).toMatchObject({ cwd: A, resume: SA });
     expect(lastOf(c, 'session')).toMatchObject({ id: SA, root: A });
     expect(c.events.filter((e) => e.kind === 'replay').at(-1)!.events.length).toBeGreaterThan(0);
@@ -249,8 +259,9 @@ describe('restart', () => {
     const s = await boot();
     const c = await connect(s.url);
     await until(() => lastOf(c, 'comments') !== undefined);
+    const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
-    await until(() => s.backend.starts.length === 2 && switched(c, null));
+    await until(() => s.backend.starts.length === 2 && switchedSince(c, mark, null));
     expect(s.backend.starts[1]).toEqual({ cwd: A, permissionMode: 'auto' });
   });
 
@@ -259,8 +270,9 @@ describe('restart', () => {
     const c = await connect(s.url);
     c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
     await until(() => c.events.some(isResult));
+    const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
-    await until(() => s.backend.starts.length === 2 && switched(c, 'fake-session'));
+    await until(() => s.backend.starts.length === 2 && switchedSince(c, mark, 'fake-session'));
     expect(s.backend.starts[1]).toMatchObject({ resume: 'fake-session' });
   });
 });
@@ -276,7 +288,7 @@ describe('restart while busy', () => {
     expect(errors(c)[0]).toMatchObject({ where: 'switch' });
     const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
-    await until(() => s.backend.starts.length === 2);
+    await until(() => s.backend.starts.length === 2 && switchedSince(c, mark, 'fake-session'));
     const after = c.events.slice(mark);
     expect(after.some((e) => e.kind === 'replay')).toBe(true);
     expect(after.find((e) => e.kind === 'session')).toMatchObject({ id: 'fake-session', root: A });
@@ -314,8 +326,9 @@ describe('fix round 1', () => {
     const c = await connect(s.url);
     c.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [comment('c1')] }));
     await until(() => lastOf(c, 'comments')?.items.length === 1);
+    const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
-    await until(() => s.backend.starts.length === 2 && switched(c, null));
+    await until(() => s.backend.starts.length === 2 && switchedSince(c, mark, null));
     expect(lastOf(c, 'comments')!.items).toEqual([comment('c1')]);
     // and they still follow the session to its first id
     c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
@@ -328,8 +341,9 @@ describe('fix round 1', () => {
     const c = await connect(s.url);
     c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'run' }));
     await until(() => c.events.some((e) => e.kind === 'permission'));
+    const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
-    await until(() => s.backend.starts.length === 2 && switched(c, 'fake-session'));
+    await until(() => s.backend.starts.length === 2 && switchedSince(c, mark, 'fake-session'));
     expect(c.events.find((e) => e.kind === 'permission-done')).toMatchObject({ allow: false });
     const late = await connect(s.url);
     await until(() => late.events.length > 0);
