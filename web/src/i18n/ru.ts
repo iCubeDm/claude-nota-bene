@@ -34,6 +34,9 @@ export const ru = {
   allowQ: (tool: string) => `Разрешить ${tool}?`,
   allow: 'Разрешить',
   deny: 'Запретить',
+  planQ: 'План готов — утвердить?',
+  approvePlan: (m: string) => `Утвердить · дальше «${m}»`,
+  keepPlanning: 'Доработать план',
   allowed: '✓ разрешено',
   denied: '✕ запрещено',
   mermaidError: (msg: string) => `ошибка mermaid: ${msg}`, // new in M0 (the prototype had it in English only)

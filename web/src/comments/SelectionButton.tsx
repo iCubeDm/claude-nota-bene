@@ -29,7 +29,7 @@ function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | n
     const id = root?.dataset.itemId;
     if (!root || !id || !pane.contains(root)) return null;
     const kind = root.dataset.kind;
-    if (!(kind === 'user' || (kind === 'assistant' && root.dataset.final === 'true'))) return null;
+    if (!(kind === 'user' || kind === 'plan' || (kind === 'assistant' && root.dataset.final === 'true'))) return null;
     return { root, source: { kind: 'message', id } };
   }
   let root: HTMLElement | null = null;

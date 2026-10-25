@@ -110,4 +110,20 @@ describe('server', () => {
     const replay = b.events[0]!;
     if (replay.kind === 'replay') expect(replay.events.some((e) => e.kind === 'mode')).toBe(false); // live state, not history
   });
+
+  it('an allow that carries a modified input still runs the original input', async () => {
+    const seen: unknown[] = [];
+    const base = fakeBackend([{ text: 'ok', ask: { toolName: 'Bash', input: { command: 'ls' } } }]);
+    // the agent side: what the backend's ask resolves with is what the SDK adapter turns into updatedInput
+    const backend = { ...base, start: (o: Parameters<typeof base.start>[0]) => base.start({ ...o, ask: async (...a) => { const r = await o.ask(...a); seen.push(r); return r; } }) };
+    const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist });
+    closers.push(s.close);
+    const c = await connect(s.url);
+    c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'run' }));
+    await until(() => c.events.some((e) => e.kind === 'permission'));
+    const p = c.events.find((e) => e.kind === 'permission') as Extract<ServerEvent, { kind: 'permission' }>;
+    c.ws.send(JSON.stringify({ type: 'permission', id: p.id, allow: true, input: { command: 'rm -rf /' } }));
+    await until(() => seen.length === 1);
+    expect(seen[0]).toBe(true); // a plain allow: the adapter echoes the ORIGINAL input
+  });
 });

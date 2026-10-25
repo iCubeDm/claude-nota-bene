@@ -168,8 +168,8 @@ export const interrupt = (): AppThunk => (_d, getState, { send }) => {
   if (selectBusy(getState())) send({ type: 'interrupt' });
 };
 
-export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _g, { send }) => {
-  send({ type: 'permission', id, allow });
+export const answerPermission = (id: string, allow: boolean, input?: Record<string, unknown>): AppThunk => (_d, _g, { send }) => {
+  send({ type: 'permission', id, allow, ...(input ? { input } : {}) });
 };
 
 /**
@@ -178,6 +178,7 @@ export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _
  * item, so the " · time" part of `reply` is dropped rather than invented.
  */
 export const selectReplyLabel = (s: RootState, messageId: string): string | null => {
+  if (messageId.startsWith('plan:')) return s.feed.items.some((it) => it.kind === 'permission' && `plan:${it.id}` === messageId) ? t('mode_plan') : null;
   let n = 0;
   for (const it of s.feed.items) {
     if (it.kind === 'assistant' && it.final) n++;

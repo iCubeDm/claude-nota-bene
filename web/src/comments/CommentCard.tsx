@@ -35,6 +35,10 @@ function IconButton({ label, className = '', noTitle = false, children, ...rest 
 /** The source item as the card needs it: missing (null), still streaming, or its text. undefined = not a message source. */
 function sourceState(s: RootState, src: Comment['anchor']['source'] | undefined): null | 'streaming' | string | undefined {
   if (src?.kind !== 'message') return undefined;
+  if (src.id.startsWith('plan:')) {
+    const p = s.feed.items.find((x) => x.kind === 'permission' && `plan:${x.id}` === src.id);
+    return p?.kind === 'permission' ? String(p.input.plan ?? '') : null;
+  }
   const it = s.feed.items.find((x) => (x.kind === 'assistant' || x.kind === 'user') && x.id === src.id);
   if (!it || (it.kind !== 'assistant' && it.kind !== 'user')) return null;
   return it.kind === 'assistant' && !it.final ? 'streaming' : it.text;

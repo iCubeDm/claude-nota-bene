@@ -175,6 +175,8 @@ export async function startServer(o: {
             manager.interrupt();
             break;
           case 'permission':
+            // msg.input is deliberately ignored: a client must never rewrite the input of an approved tool call
+            // (the WS also accepts origin-less connections). The agent gets the ORIGINAL input back, as in the prototype.
             manager.answer(msg.id, msg.allow);
             break;
           case 'command':
