@@ -196,7 +196,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Favicon = NB circle coloured by state: idle (purple), working (blinks orange/purple, orange = the working dot), waiting for you (red), done while away (green).
 - [ ] Server errors as toasts (dedup ×N).
 - [ ] `--chrome` (Claude in Chrome tools) enabled.
-- [ ] ↻ Server button: restart the server and resume the same session (prototype parity; the launcher relaunches with `--continue`).
+- [ ] ↻ restarts the agent in-process and resumes the same session (R-M4-1); available while busy as the escape hatch; M5's launcher adds a full server restart.
 - [ ] Background-task line above the composer: running shell tasks and subagents with elapsed time (prototype parity, added 2026-10-25; M2 replaces it with the indicator and drawer).
 
 **Launch & self-hosting (M5)**
