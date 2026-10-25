@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
+import { HighlightLayer } from './comments/HighlightLayer.tsx';
 import { CommentPopup } from './comments/CommentPopup.tsx';
 import { SelectionButton, type PendingSelection } from './comments/SelectionButton.tsx';
 import { Feed } from './feed/Feed.tsx';
@@ -19,6 +20,7 @@ export function App() {
         >
           <Feed />
         </div>
+        <HighlightLayer />
       </main>
       <SelectionButton onComment={setPending} />
       {pending && <CommentPopup pending={pending} onClose={close} />}
