@@ -916,9 +916,10 @@ function toast(title, msg) {
 
 // ---------- tab icon = agent state ----------
 // the favicon is the NB note alone, and its colour is the agent state, so a background Chrome tab tells you when
-// to come back: working — purple, blinking; needs you (a permission card is open) — amber; finished while you
-// were away — green (until you look at the tab); idle — calm purple
-const FAV = { idle: '#8b6cf2', work: '#8b6cf2', workHi: '#c9bbff', wait: '#e8930c', done: '#22b45a' };
+// to come back: working — blinks orange/purple (orange = the "agent is working" dot above the composer; the old
+// purple/light-purple blink was unreadable at 16px); needs you (a permission card is open) — red, so it is not
+// confused with the orange of working; finished while you were away — green (until you look); idle — calm purple
+const FAV = { idle: '#8b6cf2', work: '#8b6cf2', workHi: '#f0761f', wait: '#e5484d', done: '#22b45a' };
 const favSvg = (fill) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15.5" fill="${fill}"/>
   <g fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 21.5v-11l6.5 11v-11"/>
   <path d="M18 10.5h3.2a2.75 2.75 0 0 1 0 5.5H18zM18 16h3.7a2.75 2.75 0 0 1 0 5.5H18z"/></g></svg>`;
