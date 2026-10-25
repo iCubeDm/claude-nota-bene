@@ -35,7 +35,9 @@ function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | n
   let root: HTMLElement | null = null;
   for (let e: HTMLElement | null = start.closest<HTMLElement>('[data-file-path]'); e && pane.contains(e); e = e.parentElement?.closest<HTMLElement>('[data-file-path]') ?? null) root = e;
   const path = root?.dataset.filePath;
-  return root && path ? { root, source: { kind: 'file', path } } : null;
+  // another source's view carries its ref on the pane (M3-16): the comment names `path @ ref`
+  const ref = pane.dataset.fileRef;
+  return root && path ? { root, source: ref ? { kind: 'file', path, ref } : { kind: 'file', path } } : null;
 }
 
 /** The selection inside one commentable root, clipped to that root. */

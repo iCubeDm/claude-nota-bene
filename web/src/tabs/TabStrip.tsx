@@ -2,7 +2,9 @@ import { useSyncExternalStore, type ReactNode } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { AUDIO, IMAGE, VIDEO } from '@/files/kinds.ts';
-import { revealInTree } from '@/tree/slice.ts';
+import { fileKey } from '@/files/sources.ts';
+import { SourceChip } from '@/files/SourcePicker.tsx';
+import { revealFile } from '@/tree/slice.ts';
 import { useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
 import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
@@ -25,7 +27,7 @@ const basename = (p: string) => p.split('/').pop() || p;
 function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; last: boolean; playing: boolean }) {
   const t = useT();
   const d = useAppDispatch();
-  const badge = useAppSelector((s) => (tab.kind === 'file' ? selectPendingCountByPath(s)[tab.path] ?? 0 : 0));
+  const badge = useAppSelector((s) => (tab.kind === 'file' ? selectPendingCountByPath(s)[fileKey(tab.path, tab.ref)] ?? 0 : 0));
   const label = tab.kind === 'chat' ? t('chat') : basename(tab.path);
   const isChat = tab.kind === 'chat';
   return (
@@ -37,7 +39,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           aria-selected={active}
           data-tab={tab.id}
           data-playing={playing || undefined}
-          title={tab.kind === 'file' ? tab.path : undefined}
+          title={tab.kind === 'file' ? (tab.ref ? `${tab.path} @ ${tab.ref}` : tab.path) : undefined}
           onClick={() => d(activate(tab.id))}
           onAuxClick={(e) => {
             if (e.button === 1 && !isChat) { e.preventDefault(); d(closeTab(tab.id)); }
@@ -50,6 +52,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           <span className="hidden size-1.5 flex-none animate-pulse rounded-full bg-primary group-data-[playing=true]:inline-block" />
           <Svg>{iconFor(tab)}</Svg>
           <span className="truncate">{label}</span>
+          {tab.kind === 'file' && tab.ref && <SourceChip name={tab.ref} />}
           {badge > 0 && <span data-badge className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{badge}</span>}
           {!isChat && (
             <button
@@ -73,7 +76,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(tab.path)}>{t('copyPath')}</ContextMenuItem>
-            <ContextMenuItem onSelect={() => d(revealInTree(tab.path))}>{t('revealInTree')}</ContextMenuItem>
+            <ContextMenuItem onSelect={() => d(revealFile(tab.path, tab.src))}>{t('revealInTree')}</ContextMenuItem>
           </>
         )}
       </ContextMenuContent>

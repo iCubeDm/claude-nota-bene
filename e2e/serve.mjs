@@ -29,6 +29,14 @@ function seedFiles(dir) {
   ff('-f', 'lavfi', '-i', 'sine=d=3', path.join(dir, 'media/s.mp3'));
   fs.writeFileSync(path.join(dir, 'big.log'), 'x'.repeat(3 * 1024 * 1024));
   fs.symlinkSync(os.tmpdir(), path.join(dir, 'link-out'));
+  // M3-16: the project is a git repo with one more worktree, on feature/x, outside the project (removed with tmp)
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'e2e', GIT_AUTHOR_EMAIL: 'e2e@x', GIT_COMMITTER_NAME: 'e2e', GIT_COMMITTER_EMAIL: 'e2e@x' };
+  const git = (...a) => execFileSync('git', a, { cwd: dir, env, stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  git('commit', '-q', '--allow-empty', '-m', 'init');
+  const wt = path.join(tmp, 'wt-x');
+  git('worktree', 'add', '-q', '-b', 'feature/x', wt);
+  fs.writeFileSync(path.join(wt, 'only-x.md'), '# Only on feature/x\n\nwritten by another agent\n');
 }
 
 const child = spawn(

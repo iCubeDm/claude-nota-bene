@@ -1,5 +1,6 @@
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { Comment } from '@nota-bene/shared';
+import { fileKey } from '../files/sources.ts';
 // store.ts imports this file for the reducer; every use of serverEvent below is lazy (inside callbacks), so the cycle is safe.
 import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
 
@@ -89,9 +90,14 @@ const selectSentByMessage = createSelector([selectComments], (items) => {
 });
 export const selectSentFor = (s: RootState, messageId: string): Comment[] => selectSentByMessage(s)[messageId] ?? EMPTY;
 
-/** Pending comments per project-relative file path (anchor.source of kind 'file'). */
+/** Pending comments per file, keyed by `fileKey(path, ref)` (the path alone in this folder). */
 export const selectPendingCountByPath = createSelector([selectComments], (items) => {
   const m: Record<string, number> = {};
-  for (const c of items) if (c.status === 'pending' && c.anchor.source.kind === 'file') m[c.anchor.source.path] = (m[c.anchor.source.path] ?? 0) + 1;
+  for (const c of items) {
+    const src = c.anchor.source;
+    if (c.status !== 'pending' || src.kind !== 'file') continue;
+    const k = fileKey(src.path, src.ref);
+    m[k] = (m[k] ?? 0) + 1;
+  }
   return m;
 });

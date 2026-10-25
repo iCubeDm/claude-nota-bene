@@ -15,7 +15,7 @@ export function Panes({ chat }: { chat: ReactNode }) {
         {chat}
       </main>
       {open.map((tab) =>
-        tab.kind === 'file' ? <FileView key={tab.id} path={tab.path} active={active === tab.id} /> : null,
+        tab.kind === 'file' ? <FileView key={tab.id} path={tab.path} src={tab.src} refName={tab.ref} active={active === tab.id} /> : null,
       )}
     </>
   );

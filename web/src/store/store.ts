@@ -6,6 +6,7 @@ import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { activate, readSavedTabs, restoreTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
+import { loadSources } from '../files/sources.ts';
 import { AUDIO, VIDEO } from '../files/kinds.ts';
 import { browserPip, MediaController, type PipApi } from '../media/mediaController.ts';
 import { filesSlice } from '../files/slice.ts';
@@ -88,7 +89,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   let dirs = store.getState().tree.dirs;
   let restoredRoot: string | null = null;
   store.subscribe(() => {
-    const st = store.getState();
+    let st = store.getState();
     const now = st.comments.ui.panelOpen;
     if (now !== panelOpen) {
       panelOpen = now;
@@ -99,14 +100,20 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
       // first time this root is known: restore its saved tabs (the dispatch re-enters this subscriber and persists the result)
       restoredRoot = root;
       const saved = readSavedTabs(root);
+      // source ids are stable (M3-16): every saved tab comes back at once, whatever /sources says; a tab whose source
+      // is gone keeps its place and says so in its view. The load feeds the picker and absolute refs.
+      void loadSources();
       if (saved) store.dispatch(restoreTabs(saved));
       const savedDirs = readSavedDirs(root);
       if (savedDirs) store.dispatch(setDirs([...new Set([...savedDirs, ...store.getState().tree.dirs])]));
+      // the restores re-entered this subscriber, which persisted them; `st` is stale now and would write the
+      // pre-restore (empty) state back over them
+      st = store.getState();
     }
     if (st.tree.dirs !== dirs) {
       dirs = st.tree.dirs;
       if (restoredRoot) {
-        try { localStorage.setItem(treeKey(restoredRoot), JSON.stringify(dirs)); } catch { /* not persisted */ }
+        try { localStorage.setItem(treeKey(restoredRoot, st.tree.src), JSON.stringify(dirs)); } catch { /* not persisted */ }
       }
     }
     if (st.tabs !== tabs) {

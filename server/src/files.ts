@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { TreeEntry } from '@nota-bene/shared';
 
-const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store']);
+export const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store']);
 // the tree shows build output; the file walk (the prototype's SKIP_DIRS) does not
 const SKIP_DIRS = new Set([...HIDDEN, 'dist', 'build', '.next', '__pycache__', '.venv', 'venv', '.cache']);
 const CAP = 20_000;
@@ -70,8 +70,12 @@ export async function listDir(abs: string, root: string): Promise<TreeEntry[]> {
     }
     out.push({ name: e.name, dir });
   }
-  return out.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name, 'ru', { numeric: true }));
+  return sortEntries(out);
 }
+
+/** Folders first, then names in `localeCompare(…, 'ru', { numeric: true })` order (the prototype's tree order). */
+export const sortEntries = (out: TreeEntry[]): TreeEntry[] =>
+  out.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name, 'ru', { numeric: true }));
 
 const cache = new Map<string, { at: number; files: Promise<string[]>; refreshing: boolean }>();
 
@@ -119,12 +123,25 @@ async function walk(root: string): Promise<string[]> {
 
 const GIT_TIMEOUT = 5_000;
 
+/**
+ * The environment of every git call: pathspecs are literal (a file named `:(top)x` is just a name), no optional locks
+ * (we only read, while agents may be committing), and an inherited GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE (a server
+ * started from a git hook, say) can never point git at another repo.
+ */
+export function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_LITERAL_PATHSPECS: '1', GIT_OPTIONAL_LOCKS: '0' };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  return env;
+}
+
 function gitFiles(root: string): Promise<string[] | null> {
   return new Promise((resolve) => {
     execFile(
       'git',
-      ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-      { cwd: root, maxBuffer: 64 << 20, timeout: GIT_TIMEOUT },
+      ['-c', 'core.fsmonitor=false', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+      { cwd: root, env: gitEnv(), maxBuffer: 64 << 20, timeout: GIT_TIMEOUT },
       (err, out) => {
         if (err || !out) return resolve(null); // not a repo, no git, timeout, or an empty repo: walk instead
         resolve(out.split('\0').filter(Boolean));
@@ -166,7 +183,7 @@ async function existingFiles(root: string, rels: string[]): Promise<string[]> {
 }
 
 // folders as `dir/` entries (the prototype's way, so that an @ pick of a folder works), folders first
-function withDirs(files: string[]): string[] {
+export function withDirs(files: string[]): string[] {
   const dirs = new Set<string>();
   for (const f of files) for (let i = f.indexOf('/'); i >= 0; i = f.indexOf('/', i + 1)) dirs.add(f.slice(0, i + 1));
   return [...dirs, ...files];

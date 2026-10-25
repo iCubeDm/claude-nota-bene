@@ -91,6 +91,13 @@ export const ru = {
   files: 'Файлы',
   refresh: 'Обновить',
   filterPh: 'Фильтр файлов…',
+  // ветки и worktree (M3-16)
+  sourcePick: 'Источник',
+  sourceHere: 'эта папка',
+  sourceWorktree: 'worktree',
+  sourceBranch: 'ветка',
+  readOnly: 'только чтение',
+  sourceGone: 'Этой ветки или worktree больше нет',
   fileTree: 'Дерево файлов',
   // file viewers (M3-08)
   tooLarge: 'Файл слишком большой для показа (больше 2 МБ)',

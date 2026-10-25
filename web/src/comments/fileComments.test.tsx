@@ -252,7 +252,7 @@ it('two jumps in a row: the last one wins', async () => {
   const store = setup([fileComment(), second]);
   fireEvent.click(quoteOf('f1'));
   fireEvent.click(quoteOf('f2'));
-  expect(store.getState().files.jump).toEqual({ path: 'docs/n.md', id: 'f2' });
+  expect(store.getState().files.jump).toEqual({ path: 'docs/n.md', src: 'here', id: 'f2' });
   await waitFor(() => expect(scrolls).toHaveLength(1));
   expect(scrolls[0].top).toBe(target(0)); // "second para" starts its own paragraph
   await frames();

@@ -10,6 +10,8 @@ import { useT } from '@/i18n/index.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
+import { isFixed, sourcesKnown, useSources } from './sources.ts';
+import { SourceChip } from './SourcePicker.tsx';
 import { clearJump, dropFileLoad, selectJump, setFileLoad } from './slice.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -21,12 +23,15 @@ type Loaded =
   | { s: 'tooLarge' }
   | { s: 'binary' }
   | { s: 'gone' }
+  | { s: 'sourceGone' }
   | { s: 'error'; message: string };
 
 /** HEAD for the size, a Range probe for NUL, only then the whole body. */
-async function load(url: string, signal: AbortSignal): Promise<Loaded> {
+/** `other`: another source; the server answers 400 for a source id it does not know (the branch was deleted). */
+async function load(url: string, signal: AbortSignal, other: boolean): Promise<Loaded> {
   const head = await fetch(url, { method: 'HEAD', signal });
   if (head.status === 404) return { s: 'gone' };
+  if (other && head.status === 400) return { s: 'sourceGone' };
   if (!head.ok) return { s: 'error', message: `${head.status} ${head.statusText}`.trim() };
   if (Number(head.headers.get('content-length') ?? 0) > MAX_BYTES) return { s: 'tooLarge' };
   const probe = await fetch(url, { headers: { Range: `bytes=0-${PROBE - 1}` }, signal });
@@ -61,13 +66,22 @@ function CodeText({ text, path }: { text: string; path: string }) {
   return <code ref={ref} />;
 }
 
-export function FileView({ path, active }: { path: string; active: boolean }) {
+/**
+ * One open file. `src`/`refName`: another source (a worktree or a branch; M3-16), shown read-only with a chip. A branch
+ * view does not reload after a turn (it only changes with a commit); a worktree view does, like this folder's.
+ */
+export function FileView({ path, active, src = 'here', refName }: { path: string; active: boolean; src?: string; refName?: string }) {
   const t = useT();
   const dispatch = useAppDispatch();
   const kind = kindOf(path);
   const media = kind !== 'md' && kind !== 'text';
-  const tabId = fileTabId(path);
-  const url = fileUrl(path);
+  const tabId = fileTabId(path, src);
+  const url = fileUrl(path, undefined, src);
+  const ref = src === 'here' ? undefined : refName;
+  const sources = useSources();
+  const fixed = isFixed(src, sources);
+  // the tab stays (nothing is dropped or rewritten); its view says the source is gone
+  const srcGone = src !== 'here' && sourcesKnown() && !sources.some((x) => x.id === src);
   const turnSeq = useAppSelector(selectTurnSeq);
   const [rev, setRev] = useState(0);
   const [data, setData] = useState<Loaded | null>(null);
@@ -86,8 +100,8 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
   useEffect(() => {
     if (seenTurn.current === turnSeq) return;
     seenTurn.current = turnSeq;
-    setRev((r) => r + 1);
-  }, [turnSeq]);
+    if (!fixed) setRev((r) => r + 1);
+  }, [turnSeq, fixed]);
 
   // image/media: a reload only matters after a failed load; it retries under a new cache-busting key
   useEffect(() => {
@@ -106,28 +120,29 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
       loadedRev.current = { path, rev }; // an interrupted load stays unmarked and runs again
       setData(r);
     };
-    load(url, ac.signal).then(done, (e: unknown) => done({ s: 'error', message: e instanceof Error ? e.message : String(e) }));
+    load(url, ac.signal, src !== 'here').then(done, (e: unknown) => done({ s: 'error', message: e instanceof Error ? e.message : String(e) }));
     return () => ac.abort();
-  }, [media, active, path, rev, url]);
+  }, [media, active, path, rev, url, src]);
 
   // the load state comments read (orphan or unknown); published after the commit, so the text is in the DOM by then
   useEffect(() => {
     if (media) return;
-    dispatch(setFileLoad({ path, s: 'loading' }));
-    return () => void dispatch(dropFileLoad(path)); // tab closed: its comments go back to "unknown"
-  }, [media, path, dispatch]);
+    dispatch(setFileLoad({ path, ref, s: 'loading' }));
+    return () => void dispatch(dropFileLoad({ path, ref })); // tab closed: its comments go back to "unknown"
+  }, [media, path, ref, dispatch]);
   useEffect(() => {
     if (media || !data) return;
-    if (data.s === 'error') dispatch(setFileLoad({ path, s: 'loading' })); // transient: neither loaded nor gone
-    else dispatch(setFileLoad({ path, s: data.s === 'text' ? 'loaded' : 'gone' }));
-  }, [media, data, path, dispatch]);
+    // transient, or a deleted source (it may come back): neither loaded nor gone
+    if (data.s === 'error' || data.s === 'sourceGone') dispatch(setFileLoad({ path, ref, s: 'loading' }));
+    else dispatch(setFileLoad({ path, ref, s: data.s === 'text' ? 'loaded' : 'gone' }));
+  }, [media, data, path, ref, dispatch]);
 
   // "jump to source" (CommentCard): once this view shows fresh text and is visible, scroll to the fragment and flash it
   const jump = useAppSelector(selectJump);
   const comments = useAppSelector(selectComments);
   const pane = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (jump?.path !== path || !active || !data) return;
+    if (jump?.path !== path || jump.src !== src || !active || !data) return;
     const fresh = loadedRev.current?.path === path && loadedRev.current.rev === rev;
     if (!fresh) return; // a stale view reloads on activation: wait for that load
     dispatch(clearJump());
@@ -138,7 +153,7 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
     if (!range) return; // orphaned: the tab is open, nothing to point at
     scrollRangeIntoView(range, el);
     flashRange(el, range);
-  }, [jump, active, data, rev, path, comments, dispatch]);
+  }, [jump, active, data, rev, path, src, comments, dispatch]);
 
   const note = (key: 'tooLarge' | 'binary' | 'fileGone') => (
     <p className="p-4 text-sm text-muted-foreground">
@@ -153,9 +168,11 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
   const onError = () => setFailed(true);
   const large = data?.s === 'text' && kind === 'text' && data.text.length > HIGHLIGHT_MAX;
 
+  const goneSrc = <p data-source-gone className="p-4 text-sm text-muted-foreground">{t('sourceGone')}</p>;
+
   let body;
-  if (media && failed) {
-    body = <div data-pane={tabId} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">{gone}</div>;
+  if (media && (failed || srcGone)) {
+    body = <div data-pane={tabId} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">{srcGone ? goneSrc : gone}</div>;
   } else if (kind === 'image') {
     body = (
       // M3-13 relies on data-pane as the pane's scroll container; data-file-path (text/md only) marks the text root
@@ -183,14 +200,15 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
     const inner =
       data == null ? null
       : data.s === 'text' ? (
-        kind === 'md' ? <div className="mx-auto max-w-3xl p-4" onClick={(e) => refClick(e, dispatch)}><Markdown text={data.text} final baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
+        kind === 'md' ? <div className="mx-auto max-w-3xl p-4" onClick={(e) => refClick(e, dispatch, src)}><Markdown text={data.text} final src={src} baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
         : <pre className="m-0 p-4 font-mono text-xs leading-relaxed whitespace-pre"><CodeText text={data.text} path={path} /></pre>
       )
       : data.s === 'error' ? <p className="p-4 text-sm text-destructive">{data.message}</p>
+      : data.s === 'sourceGone' ? goneSrc
       : note(data.s === 'gone' ? 'fileGone' : data.s);
     body = (
       // data-file-path only while the text is shown: a note or an error is not commentable and has no anchors
-      <div ref={pane} data-pane={tabId} data-file-path={data?.s === 'text' ? path : undefined} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">
+      <div ref={pane} data-pane={tabId} data-file-path={data?.s === 'text' ? path : undefined} data-file-ref={ref} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">
         {inner}
         <HighlightLayer pane={tabId} />
       </div>
@@ -200,7 +218,8 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
   return (
     <div hidden={!active} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
       <div data-anchor-skip className="flex h-8 flex-none items-center gap-2 border-b border-border-soft bg-chrome px-3 font-mono text-[11.5px] text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate" title={path}>{path}</span>
+        <span className="min-w-0 flex-1 truncate" title={ref ? `${path} @ ${ref}` : path}>{path}</span>
+        {ref && <SourceChip name={ref} />}
         {large && <span>{t('noHighlight')}</span>}
         <button type="button" aria-label={t('reload')} title={t('reload')} onClick={() => setRev((r) => r + 1)} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>

@@ -65,3 +65,13 @@ test('comment images are ids', () => {
   expect(parseClientMessage(comments(comment({ images: ['../x'] })))).toHaveProperty('error');
   expect(parseClientMessage(comments(comment({ images: [H.toUpperCase()] })))).toHaveProperty('error');
 });
+
+test('a file anchor keeps its ref (branch), a string of at most 200 chars', () => {
+  const src = { kind: 'file', path: 'a.md', ref: 'feature/x' };
+  const c = comment({ anchor: { ...anchor, source: { ...src, junk: 1 } } });
+  expect(parseClientMessage(comments(c))).toEqual({ type: 'comments', items: [comment({ anchor: { ...anchor, source: src } })] });
+  expect(parseClientMessage(comments(comment({ anchor: { ...anchor, source: { kind: 'file', path: 'a.md', ref: 3 } } })))).toHaveProperty('error');
+  expect(parseClientMessage(comments(comment({ anchor: { ...anchor, source: { kind: 'file', path: 'a.md', ref: 'x'.repeat(201) } } })))).toHaveProperty('error');
+  const plain = comment({ anchor: { ...anchor, source: { kind: 'file', path: 'a.md' } } });
+  expect(parseClientMessage(comments(plain))).toEqual({ type: 'comments', items: [plain] });
+});

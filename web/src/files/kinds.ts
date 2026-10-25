@@ -29,9 +29,9 @@ function resolveIn(baseDir: string, p: string): string | null {
 
 /**
  * URL of a project file. Relative paths resolve against `baseDir` (project-relative; none = project root).
- * A path that would climb above the root is sent as-is, so the server answers 403.
+ * A path that would climb above the root is sent as-is, so the server answers 403. `src`: another source (M3-16).
  */
-export function fileUrl(p: string, baseDir?: string): string {
+export function fileUrl(p: string, baseDir?: string, src?: string): string {
   if (/^(https?:|data:|blob:)/.test(p)) return p;
   let path = p;
   try {
@@ -40,7 +40,7 @@ export function fileUrl(p: string, baseDir?: string): string {
     // keep raw
   }
   if (baseDir && !path.startsWith('/')) path = resolveIn(baseDir, path) ?? `${baseDir}/${path}`;
-  return `/file?path=${encodeURIComponent(path)}`;
+  return `/file?path=${encodeURIComponent(path)}${src && src !== 'here' ? `&src=${encodeURIComponent(src)}` : ''}`;
 }
 
 export const isPath = (p: string): boolean =>

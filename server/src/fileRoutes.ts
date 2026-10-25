@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream';
 import type { EventHub } from './hub.ts';
 import { reportError } from './errors.ts';
 import { listDir, listFiles, resolveInRoot } from './files.ts';
+import { blobSize, branchFiles, listSources, readFile, readTree, SourceError, type Source } from './git.ts';
 import { fuzzyScore } from './fuzzy.ts';
 import type { AgentSession } from './agent/types.ts';
 import { parseRange } from './range.ts';
@@ -38,6 +39,23 @@ function queryPath(req: IncomingMessage): string {
   return new URL(req.url ?? '/', 'http://x').searchParams.get('path') ?? '';
 }
 
+/**
+ * The `src` of a request: none or 'here' is this checkout (no git call); anything else must be an id from the current
+ * listSources, never a path or a raw ref. null = unknown (the route answers 400).
+ */
+async function sourceOf(req: IncomingMessage, root: string): Promise<Source | 'here' | null> {
+  const id = new URL(req.url ?? '/', 'http://x').searchParams.get('src');
+  if (id === null || id === 'here') return 'here';
+  return (await listSources(root)).find((s) => s.id === id && s.kind !== 'checkout') ?? null;
+}
+
+// project files are untrusted: an .svg/.html must not run script on our origin
+const SAFETY = {
+  'x-content-type-options': 'nosniff',
+  'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+  'cross-origin-resource-policy': 'same-origin',
+};
+
 const CLI_TIMEOUT = 1500;
 
 // the CLI answers with project-relative paths, but also absolute ones (skills, added dirs): inside the root
@@ -59,7 +77,7 @@ const baseOf = (p: string) => p.toLowerCase().replace(/\/$/, '').split('/').pop(
  * 3. the rest of our fuzzy hits. At most 30 paths; an empty query gives the CLI's hits only.
  */
 export async function complete(
-  o: { session: Pick<AgentSession, 'fileSuggestions'>; root: string; timeoutMs?: number },
+  o: { session: Pick<AgentSession, 'fileSuggestions'>; root: string; timeoutMs?: number; files?: () => Promise<string[]> },
   raw: string,
 ): Promise<string[]> {
   const lq = raw.toLowerCase();
@@ -67,7 +85,7 @@ export async function complete(
     const timer = setTimeout(() => reject(new Error('file_suggestions timeout')), o.timeoutMs ?? CLI_TIMEOUT);
     o.session.fileSuggestions(raw).then(resolve, reject).finally(() => clearTimeout(timer));
   });
-  const [cliRes, ours] = await Promise.allSettled([cli, lq ? listFiles(o.root) : Promise.resolve([] as string[])]);
+  const [cliRes, ours] = await Promise.allSettled([cli, lq ? (o.files ?? (() => listFiles(o.root)))() : Promise.resolve([] as string[])]);
   const key = (p: string) => p.replace(/\/$/, '');
   const theirs: string[] = [];
   if (cliRes.status === 'fulfilled') {
@@ -114,79 +132,124 @@ export function fileRoutes(o: {
     return false;
   };
 
+  const json = (req: IncomingMessage, res: ServerResponse, status: number, body: unknown) => {
+    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(req.method === 'HEAD' ? undefined : JSON.stringify(body));
+  };
+  /** Runs `fn` with the request's source; 400 for an unknown one. */
+  const withSource = (req: IncomingMessage, res: ServerResponse, fn: (src: Source | 'here') => Promise<void> | void) => {
+    sourceOf(req, o.root).then(
+      (src) => (src === null ? plain(res, 400, 'unknown source') : fn(src)),
+      (e) => fail(req, res, e),
+    ).catch((e) => fail(req, res, e));
+  };
+  const sourceFail = (req: IncomingMessage, res: ServerResponse, e: unknown) =>
+    e instanceof SourceError ? plain(res, e.status, e.message) : fail(req, res, e);
+
+  /** A file under `base` (this checkout or a worktree): resolveInRoot, Range, the safety headers, a streamed body. */
+  const serveFs = (req: IncomingMessage, res: ServerResponse, base: string) => {
+    const abs = resolveInRoot(base, queryPath(req));
+    if (abs === null) return plain(res, 403, 'outside project');
+    fs.promises.stat(abs).then(
+      (st) => {
+        if (!st.isFile()) return plain(res, 404, 'not found');
+        const head = { 'content-type': typeOf(abs), 'accept-ranges': 'bytes', ...SAFETY };
+        const range = parseRange(req.headers.range, st.size);
+        if (range === 'unsatisfiable') {
+          res.writeHead(416, { 'content-range': `bytes */${st.size}` });
+          res.end();
+          return;
+        }
+        if (range) {
+          res.writeHead(206, {
+            ...head,
+            'content-range': `bytes ${range.start}-${range.end}/${st.size}`,
+            'content-length': range.end - range.start + 1,
+          });
+        } else {
+          res.writeHead(200, { ...head, 'content-length': st.size });
+        }
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        // pipeline destroys the read stream when the client aborts (Chrome does this on every seek) and
+        // ends only this response on a read error (file deleted mid-read)
+        pipeline(fs.createReadStream(abs, range ? { start: range.start, end: range.end } : {}), res, (e) => {
+          if (e && (e as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+            reportError(o.hub, path.relative(base, abs) || abs, e);
+          }
+        });
+      },
+      () => plain(res, 404, 'not found'),
+    ).catch((e) => fail(req, res, e));
+  };
+
+  /**
+   * A branch blob: whole (no Range), the same safety headers, a content type from the path; HEAD gives the length (413
+   * above the cap, like GET). No Range means branch media cannot seek: Chrome still plays it, Safari refuses video
+   * without range support. Worktree media is served by serveFs and keeps Range.
+   */
+  const serveBlob = async (req: IncomingMessage, res: ServerResponse, src: Source) => {
+    const rel = queryPath(req);
+    const head = { 'content-type': typeOf(rel), ...SAFETY };
+    if (req.method === 'HEAD') {
+      const size = await blobSize(o.root, src, rel);
+      if (size === null) return plain(res, 404, 'not found');
+      res.writeHead(200, { ...head, 'content-length': size });
+      res.end();
+      return;
+    }
+    const buf = await readFile(o.root, src, rel);
+    if (buf === null) return plain(res, 404, 'not found');
+    res.writeHead(200, { ...head, 'content-length': buf.length });
+    res.end(buf);
+  };
+
   return {
+    '/sources': (req, res) => {
+      if (!getOnly(req, res)) return;
+      listSources(o.root).then((list) => json(req, res, 200, list), (e) => fail(req, res, e));
+    },
+
     '/tree': (req, res) => {
       if (!getOnly(req, res)) return;
-      const abs = resolveInRoot(o.root, queryPath(req));
-      if (abs === null) return plain(res, 403, 'outside project');
-      listDir(abs, o.root).then(
-        (list) => {
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-          res.end(req.method === 'HEAD' ? undefined : JSON.stringify(list));
-        },
-        () => {
-          res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-          res.end(req.method === 'HEAD' ? undefined : '[]');
-        },
-      );
+      withSource(req, res, async (src) => {
+        if (src === 'here') {
+          const abs = resolveInRoot(o.root, queryPath(req));
+          if (abs === null) return plain(res, 403, 'outside project');
+          return listDir(abs, o.root).then((list) => json(req, res, 200, list), () => json(req, res, 404, []));
+        }
+        try {
+          json(req, res, 200, await readTree(o.root, src, queryPath(req)));
+        } catch (e) {
+          if (e instanceof SourceError && e.status === 403) return plain(res, 403, e.message);
+          json(req, res, 404, []); // a missing folder, like for this checkout
+        }
+      });
     },
 
     '/file': (req, res) => {
       if (!getOnly(req, res)) return;
-      const abs = resolveInRoot(o.root, queryPath(req));
-      if (abs === null) return plain(res, 403, 'outside project');
-      fs.promises.stat(abs).then(
-        (st) => {
-          if (!st.isFile()) return plain(res, 404, 'not found');
-          const base = {
-            'content-type': typeOf(abs),
-            'accept-ranges': 'bytes',
-            // project files are untrusted: an .svg/.html must not run script on our origin
-            'x-content-type-options': 'nosniff',
-            'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
-            'cross-origin-resource-policy': 'same-origin',
-          };
-          const range = parseRange(req.headers.range, st.size);
-          if (range === 'unsatisfiable') {
-            res.writeHead(416, { 'content-range': `bytes */${st.size}` });
-            res.end();
-            return;
-          }
-          if (range) {
-            res.writeHead(206, {
-              ...base,
-              'content-range': `bytes ${range.start}-${range.end}/${st.size}`,
-              'content-length': range.end - range.start + 1,
-            });
-          } else {
-            res.writeHead(200, { ...base, 'content-length': st.size });
-          }
-          if (req.method === 'HEAD') {
-            res.end();
-            return;
-          }
-          // pipeline destroys the read stream when the client aborts (Chrome does this on every seek) and
-          // ends only this response on a read error (file deleted mid-read)
-          pipeline(fs.createReadStream(abs, range ? { start: range.start, end: range.end } : {}), res, (e) => {
-            if (e && (e as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') {
-              reportError(o.hub, path.relative(o.root, abs) || abs, e);
-            }
-          });
-        },
-        () => plain(res, 404, 'not found'),
-      ).catch((e) => fail(req, res, e));
+      withSource(req, res, async (src) => {
+        if (src === 'here') return serveFs(req, res, o.root);
+        if (src.kind === 'worktree' && src.dir) return serveFs(req, res, src.dir);
+        await serveBlob(req, res, src).catch((e) => sourceFail(req, res, e));
+      });
     },
 
     '/complete': (req, res) => {
       if (!getOnly(req, res)) return;
       const q = new URL(req.url ?? '/', 'http://x').searchParams.get('q') ?? '';
-      o.complete(q).then(
-        (hits) => {
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify(hits.slice(0, 30)));
-        },
-        (e) => fail(req, res, e),
-      );
+      withSource(req, res, (src) => {
+        // another source: our own file search over it (the CLI only knows this checkout)
+        const run = src === 'here' ? o.complete(q)
+          : complete({
+            session: { fileSuggestions: async () => [] }, root: src.dir ?? o.root,
+            files: src.kind === 'branch' ? () => branchFiles(o.root, src) : undefined,
+          }, q);
+        run.then((hits) => json(req, res, 200, hits.slice(0, 30)), (e) => fail(req, res, e));
+      });
     },
   };
 }

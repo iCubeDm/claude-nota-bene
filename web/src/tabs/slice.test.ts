@@ -75,7 +75,7 @@ it('persists paths and active (never the chat) under tabs:<root>', () => {
   store.dispatch(openFile('a.md'));
   store.dispatch(openFile('b.md'));
   store.dispatch(activate(fileTabId('a.md')));
-  expect(JSON.parse(localStorage.getItem('tabs:/r1')!)).toEqual({ paths: ['a.md', 'b.md'], active: 'file:a.md' });
+  expect(JSON.parse(localStorage.getItem('tabs:/r1')!)).toEqual({ files: [{ path: 'a.md' }, { path: 'b.md' }], active: 'file:a.md' });
 });
 
 it('restores per root, once; another root does not restore', () => {
@@ -98,4 +98,12 @@ it('ignores corrupt stored data', () => {
   const m = mk();
   m.session('/r1');
   expect(ids(m.store)).toEqual(['chat']);
+});
+
+it('a restore leaves the saved tabs in storage (the subscriber must not write the pre-restore state back)', () => {
+  const saved = JSON.stringify({ files: [{ path: 'a.md' }, { path: 'b.md' }], active: 'file:b.md' });
+  localStorage.setItem('tabs:/r1', saved);
+  const m = mk();
+  m.session('/r1');
+  expect(localStorage.getItem('tabs:/r1')).toBe(saved);
 });

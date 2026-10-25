@@ -1,4 +1,4 @@
-import type { ImageRef } from '@nota-bene/shared';
+import type { AnchorSource, Comment, ImageRef } from '@nota-bene/shared';
 import { mediaTypeOf } from '../attachments/image.ts';
 import { getLang, t, tIn } from '../i18n/index.ts';
 import { selectReplyLabel, sendMessage, type AppThunk } from '../store/store.ts';
@@ -8,6 +8,16 @@ import { clearImages, selectDraft, selectImages, selectUploading, setDraft } fro
 import { markSending, selectPending } from './slice.ts';
 
 export type SendResult = 'empty' | 'sent' | 'offline';
+
+/** A file source as the batch and the card name it: `path`, or `path @ ref` for another branch or worktree (M3-16). */
+export const whereOfFile = (src: Extract<AnchorSource, { kind: 'file' }>): string => (src.ref ? `${src.path} @ ${src.ref}` : src.path);
+
+/** Where a comment's fragment lives, for the batch line: the reply label, "my message", or the file. */
+export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0]): string {
+  const src = c.anchor.source;
+  if (src.kind === 'file') return whereOfFile(src);
+  return (st && selectReplyLabel(st, src.id)) ?? t('srcChat');
+}
 
 /**
  * The one send path: the composer draft plus every pending comment as one message. Pending → sent happens only via
@@ -30,7 +40,7 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
   }));
   const text = composeBatch(
     body, pending, lang, (c) => labelOf(c, lang),
-    (c) => (c.anchor.source.kind === 'message' ? (selectReplyLabel(st, c.anchor.source.id) ?? t('srcChat')) : c.anchor.source.path),
+    (c) => whereOf(c, st),
     instructionOf, refs,
   );
   const ids = pending.map((c) => c.id);

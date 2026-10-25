@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { t } from '@/i18n/index.ts';
 import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
+import { useSources } from '@/files/sources.ts';
 import { markRefs } from '@/refs/refs.ts';
 import './markdown.css';
 
@@ -18,14 +19,15 @@ DOMPurify.addHook('afterSanitizeAttributes', (n) => {
 
 const escAttr = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
-// marked renderers are global and parse is synchronous, so the current render's baseDir lives here
+// marked renderers are global and parse is synchronous, so the current render's baseDir and source live here
 let currentBase: string | undefined;
+let currentSrc: string | undefined;
 
 marked.use({
   gfm: true,
   renderer: {
     image(href: string, _title: string | null, text: string) {
-      const src = escAttr(fileUrl(href, currentBase));
+      const src = escAttr(fileUrl(href, currentBase, currentSrc));
       if (VIDEO.test(href)) return `<video controls preload="metadata" src="${src}"></video>`;
       if (AUDIO.test(href)) return `<audio controls src="${src}"></audio>`;
       return `<img src="${src}" alt="${escAttr(text || '')}">`;
@@ -50,8 +52,7 @@ function loadMermaid(): Promise<MermaidApi> {
 
 let seq = 0;
 
-function postProcess(root: HTMLElement, final: boolean, baseDir?: string) {
-  if (final) markRefs(root, baseDir);
+function postProcess(root: HTMLElement, final: boolean) {
   root.querySelectorAll<HTMLElement>('pre code').forEach((c) => {
     const lang = /language-(\w+)/.exec(c.className)?.[1];
     const pre = c.parentElement!;
@@ -80,11 +81,15 @@ function postProcess(root: HTMLElement, final: boolean, baseDir?: string) {
 }
 
 export const Markdown = memo(
-  function Markdown({ text, final, baseDir }: { text: string; final: boolean; baseDir?: string }) {
+  /** `src`: the source of the file being shown (M3-16): its relative images load from that source. */
+  function Markdown({ text, final, baseDir, src }: { text: string; final: boolean; baseDir?: string; src?: string }) {
     const ref = useRef<HTMLDivElement>(null);
+    // absolute paths become refs only inside a known source's dir: re-mark when the list arrives or changes
+    const sources = useSources();
     const html = useMemo(
       () => {
         currentBase = baseDir;
+        currentSrc = src;
         try {
           return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
             ADD_TAGS: ['video', 'audio'],
@@ -92,14 +97,18 @@ export const Markdown = memo(
           });
         } finally {
           currentBase = undefined;
+          currentSrc = undefined;
         }
       },
-      [text, baseDir],
+      [text, baseDir, src],
     );
     useLayoutEffect(() => {
-      if (ref.current) postProcess(ref.current, final, baseDir);
-    }, [html, final, baseDir]);
+      if (ref.current && final) markRefs(ref.current, baseDir);
+    }, [html, final, baseDir, sources]);
+    useLayoutEffect(() => {
+      if (ref.current) postProcess(ref.current, final);
+    }, [html, final]);
     return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
   },
-  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir,
+  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src,
 );

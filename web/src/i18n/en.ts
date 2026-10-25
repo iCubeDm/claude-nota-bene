@@ -94,6 +94,13 @@ export const en: Dict = {
   files: 'Files',
   refresh: 'Refresh',
   filterPh: 'Filter files…',
+  // branches and worktrees (M3-16)
+  sourcePick: 'Source',
+  sourceHere: 'this folder',
+  sourceWorktree: 'worktree',
+  sourceBranch: 'branch',
+  readOnly: 'read-only',
+  sourceGone: 'This branch or worktree no longer exists',
   fileTree: 'File tree',
   // file viewers (M3-08)
   tooLarge: 'File is too large to show (over 2 MB)',

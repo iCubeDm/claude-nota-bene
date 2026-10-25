@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import type { Comment } from '@nota-bene/shared';
 import { rangeForAnchor } from '@/anchors/text.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { fileTabId } from '@/tabs/slice.ts';
+import { fileKey } from '@/files/sources.ts';
 import { openCommentCard, selectComments } from './slice.ts';
 
 const PAD_X = 2;
@@ -29,22 +29,28 @@ type Drawn = { id: string; range: Range };
 type Cached = { c: Comment; root: HTMLElement; range: Range };
 type Source = Comment['anchor']['source'];
 
-/** Which pane a source lives in: message sources in the chat, file sources in that file's tab. */
-const paneOf = (src: Source): string => (src.kind === 'message' ? 'chat' : fileTabId(src.path));
+/** The file a file pane shows: its path and, for another source, the ref (M3-16). undefined = the chat. */
+type PaneFile = { path: string; ref?: string } | undefined;
+
+/** Whether a source lives in this pane: message sources in the chat, a file source in the tab of that path AND ref. */
+const inPane = (src: Source, file: PaneFile): boolean =>
+  file === undefined ? src.kind === 'message' : src.kind === 'file' && src.path === file.path && (src.ref ?? '') === (file.ref ?? '');
 
 /**
  * The commentable roots inside a pane, keyed by source: the chat's items (by id), or the file view's own text root:
- * the pane element itself, while FileView marks it with this tab's path (only while it shows text). A
+ * the pane element itself, while FileView marks it with this tab's path and ref (only while it shows text). A
  * `data-file-path` inside rendered markdown is file content and never a root.
  */
-function rootsIn(pane: HTMLElement, path: string | undefined): Map<string, HTMLElement> {
+function rootsIn(pane: HTMLElement, file: PaneFile | null): Map<string, HTMLElement> {
   const roots = new Map<string, HTMLElement>();
-  if (path === undefined) {
+  if (file === undefined) {
     for (const e of pane.querySelectorAll<HTMLElement>('#items [data-item-id]')) if (e.dataset.itemId) roots.set(`m:${e.dataset.itemId}`, e);
-  } else if (pane.dataset.filePath === path) roots.set(`f:${path}`, pane);
+  } else if (file && pane.dataset.filePath === file.path && (pane.dataset.fileRef ?? '') === (file.ref ?? '')) {
+    roots.set(`f:${fileKey(file.path, file.ref)}`, pane);
+  }
   return roots;
 }
-const keyOf = (src: Source) => (src.kind === 'message' ? `m:${src.id}` : `f:${src.path}`);
+const keyOf = (src: Source) => (src.kind === 'message' ? `m:${src.id}` : `f:${fileKey(src.path, src.ref)}`);
 
 /**
  * The Range of a comment's text, or null for an orphan / a source that is not (yet) in the DOM or not commentable.
@@ -101,16 +107,22 @@ export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
   const paint = useRef<() => void>(() => {});
   const dispatch = useAppDispatch();
   const all = useAppSelector(selectComments);
-  const comments = useMemo(() => all.filter((c) => paneOf(c.anchor.source) === paneId), [all, paneId]);
   const active = useAppSelector((s) => s.tabs.active === paneId);
-  // what moves this pane's text: the feed for the chat; a settled (re)load for a file tab
+  // the file this pane shows (path + ref); null = a file pane whose tab is gone
   const path = useAppSelector((s) => {
     const tab = s.tabs.open.find((t) => t.id === paneId);
     return tab?.kind === 'file' ? tab.path : undefined;
   });
-  const content = useAppSelector((s) => (paneId === 'chat' ? s.feed : path === undefined ? undefined : s.files.load[path]));
-  const state = useRef({ comments, active, path });
-  state.current = { comments, active, path };
+  const ref = useAppSelector((s) => {
+    const tab = s.tabs.open.find((t) => t.id === paneId);
+    return tab?.kind === 'file' ? tab.ref : undefined;
+  });
+  const file: PaneFile | null = useMemo(() => (paneId === 'chat' ? undefined : path === undefined ? null : { path, ref }), [paneId, path, ref]);
+  const comments = useMemo(() => (file === null ? [] : all.filter((c) => inPane(c.anchor.source, file))), [all, file]);
+  // what moves this pane's text: the feed for the chat; a settled (re)load for a file tab
+  const content = useAppSelector((s) => (paneId === 'chat' ? s.feed : path === undefined ? undefined : s.files.load[fileKey(path, ref)]));
+  const state = useRef({ comments, active, file });
+  state.current = { comments, active, file };
 
   useEffect(() => {
     const el = layer.current;
@@ -132,7 +144,7 @@ export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
         return; // the cache is kept: its ranges stay valid while hidden, and are re-checked on the next paint
       }
       const list: (Drawn & { kind: 'sent' | 'pending' })[] = [];
-      const roots = rootsIn(pane, paneId === 'chat' ? undefined : (state.current.path ?? ''));
+      const roots = rootsIn(pane, state.current.file);
       for (const [k, r] of roots) if (k.startsWith('f:')) for (const e of r.children) if (!e.hasAttribute('data-hl-layer')) observe(e);
       const prev = cache.current;
       const next = new Map<string, Cached>(); // only what this paint drew survives: removed / orphaned comments drop out

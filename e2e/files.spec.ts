@@ -279,3 +279,22 @@ test('a comment on an md file goes out with its path and its mark survives a rel
   await expect.poll(() => pane.locator('[data-hl="sent"]').count()).toBeGreaterThanOrEqual(1);
   await expect(pane.locator('[data-hl="pending"]')).toHaveCount(0);
 });
+
+test('the tree shows another worktree read-only: pick it, open a file only it has, the tab chip names its branch @files', async ({ page }) => {
+  await start(page);
+  const sheet = page.locator('#tree-sheet');
+  if (await sheet.isHidden()) await page.locator('#toggleTree').click();
+  const picker = sheet.getByRole('combobox', { name: /^(Source|Источник)$/ });
+  await expect(picker.locator('option[value="ref:feature/x"]')).toHaveText(/feature\/x/);
+  await picker.selectOption('ref:feature/x');
+  await sheet.locator('button[data-path="only-x.md"]').click();
+  const tab = page.locator('[data-tab="file:ref:feature/x:only-x.md"]');
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  await expect(tab.locator('[data-src-chip]')).toHaveText('feature/x');
+  await expect(page.locator('[data-pane="file:ref:feature/x:only-x.md"][data-file-ref="feature/x"] h1')).toHaveText('Only on feature/x');
+  // this folder does not have it
+  await picker.selectOption('here');
+  await expect(sheet.locator('button[data-path="only-x.md"]')).toHaveCount(0);
+  await page.locator('#toggleTree').click();
+  await tab.getByRole('button', { name: /^(Close|Закрыть)$/ }).click();
+});
