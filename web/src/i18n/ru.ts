@@ -29,4 +29,15 @@ export const ru = {
   srcMine: 'моё сообщение',
   batchHead: 'Комментарии к фрагментам:',
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
+  // quick labels (M1-08)
+  'label_looks-good': 'Выглядит хорошо',
+  label_clarify: 'Поясни',
+  label_verify: 'Проверь',
+  label_example: 'Приведи пример',
+  label_overview: 'Нет общей картины',
+  label_patterns: 'Как в существующем коде',
+  label_alternatives: 'Рассмотри альтернативы',
+  'label_no-regression': 'Без регрессий',
+  'label_out-of-scope': 'Вне задачи',
+  'label_needs-tests': 'Нужны тесты',
 };

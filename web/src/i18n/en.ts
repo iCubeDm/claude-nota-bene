@@ -32,4 +32,15 @@ export const en: Dict = {
   srcMine: 'my message',
   batchHead: 'Comments on fragments:',
   resumed: (id) => `↻ resumed session ${id}`,
+  // quick labels (M1-08)
+  'label_looks-good': 'Looks good',
+  label_clarify: 'Clarify this',
+  label_verify: 'Verify this',
+  label_example: 'Give me an example',
+  label_overview: 'Missing overview',
+  label_patterns: 'Match existing patterns',
+  label_alternatives: 'Consider alternatives',
+  'label_no-regression': 'Ensure no regression',
+  'label_out-of-scope': 'Out of scope',
+  'label_needs-tests': 'Needs tests',
 };
