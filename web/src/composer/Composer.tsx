@@ -6,7 +6,7 @@ import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
 import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
-import { nextMode, pickMode, selectMode, selectSwitching } from '@/controls/slice.ts';
+import { nextMode, pickMode, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
@@ -25,6 +25,8 @@ export function Composer() {
   const uploading = useAppSelector(selectUploading) > 0;
   // mid-switch the server refuses sends: Send is off (Enter too) and the draft simply waits for the new session
   const switching = useAppSelector(selectSwitching);
+  const suggestion = useAppSelector(selectSuggestion);
+  const showSug = !!suggestion && !text && !busy && !switching;
   const [failed, setFailed] = useState(false);
   const [note, setNote] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -110,6 +112,13 @@ export function Composer() {
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // an open @ / : picker takes Tab at window capture and stops it, so this is only reached with no picker to serve
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.nativeEvent.isComposing && showSug) {
+      e.preventDefault();
+      dispatch(setDraft(suggestion));
+      // the controlled value lands on the next render; put the caret after it
+      requestAnimationFrame(() => ref.current?.setSelectionRange(suggestion.length, suggestion.length));
+      return;
+    }
     if (e.key === 'Tab' && e.shiftKey && !e.nativeEvent.isComposing && mode) {
       e.preventDefault();
       dispatch(pickMode(nextMode(mode)));
@@ -141,20 +150,27 @@ export function Composer() {
         onRemove={(id) => void dispatch(removeImage(id))}
       />
       <div data-dropping={dropping || undefined} className="flex items-end gap-2 pt-2.5 pb-1.5 data-[dropping]:rounded-[10px] data-[dropping]:outline data-[dropping]:outline-2 data-[dropping]:outline-dashed data-[dropping]:outline-primary">
+        <div className="relative flex min-w-0 flex-1">
         <textarea
           ref={ref}
           id="composer-input"
           rows={1}
           value={text}
-          placeholder={t('composerPh')}
+          placeholder={showSug ? suggestion : t('composerPh')}
           onChange={(e) => {
             dispatch(setDraft(e.target.value));
             setFailed(false);
           }}
           onKeyDown={onKeyDown}
           onPaste={intake.onPaste}
-          className="max-h-[40vh] min-h-10 flex-1 resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)]"
+          className={`max-h-[40vh] min-h-10 w-full resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)] ${showSug ? 'pr-16 placeholder:text-foreground placeholder:opacity-45' : ''}`}
         />
+        {showSug && (
+          <span aria-hidden className="pointer-events-none absolute right-2.5 bottom-2.5 rounded bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+            Tab ⇥
+          </span>
+        )}
+        </div>
         <MentionPicker target={ref} />
         <span className="inline-flex" title={switching ? t('switching') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>

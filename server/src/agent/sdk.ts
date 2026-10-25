@@ -65,6 +65,8 @@ class SdkSession implements AgentSession {
         ...(o.resume ? { resume: o.resume } : {}),
         permissionMode: o.permissionMode,
         includePartialMessages: true,
+        // predicted next prompt after each turn: the UI shows it as ghost text in the composer
+        promptSuggestions: true,
         // the SDK doesn't enable Claude in Chrome on its own — without the flag the session has no browser tools
         extraArgs: { chrome: null },
         systemPrompt: { type: 'preset', preset: 'claude_code', append: APPEND },

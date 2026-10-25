@@ -7,10 +7,15 @@ import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
  * it and tore the old session down), then `committed` until the new session is announced.
  */
 export type SwitchPhase = 'asked' | 'committed';
-export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; restoreAfterPlan: Mode | null; switching: SwitchPhase | null };
+export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; restoreAfterPlan: Mode | null; switching: SwitchPhase | null;
+  /** the SDK's predicted next prompt; ghost text in an empty, idle composer. Cleared by anything that moves the conversation on. */
+  suggestion: string;
+  /** the session last announced, to tell a real change from the server's title refresh (same id, new title) */
+  seen: { id: string | null; root: string } | null;
+};
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, suggestion: '', seen: null };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -35,6 +40,18 @@ export const controlsSlice = createSlice({
     b.addCase(serverEvent, (s, a) => {
       const ev = a.payload;
       if (ev.kind === 'mode') setMode(s, ev.mode);
+      // stale once the conversation moves on: a user turn (live or replayed), a reset, a replay, another session
+      if (ev.kind === 'user' || ev.kind === 'replay') s.suggestion = '';
+      else if (ev.kind === 'session') {
+        // the server re-announces after every result (title refresh): only a different id or root is a new session
+        if (s.seen && (s.seen.id !== ev.id || s.seen.root !== ev.root)) s.suggestion = '';
+        s.seen = { id: ev.id, root: ev.root };
+      }
+      else if (ev.kind === 'sdk') {
+        const m = ev.m as unknown as { type?: string; suggestion?: unknown };
+        if (m.type === 'conversation_reset') s.suggestion = '';
+        else if (m.type === 'prompt_suggestion' && typeof m.suggestion === 'string') s.suggestion = m.suggestion.trim();
+      }
       if (!s.switching) return;
       // Only these end a switch. A `session` before the reset is the old session's (a title refresh); a `busy` error
       // answers someone's send or command (any socket's: errors are broadcast), never a switch, which the server
@@ -50,6 +67,7 @@ export const { planApproved } = controlsSlice.actions;
 const { restoreCleared, switchStarted } = controlsSlice.actions;
 
 export const selectMode = (s: RootState): Mode | null => s.controls.mode;
+export const selectSuggestion = (s: RootState): string => s.controls.suggestion;
 export const selectSwitching = (s: RootState): boolean => s.controls.switching !== null;
 
 /** Optimistic: set locally, then send. The server echo sets the same value again and never sends (reducers cannot). */
