@@ -159,6 +159,8 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Side panel stack: cards with edit (✓/✕, ⌘Enter/Esc, ? help) and delete; jump to source; count badges on tabs and tree rows.
 - [ ] Batch send: one message of fragments plus comments plus image references.
 - [ ] Anchors persist across reloads and resumes; orphaned comments are shown, not dropped.
+- [ ] **Quick labels** (as in Plannotator), one click adds the comment with no typing: 👍 Looks good · ❓ Clarify this · 🔍 Verify this · 🔬 Give me an example · 🗺️ Missing overview · 🧬 Match existing patterns · 🔄 Consider alternatives · 📉 Ensure no regression · 🚫 Out of scope · 🧪 Needs tests. Labels are translated (ru/en); each may carry a hidden instruction for the agent (e.g. Verify this → "This seems like an assumption. Verify…"), sent with the batch.
+- [ ] **Emoji** in comment text: an emoji menu button in the comment popup, and GitHub-style `:` shortcodes with autocomplete (`:+1` → 👍; ↑↓ Enter/Tab, Esc), the same keyboard behaviour as the `@` picker.
 
 **Agents & tasks (M2)** — new, beyond the prototype; see [Agents and background tasks](#agents-and-background-tasks)
 - [ ] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer.
@@ -223,3 +225,11 @@ Feature freeze on `prototype/` from M0's start, except for bug fixes.
 - **Selection, popup and focus details** (contentEditable cards, mousedown preventDefault, capture-phase keys): most of the prototype's bugs were here. Mitigation: the e2e tests cover every keyboard path in the checklist.
 - **The SDK's internal `request()`** (`file_suggestions`) may change: the fallback is mandatory and tested.
 - **Long transcripts (100MB+):** replay cost. Out of scope until parity, but anchors are already virtualisation-safe.
+
+## Follow-ups (found in daily use)
+
+- **Media and picture-in-picture loop** (prototype bug, 2026-10-25). A video plays; opening a second video sends the first to PiP; opening a third one starts an endless media-selection loop until one video stops. Rule for the rebuild (M3, Files & media):
+  - Switching from a playing media tab to **another media tab** never uses PiP: the previous media pauses.
+  - PiP is used only when leaving a playing video for a **non-media** tab (chat, agent, shell, text file), and there is at most one PiP window.
+  - PiP's "back to tab" never starts playback or PiP elsewhere: it only activates the video's own tab.
+  - e2e: play A, open B, open C → exactly one video plays, no PiP, no repeated focus or selection events.
