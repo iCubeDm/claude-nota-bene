@@ -47,6 +47,14 @@ export function makeStore(o: { url: string; connect?: typeof realConnect }) {
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }),
     devTools: devToolsEnabled(),
   });
+  // the ONE place that persists the panel state, whoever changed it (toggle, ×, auto-open after adding a comment)
+  let panelOpen = store.getState().comments.ui.panelOpen;
+  store.subscribe(() => {
+    const now = store.getState().comments.ui.panelOpen;
+    if (now === panelOpen) return;
+    panelOpen = now;
+    try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
+  });
   conn = connectFn(
     o.url,
     (ev) => store.dispatch(serverEvent(ev)),

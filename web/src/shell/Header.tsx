@@ -1,12 +1,16 @@
 import { useEffect } from 'react';
 import { getLang, setLang, useT } from '@/i18n/index.ts';
-import { selectConn, selectSession, useAppSelector } from '@/store/store.ts';
+import { selectCommentsUi, selectPending, setPanelOpen } from '@/comments/slice.ts';
+import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 
 export function Header() {
   const t = useT();
   const other = getLang() === 'ru' ? 'en' : 'ru';
   const conn = useAppSelector(selectConn);
   const session = useAppSelector(selectSession);
+  const d = useAppDispatch();
+  const panelOpen = useAppSelector(selectCommentsUi).panelOpen;
+  const pendingN = useAppSelector(selectPending).length;
   // the project, not the app, names the window: several windows on different projects must be told apart
   const project = session?.root.split('/').filter(Boolean).pop() ?? 'Nota Bene';
   useEffect(() => { document.title = `${project} · Nota Bene`; }, [project]);
@@ -18,6 +22,17 @@ export function Header() {
       <span className="flex-1" />
       <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : ''}</span>
       <span id="session" className="font-mono text-[11px]">{session?.id?.slice(0, 8) ?? ''}</span>
+      {/* moves into the tab strip in M2 */}
+      <button
+        type="button"
+        id="toggleComments"
+        aria-pressed={panelOpen}
+        onClick={() => d(setPanelOpen(!panelOpen))}
+        className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-muted hover:text-foreground ${panelOpen ? 'bg-primary/15 text-primary' : ''}`}
+      >
+        {t('comments')}
+        {pendingN > 0 && <span className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{pendingN}</span>}
+      </button>
       <button
         type="button"
         id="langBtn"
