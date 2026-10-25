@@ -219,6 +219,13 @@
   footer { flex: none; border-top: 1px solid var(--border-soft); background: oklch(0.22 0.02 260 / .5); backdrop-filter: blur(24px); }
   #status { font-size: 12px; color: var(--muted-fg); display: flex; gap: 10px; align-items: center; min-height: 0; }
   #status:not(:empty) { padding-top: 8px; }
+  /* background tasks / subagents (minimal stand-in for the rebuild's M2 task drawer) */
+  #tasksLine { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted-fg); }
+  #tasksLine:not(:empty) { padding-top: 6px; }
+  #tasksLine .task { display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; }
+  #tasksLine .task .gear { color: var(--accent); animation: pulse 1.4s infinite; }
+  #tasksLine .task .d { color: var(--foreground); opacity: .85; overflow: hidden; text-overflow: ellipsis; }
+  #tasksLine .task .m { font-family: var(--font-mono); font-size: 10.5px; flex: none; }
   #status .spin { color: var(--accent); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
   #composer { display: flex; gap: 8px; padding: 10px 0 6px; align-items: flex-end; }
@@ -339,6 +346,7 @@
     <div id="panes"><div class="pane active" id="pane-chat"><div class="col" id="items"></div></div></div>
     <footer><div class="col">
       <div id="status"></div>
+      <div id="tasksLine"></div>
       <div id="attach" class="thumbs"></div>
       <div id="composer">
         <div class="ta-wrap"><textarea id="text" rows="1"></textarea><span id="sugHint">Tab ⇥</span></div>
@@ -793,7 +801,39 @@ function renderSuggestion() {
 const setSuggestion = (s) => { suggestion = (s || '').trim(); renderSuggestion(); };
 renderSuggestion();
 
+// ---------- background tasks (subagents, shell): one line each above the composer ----------
+// fed by the SDK's task events; a task disappears when it finishes. Ambient (non-activity) tasks are skipped.
+const tasks = new Map(); // task_id → { desc, type, start, tokens, tool, summary }
+let tasksTimer = null;
+function renderTasks() {
+  const el = $('tasksLine');
+  const live = [...tasks.values()];
+  el.innerHTML = live.map((tk) => {
+    const secs = Math.max(0, Math.round((Date.now() - tk.start) / 1000));
+    const time = secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `${secs}s`;
+    const meta = [time, tk.tokens ? fmtK(tk.tokens) + ' tok' : '', tk.tool || ''].filter(Boolean).join(' · ');
+    return `<div class="task" title="${esc(tk.summary || tk.desc)}"><span class="gear">⚙</span><span class="d">${esc(tk.desc)}</span><span class="m">${esc(meta)}</span></div>`;
+  }).join('');
+  if (live.length && !tasksTimer) tasksTimer = setInterval(renderTasks, 1000);
+  if (!live.length && tasksTimer) { clearInterval(tasksTimer); tasksTimer = null; }
+}
+function onTask(m) {
+  const id = m.task_id;
+  if (m.subtype === 'task_started') {
+    if (m.ambient || m.skip_transcript) return;
+    tasks.set(id, { desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type, start: evTs, tokens: 0, tool: '', summary: '' });
+  } else if (m.subtype === 'task_progress' && tasks.has(id)) {
+    Object.assign(tasks.get(id), { tokens: m.usage?.total_tokens || 0, tool: m.last_tool_name || '', summary: m.summary || '' });
+  } else if (m.subtype === 'task_updated' && tasks.has(id)) {
+    const st = m.patch?.status;
+    if (st && st !== 'running' && st !== 'pending' && st !== 'paused') tasks.delete(id);
+    else if (m.patch?.description) tasks.get(id).desc = m.patch.description;
+  } else if (m.subtype === 'task_notification') tasks.delete(id);
+  if (!replaying) renderTasks();
+}
+
 function onSdk(m) {
+  if (m.type === 'system' && /^task_(started|progress|updated|notification)$/.test(m.subtype)) return onTask(m);
   if (m.type === 'prompt_suggestion') return setSuggestion(m.suggestion);
   if (m.type === 'conversation_reset') setSuggestion('');
   if (m.type === 'system' && m.subtype === 'init') { $('session').textContent = `${m.model} · ${m.session_id.slice(0, 8)}`; return; }
@@ -1414,7 +1454,7 @@ function connect() {
   ws.onopen = () => { $('conn').textContent = ''; };
   ws.onmessage = (e) => {
     const ev = JSON.parse(e.data);
-    if (ev.kind === 'replay') { items.innerHTML = ''; agentCount = 0; streamEl = null; forcePending = false; setBusy(false); replaying = true; ev.events.forEach(handle); replaying = false; chatPane.scrollTop = chatPane.scrollHeight; }
+    if (ev.kind === 'replay') { items.innerHTML = ''; agentCount = 0; streamEl = null; forcePending = false; setBusy(false); tasks.clear(); replaying = true; ev.events.forEach(handle); replaying = false; renderTasks(); chatPane.scrollTop = chatPane.scrollHeight; }
     else handle(ev);
   };
   ws.onclose = () => { $('conn').textContent ||= t('offline'); setTimeout(connect, 1000); };
