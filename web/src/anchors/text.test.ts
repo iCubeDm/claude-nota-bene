@@ -21,6 +21,11 @@ describe('anchor text model', () => {
     expect(offsetsOf(root, r)).toEqual({ start: 0, end: 2 });
   });
 
+  it('skips [data-anchor-skip] subtrees', () => {
+    const root = el('<div><div data-anchor-skip>you · 14:03</div>hello</div>');
+    expect(textOf(root)).toBe('hello');
+  });
+
   it('offsetsOf and rangeFromOffsets round-trip across bold, code and links', () => {
     const root = el('<p>Use <b>the</b>  <code>foo()</code> call, see <a href="#">docs\n here</a>.</p>');
     const text = textOf(root);

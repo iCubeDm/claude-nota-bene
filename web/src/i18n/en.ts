@@ -30,6 +30,7 @@ export const en: Dict = {
   denied: '✕ denied',
   mermaidError: (msg) => `mermaid error: ${msg}`,
   srcMine: 'my message',
+  commentBtn: '💬 Comment',
   batchHead: 'Comments on fragments:',
   resumed: (id) => `↻ resumed session ${id}`,
   // quick labels (M1-08)

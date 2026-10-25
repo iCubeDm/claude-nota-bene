@@ -1,6 +1,6 @@
 // The only code that maps DOM ranges to anchor offsets. "Rendered text" is the
 // root's visible text with every whitespace run collapsed to one space and the
-// ends trimmed; script/style/aria-hidden subtrees are skipped. All three
+// ends trimmed; script/style/aria-hidden/[data-anchor-skip] subtrees are skipped. All three
 // functions share one model (`build`), so round-trips are exact.
 
 type Pt = [Text, number];
@@ -64,7 +64,7 @@ function build(root: Element): Model {
       else if (child.nodeType === Node.ELEMENT_NODE) {
         const e = child as Element;
         const tag = e.tagName.toLowerCase();
-        if (tag === 'script' || tag === 'style' || e.getAttribute('aria-hidden') === 'true') continue;
+        if (tag === 'script' || tag === 'style' || e.getAttribute('aria-hidden') === 'true' || e.hasAttribute('data-anchor-skip')) continue;
         const block = BLOCKS.has(tag);
         if (block) pending = true;
         visit(e);

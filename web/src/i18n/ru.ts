@@ -27,6 +27,7 @@ export const ru = {
   denied: '✕ запрещено',
   mermaidError: (msg: string) => `ошибка mermaid: ${msg}`, // new in M0 (the prototype had it in English only)
   srcMine: 'моё сообщение',
+  commentBtn: '💬 Комментировать',
   batchHead: 'Комментарии к фрагментам:',
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
   // quick labels (M1-08)

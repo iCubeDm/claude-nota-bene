@@ -15,7 +15,7 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
       data-item-id={item.id}
       className="my-2.5 whitespace-pre-wrap rounded-[10px] border border-border-soft bg-muted/55 px-3 py-2"
     >
-      <div className="mb-0.5 font-mono text-[10.5px] text-muted-foreground">
+      <div data-anchor-skip className="mb-0.5 font-mono text-[10.5px] text-muted-foreground">
         {t('you')}
         {time}
         {mode}
