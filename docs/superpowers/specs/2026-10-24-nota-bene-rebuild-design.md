@@ -163,7 +163,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] **Quick labels** (as in Plannotator), one click adds the comment with no typing: 👍 Looks good · ❓ Clarify this · 🔍 Verify this · 🔬 Give me an example · 🗺️ Missing overview · 🧬 Match existing patterns · 🔄 Consider alternatives · 📉 Ensure no regression · 🚫 Out of scope · 🧪 Needs tests. Labels are translated (ru/en); each may carry a hidden instruction for the agent (e.g. Verify this → "This seems like an assumption. Verify…"), sent with the batch.
 - [ ] **Emoji** in comment text: an emoji menu button in the comment popup, and GitHub-style `:` shortcodes with autocomplete (`:+1` → 👍; ↑↓ Enter/Tab, Esc), the same keyboard behaviour as the `@` picker.
 
-**Agents & tasks (M2)** — new, beyond the prototype; see [Agents and background tasks](#agents-and-background-tasks)
+**Agents & tasks (M2)** — new, beyond the prototype; built after M5 (see Milestones → Order). The last two items below (tab strip, tab context menu) are delivered in M3; see [Agents and background tasks](#agents-and-background-tasks)
 - [ ] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer.
 - [ ] Drawer: tree of tasks (subagents, shell, monitors; nested by `parent_task_id`) with status, elapsed time, tokens, last tool, one-line summary; actions: open, stop (`stopTask`), move to background (`backgroundTasks(toolUseId)`).
 - [ ] Subagent chat in its own tab (live via `forwardSubagentText`), commentable; comments go to the main session.
@@ -180,6 +180,8 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Clickable project paths in `code` and relative links (HEAD check, strike-through if missing).
 - [ ] `@` mentions: the CLI's `file_suggestions` with our own fuzzy fallback; ↑↓ Enter/Tab, folder keeps the picker open, quoted paths with spaces; clickable in sent messages.
 - [ ] Image attachments: paste, drop, 📎; downscale to ≤1568px; png→jpeg over 3.5 MB; thumbnails, lightbox; in the composer and in comments.
+- [ ] Attachments are stored on the server by content hash (`~/.nota-bene/attachments/<sha256>.<ext>`) and travel over the socket as ids, never as base64 in the replayed history (a session with screenshots would resend megabytes on every reload). Images in a resumed transcript are written to the same store on replay.
+- [ ] Comments on open files (md rendered and code), with count badges on tabs and tree rows; image references in a batch (moved here from M1).
 
 **Session & agent controls (M4)**
 - [ ] Session picker over all folders: grouped by cwd, filter, current project first, new session; in-process switch (no restart).
@@ -193,6 +195,8 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Favicon = NB circle coloured by state: idle (purple), working (blinks orange/purple, orange = the working dot), waiting for you (red), done while away (green).
 - [ ] Server errors as toasts (dedup ×N).
 - [ ] `--chrome` (Claude in Chrome tools) enabled.
+- [ ] ↻ Server button: restart the server and resume the same session (prototype parity; the launcher relaunches with `--continue`).
+- [ ] Background-task line above the composer: running shell tasks and subagents with elapsed time (prototype parity, added 2026-10-25; M2 replaces it with the indicator and drawer).
 
 **Launch & self-hosting (M5)**
 - [ ] `nota-bene [dir] [--port] [--resume id [--fork]] [--new]` bin; resumes the folder's last session by default.
@@ -208,10 +212,12 @@ Each milestone gets its own implementation plan in `docs/superpowers/plans/` whe
 |---|---|---|
 | **M0 Foundation** | workspaces, protocol, AgentSession (SDK + fake), EventHub, HTTP/WS server, web shell, store, chat feed, composer, i18n, e2e harness | you can chat with the real agent in the new UI; e2e green on the fake agent |
 | **M1 Comments** | anchors, selection → popup → cards → batch, persistence | the review loop works across reloads |
-| **M2 Agents & tasks** | task indicator + bottom drawer, subagent chat tabs, shell output tabs, stop / background, resume of subagent chats | you can watch and steer every subagent and shell task |
-| **M3 Files & media** | tree, file tabs, viewers, Range, PiP, refs, `@`, attachments | daily media workflow works |
-| **M4 Controls** | sessions, meters, compact/clear, modes and plan, suggestions, favicon, toasts | full parity |
+| **M3 Files & media** | tabs (strip, context menu), tree, file tabs, viewers, Range, PiP, refs, `@`, attachments, comments on files | daily media workflow works |
+| **M4 Controls** | sessions, meters, compact/clear, modes and plan, suggestions, favicon, toasts, ↻ server restart, background-task line | full parity |
 | **M5 Launch** | bin, `/nb`, dev mode, retire the prototype | you open the new app with `/nb` |
+| **M2 Agents & tasks** | task indicator + bottom drawer, subagent chat tabs, shell output tabs, stop / background, resume of subagent chats | you can watch and steer every subagent and shell task |
+
+**Order (decided 2026-10-25, after M1):** M3 → M4 → M5 → M2. The user can switch from the prototype only at full parity ("весь скоуп прототипа"); M2 is new beyond the prototype, so it does not unblock the switch and comes after it. The milestone names keep their numbers. The tab strip and its context menu move from M2 into M3 (file tabs need them first); M2 reuses the `tabs` slice.
 
 Feature freeze on `prototype/` from M0's start, except for bug fixes.
 
