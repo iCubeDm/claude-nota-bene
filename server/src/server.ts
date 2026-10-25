@@ -89,6 +89,11 @@ export async function startServer(o: {
       } catch (e) {
         reportError(hub, 'comments', e);
       }
+      try {
+        ws.send(JSON.stringify({ kind: 'mode', mode: manager.mode() }));
+      } catch (e) {
+        reportError(hub, 'mode', e);
+      }
       ws.on('close', detach);
       ws.on('error', (e) => reportError(hub, 'ws', e));
       ws.on('message', guard(hub, 'ws', (data) => {
@@ -115,6 +120,9 @@ export async function startServer(o: {
             } catch (e) {
               reportError(hub, 'comments', e); // nothing stored, nothing broadcast; the socket stays up
             }
+            break;
+          case 'mode':
+            void manager.setMode(msg.mode);
             break;
           case 'interrupt':
             manager.interrupt();

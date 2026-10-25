@@ -8,7 +8,7 @@ const send = { uuid: 'u1', text: 'hi', priority: 'next' } as const;
 const yes: PermissionAsk = async () => true;
 
 function run(turns: FakeTurn[], ask: PermissionAsk = yes) {
-  const s = fakeBackend(turns).start({ cwd: '/tmp', ask });
+  const s = fakeBackend(turns).start({ cwd: '/tmp', permissionMode: 'auto', ask });
   const it = s.messages[Symbol.asyncIterator]();
   return { s, it, next: async () => (await it.next()).value as SDKMessage };
 }
@@ -91,7 +91,7 @@ describe('fake backend', () => {
   });
 
   it('emits init at the start of every turn, like the CLI, and keeps the resumed id', async () => {
-    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', resume: 'r1', ask: yes });
+    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', resume: 'r1', permissionMode: 'auto', ask: yes });
     const it = s.messages[Symbol.asyncIterator]();
     const types: string[] = [];
     const ids = new Set<string>();

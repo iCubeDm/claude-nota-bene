@@ -1,4 +1,5 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Mode } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
@@ -13,6 +14,8 @@ export type FakeTurn = {
   echoImages?: boolean;
   /** what `fileSuggestions` returns (default none) */
   suggestions?: string[];
+  /** the `permissionMode` this turn's init frame carries (the CLI changing the mode on its own); default none */
+  initMode?: Mode;
 };
 
 /**
@@ -52,10 +55,12 @@ class FakeSession implements AgentSession {
   private turnNo = 0;
   private readonly turns: FakeTurn[];
   private readonly ask: PermissionAsk;
+  private readonly modes: Mode[];
   private readonly sessionId: string;
 
-  constructor(turns: FakeTurn[], ask: PermissionAsk, resume?: string) {
+  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string) {
     this.turns = turns;
+    this.modes = modes;
     this.ask = ask;
     this.sessionId = resume ?? DEFAULT_SESSION_ID; // a resumed CLI session keeps its id
     this.messages = { [Symbol.asyncIterator]: () => this.run() };
@@ -69,6 +74,10 @@ class FakeSession implements AgentSession {
 
   async interrupt(): Promise<void> {
     this.turnCtl?.abort();
+  }
+
+  async setPermissionMode(mode: Mode): Promise<void> {
+    this.modes.push(mode);
   }
 
   async fileSuggestions(): Promise<string[]> {
@@ -102,7 +111,7 @@ class FakeSession implements AgentSession {
     let inTools = false;
     try {
       // like the CLI: init at the start of every turn
-      yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}` });
+      yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}`, ...(t.initMode ? { permissionMode: t.initMode } : {}) });
       const size = Math.max(1, t.chunk ?? 8);
       yield sdk({
         type: 'stream_event', session_id: this.sessionId, uuid: `fake-s-${n}-0`, parent_tool_use_id: null,
@@ -170,9 +179,17 @@ class FakeSession implements AgentSession {
   }
 }
 
-export function fakeBackend(turns: FakeTurn[]): AgentBackend {
+/** `startModes` records the mode each agent started with, `setModes` every setPermissionMode call. */
+export function fakeBackend(turns: FakeTurn[]): AgentBackend & { startModes: Mode[]; setModes: Mode[] } {
+  const startModes: Mode[] = [];
+  const setModes: Mode[] = [];
   return {
-    start: (o) => new FakeSession(turns, o.ask, o.resume),
+    startModes,
+    setModes,
+    start: (o) => {
+      startModes.push(o.permissionMode);
+      return new FakeSession(turns, o.ask, setModes, o.resume);
+    },
     history: async () => [],
   };
 }

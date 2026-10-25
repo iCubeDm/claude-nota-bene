@@ -1,5 +1,6 @@
 import { getSessionMessages, query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { Mode } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './types.ts';
 import { transcriptToEvents } from './transcript.ts';
 
@@ -55,13 +56,13 @@ class SdkSession implements AgentSession {
   private readonly q: ReturnType<typeof query>;
   private readonly warmup: NodeJS.Timeout;
 
-  constructor(o: { cwd: string; resume?: string; ask: PermissionAsk }) {
+  constructor(o: { cwd: string; resume?: string; permissionMode: Mode; ask: PermissionAsk }) {
     this.q = query({
       prompt: this.input,
       options: {
         cwd: o.cwd,
         ...(o.resume ? { resume: o.resume } : {}),
-        permissionMode: 'auto',
+        permissionMode: o.permissionMode,
         includePartialMessages: true,
         // the SDK doesn't enable Claude in Chrome on its own — without the flag the session has no browser tools
         extraArgs: { chrome: null },
@@ -96,6 +97,10 @@ class SdkSession implements AgentSession {
       uuid: m.uuid as SDKUserMessage['uuid'],
       priority: m.priority,
     });
+  }
+
+  async setPermissionMode(mode: Mode): Promise<void> {
+    await this.q.setPermissionMode(mode);
   }
 
   async interrupt(): Promise<void> {

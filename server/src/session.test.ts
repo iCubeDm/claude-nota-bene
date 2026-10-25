@@ -9,6 +9,7 @@ import type { AgentBackend } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager } from './session.ts';
 import { lastSession } from './state.ts';
+import { prefsKey, readPrefs, setModePref } from './prefs.ts';
 import { AttachmentStore } from './attachments.ts';
 
 let home: string;
@@ -50,7 +51,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
-        send() {}, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -68,7 +69,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })(),
-        send() {}, interrupt: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -101,7 +102,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { calls.push({ priority: m.priority }); a.send(m); },
           interrupt: () => { interrupts++; return a.interrupt(); },
-          fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -185,7 +186,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { log.push(`send:${m.priority}`); a.send(m); },
           interrupt: () => { log.push('interrupt'); return a.interrupt(); },
-          fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -215,7 +216,7 @@ describe('session manager', () => {
           ...a,
           send: (m) => a.send(m),
           interrupt: () => a.interrupt(),
-          fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
           messages: (async function* () {
             for await (const m of a.messages) {
               yield m;
@@ -249,7 +250,7 @@ describe('session manager', () => {
         })(),
         send: () => {},
         interrupt: async () => {},
-        fileSuggestions: async () => [], close: () => { closed++; },
+        setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => { closed++; },
       }),
     };
     const { events, make } = setup(backend);
@@ -270,7 +271,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { if (first) { first = false; throw new Error('send failed'); } a.send(m); },
           interrupt: () => a.interrupt(),
-          fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -299,7 +300,7 @@ describe('session manager', () => {
           })(),
           send: (m) => { delivered.push(`${mine}:${m.text}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          fileSuggestions: async () => [], close: () => {},
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => {},
         };
       },
     };
@@ -372,7 +373,7 @@ describe('busy cannot get stuck', () => {
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
-        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), fileSuggestions: async () => [], close: () => a.close() };
+        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close() };
       },
     };
     const { hub, events, make } = setup(backend);
@@ -403,7 +404,7 @@ describe('busy cannot get stuck', () => {
         })(),
         send: () => { sent++; },
         interrupt: async () => {},
-        fileSuggestions: async () => [], close: () => {},
+        setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => {},
       }),
     };
     const { hub, events, make } = setup(backend);
@@ -432,7 +433,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
         }),
       };
       const hub = new EventHub();
@@ -462,7 +463,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
         }),
       };
       const hub = new EventHub();
@@ -487,5 +488,134 @@ describe('busy cannot get stuck', () => {
       await until(() => sdkOf(events, 'result').length === 1);
       expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('ok\\nimages: 2');
     });
+  });
+});
+
+describe('permission mode', () => {
+  const modeEvents = (events: ServerEvent[]) => events.filter((e) => e.kind === 'mode').map((e) => (e as { mode: string }).mode);
+
+  it('starts in the mode saved for the project, auto otherwise', async () => {
+    const b1 = fakeBackend([{ text: 'x' }]);
+    expect((await setup(b1).make()).mode()).toBe('auto');
+    expect(b1.startModes).toEqual(['auto']);
+    setModePref('/proj', 'plan');
+    const b2 = fakeBackend([{ text: 'x' }]);
+    expect((await setup(b2).make()).mode()).toBe('plan');
+    expect(b2.startModes).toEqual(['plan']);
+  });
+
+  it('setMode calls the agent, persists and emits once', async () => {
+    const b = fakeBackend([{ text: 'x' }]);
+    const { events, make } = setup(b);
+    const s = await make();
+    await s.setMode('acceptEdits');
+    expect(b.setModes).toEqual(['acceptEdits']);
+    expect(s.mode()).toBe('acceptEdits');
+    expect(readPrefs().modes[prefsKey('/proj')]).toBe('acceptEdits');
+    expect(modeEvents(events)).toEqual(['acceptEdits']);
+  });
+
+  it('an SDK rejection reports and re-emits the old mode', async () => {
+    const inner = fakeBackend([{ text: 'x' }]);
+    const backend: AgentBackend = {
+      history: inner.history,
+      start: (o) => ({ ...inner.start(o), setPermissionMode: async () => { throw new Error('nope'); } }),
+    };
+    const { events, make } = setup(backend);
+    const s = await make();
+    await s.setMode('plan');
+    expect(s.mode()).toBe('auto');
+    expect(readPrefs().modes).toEqual({});
+    expect(modeEvents(events)).toEqual(['auto']);
+    expect(events).toContainEqual({ kind: 'server-error', where: 'mode', message: 'nope' });
+  });
+
+  it('with no agent, setMode still persists and emits, and the next agent starts in it', async () => {
+    const inner = fakeBackend([{ text: 'x', crash: true }, { text: 'y' }]);
+    const { events, make } = setup(inner);
+    const s = await make();
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 1); // the crash killed the agent
+    await s.setMode('default');
+    expect(inner.setModes).toEqual([]);
+    expect(modeEvents(events)).toEqual(['default']);
+    s.send({ id: 'u2', text: 'again' });
+    expect(inner.startModes).toEqual(['auto', 'default']);
+  });
+
+  it('follows an init whose permissionMode differs', async () => {
+    setModePref('/proj', 'plan');
+    const { events, make } = setup(fakeBackend([{ text: 'x', initMode: 'default' }]));
+    const s = await make();
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 1);
+    expect(s.mode()).toBe('default');
+    expect(readPrefs().modes[prefsKey('/proj')]).toBe('default');
+    expect(modeEvents(events)).toEqual(['default']);
+  });
+
+  it('follows a status message too', async () => {
+    const backend: AgentBackend = {
+      history: async () => [],
+      start: () => ({
+        messages: (async function* () { yield { type: 'system', subtype: 'status', permissionMode: 'acceptEdits' } as never; await new Promise(() => {}); })(),
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
+      }),
+    };
+    const { events, make } = setup(backend);
+    const s = await make();
+    await until(() => modeEvents(events).length === 1);
+    expect(s.mode()).toBe('acceptEdits');
+  });
+
+  it('an init with the same mode emits nothing', async () => {
+    setModePref('/proj', 'plan');
+    const { events, make } = setup(fakeBackend([{ text: 'x', initMode: 'plan' }]));
+    const s = await make();
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 1);
+    expect(modeEvents(events)).toEqual([]);
+    expect(s.mode()).toBe('plan');
+  });
+
+  // an agent whose frames the test pushes by hand; setPermissionMode runs `onSet` before it resolves
+  function manual(onSet: (push: (f: object) => void) => Promise<void>): AgentBackend {
+    return {
+      history: async () => [],
+      start: () => {
+        const q: object[] = [];
+        let wake: (() => void) | null = null;
+        const push = (f: object) => { q.push(f); wake?.(); };
+        return {
+          messages: (async function* () {
+            while (true) {
+              while (q.length) yield q.shift() as never;
+              await new Promise<void>((r) => { wake = r; });
+            }
+          })(),
+          send() {}, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+          setPermissionMode: () => onSet(push),
+        };
+      },
+    };
+  }
+  const status = (permissionMode: string) => ({ type: 'system', subtype: 'status', permissionMode });
+
+  it('a status frame that beats the control response gives one emit', async () => {
+    const { events, make } = setup(manual(async (push) => { push(status('plan')); await new Promise((r) => setTimeout(r, 20)); }));
+    const s = await make();
+    await s.setMode('plan');
+    expect(modeEvents(events)).toEqual(['plan']);
+    expect(readPrefs().modes[prefsKey('/proj')]).toBe('plan');
+  });
+
+  it('the echo of our own change (same mode in a later status) gives one emit', async () => {
+    let push: (f: object) => void = () => {};
+    const { events, make } = setup(manual(async (p) => { push = p; }));
+    const s = await make();
+    await s.setMode('plan');
+    push(status('plan'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(modeEvents(events)).toEqual(['plan']);
   });
 });

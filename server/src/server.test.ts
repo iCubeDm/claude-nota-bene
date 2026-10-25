@@ -82,4 +82,18 @@ describe('server', () => {
     expect(first.kind).toBe('replay');
     if (first.kind === 'replay') expect(first.events.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(true);
   });
+
+  it('every new socket gets the mode, and a mode message is applied and broadcast', async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    await until(() => a.events.some((e) => e.kind === 'mode'));
+    expect(a.events.find((e) => e.kind === 'mode')).toEqual({ kind: 'mode', mode: 'auto' });
+    a.ws.send(JSON.stringify({ type: 'mode', mode: 'plan' }));
+    await until(() => a.events.filter((e) => e.kind === 'mode').length === 2);
+    const b = await connect(s.url);
+    await until(() => b.events.some((e) => e.kind === 'mode'));
+    expect(b.events.find((e) => e.kind === 'mode')).toEqual({ kind: 'mode', mode: 'plan' });
+    const replay = b.events[0]!;
+    if (replay.kind === 'replay') expect(replay.events.some((e) => e.kind === 'mode')).toBe(false); // live state, not history
+  });
 });

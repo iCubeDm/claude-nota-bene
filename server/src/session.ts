@@ -1,18 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { ImageRef } from '@nota-bene/shared';
+import { MODES } from '@nota-bene/shared';
+import type { ImageRef, Mode } from '@nota-bene/shared';
 import { AttachmentStore } from './attachments.ts';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './agent/types.ts';
 import { stripUserFrameImages } from './agent/transcript.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
+import { prefsKey, readPrefs, setModePref } from './prefs.ts';
 import { saveSession, stateDir } from './state.ts';
 
 export type SessionManager = {
   send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): void;
   interrupt(): void;
   answer(permissionId: string, allow: boolean): void;
+  mode(): Mode;
+  /** Asks the agent, then persists and announces; a refusal is reported and the current mode re-announced. */
+  setMode(mode: Mode): Promise<void>;
   info(): { id: string | null; root: string };
   /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
   fileSuggestions(query: string): Promise<string[]>;
@@ -20,7 +25,7 @@ export type SessionManager = {
   onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
 
-type Msg = { type?: string; subtype?: string; session_id?: string };
+type Msg = { type?: string; subtype?: string; session_id?: string; permissionMode?: unknown };
 
 export async function createSessionManager(o: { hub: EventHub; backend: AgentBackend; cwd: string; resume?: string; attachments?: AttachmentStore }): Promise<SessionManager> {
   const { hub, backend, cwd } = o;
@@ -28,6 +33,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
   let sessionId: string | null = o.resume ?? null;
   let announced: string | null | undefined; // last id sent as a `session` event
   let saved: string | null = null; // last id written to the registry
+  let mode: Mode = readPrefs().modes[prefsKey(cwd)] ?? 'auto';
   let agent: AgentSession | null = null;
   let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
   const pending = new Map<string, (allow: boolean) => void>();
@@ -54,7 +60,11 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
       for await (const m of a.messages) {
         if (agent !== a) return;
         hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) });
-        const { type, subtype, session_id } = m as Msg;
+        const { type, subtype, session_id, permissionMode } = m as Msg;
+        // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
+        if (type === 'system' && (subtype === 'init' || subtype === 'status') && (MODES as readonly unknown[]).includes(permissionMode)) {
+          adoptMode(permissionMode as Mode);
+        }
         // the CLI sends init at the start of every turn: act only when the id is new
         if (type === 'system' && subtype === 'init' && session_id) {
           sessionId = session_id;
@@ -66,6 +76,13 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     } catch (e) {
       if (agent === a) died(a, e);
     }
+  }
+
+  function adoptMode(next: Mode): void {
+    if (next === mode) return;
+    mode = next;
+    try { setModePref(cwd, next); } catch (e) { reportError(hub, 'mode', e); }
+    hub.emit({ kind: 'mode', mode }, { store: false });
   }
 
   function announce(id: string | null): void {
@@ -103,7 +120,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
 
   function ensureAgent(): AgentSession {
     if (agent) return agent;
-    const a = backend.start({ cwd, ...(sessionId ? { resume: sessionId } : {}), ask });
+    const a = backend.start({ cwd, permissionMode: mode, ...(sessionId ? { resume: sessionId } : {}), ask });
     agent = a;
     void pump(a);
     return a;
@@ -155,6 +172,23 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     },
     answer(permissionId, allow) {
       pending.get(permissionId)?.(allow);
+    },
+    mode: () => mode,
+    async setMode(next) {
+      try {
+        // no agent (it died): nothing to tell, the next one starts in this mode
+        await agent?.setPermissionMode(next);
+        // the CLI's own status frame may have got here first and already announced it
+        if (mode !== next) {
+          mode = next;
+          setModePref(cwd, next);
+          hub.emit({ kind: 'mode', mode }, { store: false });
+        }
+        return;
+      } catch (e) {
+        reportError(hub, 'mode', e);
+      }
+      hub.emit({ kind: 'mode', mode }, { store: false });
     },
     info: () => ({ id: sessionId, root: cwd }),
     fileSuggestions: (query) => (agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
