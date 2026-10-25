@@ -125,11 +125,21 @@ test('tree: the Cyrillic md renders, its relative image loads, the path is a ref
   const img = mdRoot(page).locator('img');
   await expect(img).toHaveAttribute('src', /pic\.png/);
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth)).toBeGreaterThan(0);
-  const ref = mdRoot(page).locator('.ref[data-path="src/a.ts"]');
-  await expect(ref).toHaveCount(1);
-  await ref.click();
+  // `../src/a.ts` (file-relative) and `src/a.ts` (project-relative, tried before docs/src/a.ts) name the same file
+  const refs = mdRoot(page).locator('.ref[data-path="src/a.ts"]');
+  await expect(refs).toHaveCount(2);
+  const rooted = mdRoot(page).locator('.ref[data-path="src/a.ts"][data-alt="docs/src/a.ts"]');
+  await rooted.click();
   await expect(tabOf(page, 'src/a.ts')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-file-path="src/a.ts"]')).toContainText('export const a = 1;');
+  await expect(rooted).not.toHaveClass(/missing/);
+  await tabOf(page, MD).click();
+  await mdRoot(page).locator('.ref[data-path="src/a.ts"]:not([data-alt])').click();
+  await expect(tabOf(page, 'src/a.ts')).toHaveAttribute('aria-selected', 'true');
+  // a project image in the md opens as its own tab
+  await tabOf(page, MD).click();
+  await img.click();
+  await expect(tabOf(page, 'docs/pic.png')).toHaveAttribute('aria-selected', 'true');
 });
 
 test('tab menu: Close others keeps chat and the current tab, Close all leaves the chat, the chat has no Close @files', async ({ page }) => {

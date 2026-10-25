@@ -53,11 +53,21 @@ it('marks a backticked path with spaces and symbols, but not a bare command', ()
   expect(b.classList.contains('ref')).toBe(false);
 });
 
-it('resolves against baseDir, strips fragment and query, refuses to leave the root', () => {
-  const d = div('<a href="../b.md#s">1</a><a href="c.md?x=1">2</a><code>./d.ts</code><a href="../../../x.md">3</a>');
+it('links resolve against baseDir first (alt: the root), strip fragment and query, refuse to leave the root', () => {
+  const d = div('<a href="../b.md#s">1</a><a href="c.md?x=1">2</a><a href="../../../x.md">3</a>');
   markRefs(d, 'docs/sub');
-  const p = [...d.querySelectorAll<HTMLElement>('a, code')].map((e) => e.dataset.path);
-  expect(p).toEqual(['docs/b.md', 'docs/sub/c.md', 'docs/sub/d.ts', undefined]);
+  const got = [...d.querySelectorAll<HTMLElement>('a')].map((e) => [e.dataset.path, e.dataset.alt]);
+  expect(got).toEqual([['docs/b.md', undefined], ['docs/sub/c.md', 'c.md'], [undefined, undefined]]);
+});
+
+it('code in an md file resolves against the root first (alt: the file dir); one that climbs out uses the file dir', () => {
+  const d = div('<code>src/a.ts</code><code>./d.ts</code><code>../src/a.ts</code><code>x/y.ts</code>');
+  markRefs(d, 'docs');
+  const got = [...d.querySelectorAll<HTMLElement>('code')].map((e) => [e.dataset.path, e.dataset.alt]);
+  expect(got).toEqual([['src/a.ts', 'docs/src/a.ts'], ['d.ts', 'docs/d.ts'], ['src/a.ts', undefined], ['x/y.ts', 'docs/x/y.ts']]);
+  const chat = div('<code>src/a.ts</code>');
+  markRefs(chat);
+  expect(chat.querySelector('code')!.dataset.alt).toBeUndefined();
 });
 
 it('does not change the text that comment anchors read', () => {
@@ -119,6 +129,34 @@ it('a click with a non-collapsed selection does nothing', async () => {
   await tick();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(selectTabs(store.getState()).open.length).toBe(1);
+});
+
+it('a ref tries data-path, then data-alt, in each source', async () => {
+  const asked: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+    asked.push(decodeURIComponent(new URL(u, 'http://x').searchParams.get('path')!));
+    return { ok: u.includes(encodeURIComponent('docs/src/a.ts')) };
+  }));
+  const store = setup((s) => <Box store={s} html='<code class="ref" data-path="src/a.ts" data-alt="docs/src/a.ts">src/a.ts</code>' />);
+  fireEvent.click(screen.getByText('src/a.ts'));
+  await tick();
+  await tick();
+  expect(asked).toEqual(['src/a.ts', 'docs/src/a.ts']);
+  expect(selectTabs(store.getState()).active).toBe('file:docs/src/a.ts');
+});
+
+it('a click on a /file image (chat reply or md file) opens that file, from its source', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+  const store = setup((s) => (
+    <Box store={s} html='<div class="md"><img alt="p" src="/file?path=docs%2Fpic%201.png"><img alt="q" src="/file?path=x.png&amp;src=ref%3Afeature%2Fx"><img alt="r" src="/attach/abc.png"></div>' />
+  ));
+  fireEvent.click(screen.getByAltText('p'));
+  expect(selectTabs(store.getState()).active).toBe('file:docs/pic 1.png');
+  fireEvent.click(screen.getByAltText('q'));
+  expect(selectTabs(store.getState()).open.find((t) => t.id === selectTabs(store.getState()).active)).toMatchObject({ path: 'x.png', src: 'ref:feature/x' });
+  const n = selectTabs(store.getState()).open.length;
+  fireEvent.click(screen.getByAltText('r'));
+  expect(selectTabs(store.getState()).open.length).toBe(n);
 });
 
 it('a missing file gets .missing and a title', async () => {
