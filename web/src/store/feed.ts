@@ -10,6 +10,8 @@ export type FeedItem =
       /** from the tool_result with the same tool_use_id; absent while the tool still runs */
       result?: { text: string; isError: boolean };
     }
+  /** a one-line mark in the transcript: the context was compacted (pre = tokens before) or cleared; ts 0 = no time */
+  | { kind: 'marker'; what: 'compacted' | 'cleared'; pre?: number; ts: number }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
   /** `text`: the resumed session id, or for tone 'error' the server's message (`where` = the failing part); translated at render */
@@ -50,6 +52,7 @@ type Sdk = {
   user_message_uuids?: string[];
   command_uuid?: string;
   state?: string;
+  compact_metadata?: { pre_tokens?: number };
 };
 
 export const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
@@ -101,6 +104,11 @@ function blocks(m: Sdk): Block[] {
 function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
   const sub = !!m.parent_tool_use_id;
   switch (m.type) {
+    case 'conversation_reset': // live only (never stored): the server's replay [] came first, this adds the line
+      return { ...emptyFeed, session: s.session, turnSeq: s.turnSeq, items: [{ kind: 'marker', what: 'cleared', ts }] };
+    case 'system':
+      if (m.subtype !== 'compact_boundary') return s;
+      return { ...s, items: [...s.items, { kind: 'marker', what: 'compacted', pre: m.compact_metadata?.pre_tokens ?? 0, ts }] };
     case 'stream_event': {
       if (sub) return s;
       const ev = m.event;

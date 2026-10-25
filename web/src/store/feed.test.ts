@@ -243,3 +243,23 @@ test('turnSeq counts live results only; a replay keeps the live counter', () => 
   expect(s.turnSeq).toBe(1);
   expect(reduce(s, res).turnSeq).toBe(2);
 });
+
+test('a live reset frame empties the feed and adds the cleared line, keeping the session', () => {
+  const s0 = fold([{ kind: 'session', id: 'old', root: '/r', title: null, model: null }, user(), result()]);
+  expect(s0.items.length).toBe(2);
+  const s = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7)], s0);
+  expect(s.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
+  expect(s.busy).toBe(false);
+  expect(s.session).toEqual({ id: 'old', root: '/r' }); // the session event that follows updates it
+});
+
+test('a replay of the new session carries no cleared line', () => {
+  expect(reduce(emptyFeed, { kind: 'replay', events: [] }).items).toEqual([]);
+});
+
+test('compact_boundary adds a compacted line, live or replayed', () => {
+  const cb = sdk({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 12345 } }, 9);
+  const want = [{ kind: 'marker', what: 'compacted', pre: 12345, ts: 9 }];
+  expect(fold([cb]).items).toEqual(want);
+  expect(reduce(emptyFeed, { kind: 'replay', events: [cb] }).items).toEqual(want);
+});

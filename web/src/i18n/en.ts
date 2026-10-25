@@ -142,4 +142,11 @@ export const en: Dict = {
   weekTip: 'weekly plan limit',
   costTip: 'API cost of this session',
   resets: (at: string) => `resets ${at}`,
+  compactTip: 'Compact context — the agent summarizes the conversation and continues from the summary (/compact)',
+  clearTip: 'Clear context — start a fresh conversation (/clear). The current session stays in “Sessions ▾”',
+  clearQ: 'Clear the context and start a new conversation?\n\nThe current session is kept — reopen it from “Sessions ▾”.',
+  clearTitle: 'Clear context',
+  clearBtn: 'Clear',
+  compacted: (pre, at) => `⇣ context compacted · was ${pre} tokens${at ? ' · ' + at : ''}`,
+  cleared: (at) => `○ new conversation · context cleared${at ? ' · ' + at : ''}`,
 };

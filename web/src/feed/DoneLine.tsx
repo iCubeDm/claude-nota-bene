@@ -1,3 +1,4 @@
+import { fmtK } from '@/lib/format.ts';
 import { useT } from '@/i18n/index.ts';
 import type { FeedItem } from '@/store/feed.ts';
 import { timeOf } from './UserMessage.tsx';
@@ -28,6 +29,16 @@ export function NoticeLine({ item }: { item: Extract<FeedItem, { kind: 'notice' 
   return (
     <div data-kind="notice" className={LINE}>
       {t('resumed', item.text)}
+    </div>
+  );
+}
+
+export function MarkerLine({ item }: { item: Extract<FeedItem, { kind: 'marker' }> }) {
+  const t = useT();
+  const at = item.ts === 0 ? '' : timeOf(item.ts);
+  return (
+    <div data-kind="marker" className={LINE}>
+      {item.what === 'compacted' ? t('compacted', fmtK(item.pre ?? 0), at) : t('cleared', at)}
     </div>
   );
 }

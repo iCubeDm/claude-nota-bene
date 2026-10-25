@@ -64,3 +64,9 @@ controlsListener.startListening({
     if (want !== ev.mode) (api.dispatch as (t: AppThunk) => void)(pickMode(want));
   },
 });
+
+/** compact / clear. Refused while busy (the server would answer `busy` too); the confirmation for clear is the caller's. */
+export const runCommand = (name: 'compact' | 'clear'): AppThunk => (_d, getState, { send }) => {
+  if (getState().feed.busy) return;
+  send({ type: 'command', name });
+};

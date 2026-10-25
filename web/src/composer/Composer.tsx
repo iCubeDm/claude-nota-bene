@@ -4,6 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useT } from '@/i18n/index.ts';
 import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
+import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
 import { nextMode, pickMode, selectMode } from '@/controls/slice.ts';
 import { MentionPicker } from './MentionPicker.tsx';
@@ -189,6 +190,7 @@ export function Composer() {
           }}
         />
         <ModePill />
+        <CompactClear />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button type="button" variant="ghost" size="icon-sm" aria-label={t('attach')} onClick={() => fileIn.current?.click()}>
