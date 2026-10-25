@@ -307,6 +307,13 @@ const MIME = {
   '.md': 'text/plain; charset=utf-8', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8',
 };
 
+// project files are served from the app's own origin: a project .svg or .html opened directly must not run script
+// with access to the app's WebSocket (it could send messages to the agent)
+const FILE_SAFETY = {
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'",
+  'Cross-Origin-Resource-Policy': 'same-origin',
+};
 function serveFile(req, res, file) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404); return res.end('not found'); }
@@ -322,10 +329,10 @@ function serveFile(req, res, file) {
       if (start >= st.size || start > end) {
         res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end();
       }
-      res.writeHead(206, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });
+      res.writeHead(206, { ...FILE_SAFETY, 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });
       stream({ start, end });
     } else {
-      res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': st.size });
+      res.writeHead(200, { ...FILE_SAFETY, 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': st.size });
       stream();
     }
   });
