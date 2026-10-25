@@ -28,6 +28,9 @@ export const ru = {
   mermaidError: (msg: string) => `ошибка mermaid: ${msg}`, // new in M0 (the prototype had it in English only)
   srcMine: 'моё сообщение',
   commentBtn: '💬 Комментировать',
+  commentPh: 'Комментарий…',
+  popHint: '⌘/Ctrl+Enter — добавить · Esc — отмена',
+  add: 'Добавить',
   batchHead: 'Комментарии к фрагментам:',
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
   // quick labels (M1-08)

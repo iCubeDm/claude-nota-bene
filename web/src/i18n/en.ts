@@ -31,6 +31,9 @@ export const en: Dict = {
   mermaidError: (msg) => `mermaid error: ${msg}`,
   srcMine: 'my message',
   commentBtn: '💬 Comment',
+  commentPh: 'Comment…',
+  popHint: '⌘/Ctrl+Enter — add · Esc — cancel',
+  add: 'Add',
   batchHead: 'Comments on fragments:',
   resumed: (id) => `↻ resumed session ${id}`,
   // quick labels (M1-08)
