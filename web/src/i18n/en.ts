@@ -98,6 +98,7 @@ export const en: Dict = {
   tooLarge: 'File is too large to show (over 2 MB)',
   binary: 'Binary file, not shown',
   fileGone: 'This file no longer exists',
+  noFile: 'no such file in the project',
   openRaw: 'Open raw',
   noHighlight: 'not highlighted: large file',
   reload: 'Reload',

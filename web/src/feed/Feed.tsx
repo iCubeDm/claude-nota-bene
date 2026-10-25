@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import { useT } from '@/i18n/index.ts';
-import { selectFeed, useAppSelector } from '@/store/store.ts';
+import { refClick } from '@/refs/refs.ts';
+import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { Markdown } from './Markdown.tsx';
 import { DoneLine, NoticeLine } from './DoneLine.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
@@ -11,6 +12,7 @@ import { UserMessage } from './UserMessage.tsx';
 export function Feed() {
   const { items } = useAppSelector(selectFeed);
   const t = useT();
+  const dispatch = useAppDispatch();
   const root = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const lastLen = useRef(0);
@@ -38,7 +40,7 @@ export function Feed() {
   }, [items]);
 
   return (
-    <div ref={root}>
+    <div ref={root} onClick={(e) => refClick(e, dispatch)}>
       {items.length === 0 && (
         <div data-kind="empty" className="py-6 text-center text-sm text-muted-foreground">
           {t('emptyChat')}

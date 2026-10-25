@@ -1,8 +1,9 @@
 import hljs from 'highlight.js';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Markdown } from '@/feed/Markdown.tsx';
+import { refClick } from '@/refs/refs.ts';
 import { useT } from '@/i18n/index.ts';
-import { selectTurnSeq, useAppSelector, useMedia } from '@/store/store.ts';
+import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
 
@@ -57,6 +58,7 @@ function CodeText({ text, path }: { text: string; path: string }) {
 
 export function FileView({ path, active }: { path: string; active: boolean }) {
   const t = useT();
+  const dispatch = useAppDispatch();
   const kind = kindOf(path);
   const media = kind !== 'md' && kind !== 'text';
   const tabId = fileTabId(path);
@@ -146,7 +148,7 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
     const inner =
       data == null ? null
       : data.s === 'text' ? (
-        kind === 'md' ? <div className="mx-auto max-w-3xl p-4"><Markdown text={data.text} final baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
+        kind === 'md' ? <div className="mx-auto max-w-3xl p-4" onClick={(e) => refClick(e, dispatch)}><Markdown text={data.text} final baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
         : <pre className="m-0 p-4 font-mono text-xs leading-relaxed whitespace-pre"><CodeText text={data.text} path={path} /></pre>
       )
       : data.s === 'error' ? <p className="p-4 text-sm text-destructive">{data.message}</p>

@@ -5,6 +5,7 @@ import { marked } from 'marked';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { t } from '@/i18n/index.ts';
 import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
+import { markRefs } from '@/refs/refs.ts';
 import './markdown.css';
 
 // external links in agent replies open in a new browser tab instead of replacing the app
@@ -49,7 +50,8 @@ function loadMermaid(): Promise<MermaidApi> {
 
 let seq = 0;
 
-function postProcess(root: HTMLElement, final: boolean) {
+function postProcess(root: HTMLElement, final: boolean, baseDir?: string) {
+  if (final) markRefs(root, baseDir);
   root.querySelectorAll<HTMLElement>('pre code').forEach((c) => {
     const lang = /language-(\w+)/.exec(c.className)?.[1];
     const pre = c.parentElement!;
@@ -95,8 +97,8 @@ export const Markdown = memo(
       [text, baseDir],
     );
     useLayoutEffect(() => {
-      if (ref.current) postProcess(ref.current, final);
-    }, [html, final]);
+      if (ref.current) postProcess(ref.current, final, baseDir);
+    }, [html, final, baseDir]);
     return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
   },
   (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir,
