@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { AUDIO, IMAGE, VIDEO } from '@/files/kinds.ts';
 import { revealInTree } from '@/tree/slice.ts';
-import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
 import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
 
@@ -22,7 +22,7 @@ const iconFor = (tab: Tab) => (tab.kind === 'chat' ? ICONS.chat : iconForPath(ta
 
 const basename = (p: string) => p.split('/').pop() || p;
 
-function TabItem({ tab, active, last }: { tab: Tab; active: boolean; last: boolean }) {
+function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; last: boolean; playing: boolean }) {
   const t = useT();
   const d = useAppDispatch();
   const badge = useAppSelector((s) => (tab.kind === 'file' ? selectPendingCountByPath(s)[tab.path] ?? 0 : 0));
@@ -36,6 +36,7 @@ function TabItem({ tab, active, last }: { tab: Tab; active: boolean; last: boole
           tabIndex={active ? 0 : -1}
           aria-selected={active}
           data-tab={tab.id}
+          data-playing={playing || undefined}
           title={tab.kind === 'file' ? tab.path : undefined}
           onClick={() => d(activate(tab.id))}
           onAuxClick={(e) => {
@@ -82,10 +83,13 @@ function TabItem({ tab, active, last }: { tab: Tab; active: boolean; last: boole
 
 export function TabStrip() {
   const { open, active } = useAppSelector(selectTabs);
+  const media = useMedia();
+  const playing = useSyncExternalStore(media.subscribe, () => media.playing());
   return (
     <div role="tablist" className="flex h-10 flex-none items-center gap-1 overflow-x-auto border-b border-border-soft bg-chrome px-2">
       {open.map((tab, i) => (
-        <TabItem key={tab.id} tab={tab} active={tab.id === active} last={i === open.length - 1} />
+        // the dot marks a background tab that still plays; the active tab shows its own player
+        <TabItem key={tab.id} tab={tab} active={tab.id === active} last={i === open.length - 1} playing={tab.id === playing && tab.id !== active} />
       ))}
     </div>
   );

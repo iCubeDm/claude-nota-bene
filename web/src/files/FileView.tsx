@@ -1,8 +1,8 @@
 import hljs from 'highlight.js';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Markdown } from '@/feed/Markdown.tsx';
 import { useT } from '@/i18n/index.ts';
-import { selectTurnSeq, useAppSelector } from '@/store/store.ts';
+import { selectTurnSeq, useAppSelector, useMedia } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
 
@@ -70,6 +70,9 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
   const failedRef = useRef(false);
   failedRef.current = failed;
   const mediaUrl = bust ? `${url}&r=${bust}` : url;
+  // the media controller tracks this tab's <video|audio> while it is mounted (pause/PiP rules, the ▶ dot)
+  const mediaCtl = useMedia();
+  const mediaRef = useCallback((el: HTMLMediaElement | null) => (el ? mediaCtl.register(tabId, el) : undefined), [mediaCtl, tabId]);
 
   // a finished turn marks the view stale; the fetch effect below only runs while active, so an inactive view catches up on activation
   const seenTurn = useRef(turnSeq);
@@ -133,9 +136,9 @@ export function FileView({ path, active }: { path: string; active: boolean }) {
     body = (
       <div data-pane={tabId} hidden={!active} className="grid-pane relative [&:not([hidden])]:grid min-h-0 flex-1 place-items-center overflow-auto p-4">
         {kind === 'video' ? (
-          <video controls preload="metadata" src={mediaUrl} onError={onError} data-media-tab={tabId} className="max-h-full max-w-full" />
+          <video ref={mediaRef} controls preload="metadata" src={mediaUrl} onError={onError} data-media-tab={tabId} className="max-h-full max-w-full" />
         ) : (
-          <audio controls src={mediaUrl} onError={onError} data-media-tab={tabId} className="w-full max-w-xl" />
+          <audio ref={mediaRef} controls src={mediaUrl} onError={onError} data-media-tab={tabId} className="w-full max-w-xl" />
         )}
       </div>
     );
