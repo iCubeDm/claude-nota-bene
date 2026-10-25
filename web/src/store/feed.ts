@@ -25,9 +25,11 @@ export type FeedState = {
   waiting: string[];
   /** counter behind the streaming ids `stream:${n}`; kept in state so reduce stays pure and replay is deterministic. */
   streamN: number;
+  /** live results seen so far; a replay does not count. Consumers (the file tree) refresh when it changes. */
+  turnSeq: number;
 };
 
-export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0 };
+export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, turnSeq: 0 };
 
 // Loose view of the SDK message: only the fields the feed reads (real shapes: server/test/fixtures/real-frames.json).
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
@@ -169,7 +171,7 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
       const waiting = answered ? s.waiting.filter((id) => !answered.includes(id))
         : m.is_error === true ? [] : s.waiting;
       const busy = s.forcePending || (m.queued_turn_count ?? 0) > 0 || waiting.length > 0;
-      return { ...s, items: [...closed, done], busy, forcePending: false, waiting };
+      return { ...s, items: [...closed, done], busy, forcePending: false, waiting, turnSeq: s.turnSeq + 1 };
     }
     case 'command_lifecycle': {
       // a queued send that was cancelled (e.g. Stop with cancel_queued) never gets a result of its own
@@ -185,7 +187,8 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
 export function reduce(s: FeedState, ev: ServerEvent): FeedState {
   switch (ev.kind) {
     case 'replay':
-      return ev.events.reduce(reduce, emptyFeed);
+      // the replayed results are history: keep the live counter, or a reconnect would look like a finished turn
+      return { ...ev.events.reduce(reduce, emptyFeed), turnSeq: s.turnSeq };
     case 'sdk':
       return reduceSdk(s, ev.m as unknown as Sdk, ev.ts);
     case 'user': {

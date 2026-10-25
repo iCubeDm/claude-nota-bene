@@ -7,6 +7,7 @@ import { HighlightLayer } from './comments/HighlightLayer.tsx';
 import { CommentsPanel } from './comments/CommentsPanel.tsx';
 import { CommentPopup } from './comments/CommentPopup.tsx';
 import { SelectionButton, type PendingSelection } from './comments/SelectionButton.tsx';
+import { FileTree } from './files/FileTree.tsx';
 import { Feed } from './feed/Feed.tsx';
 import { Footer } from './shell/Footer.tsx';
 import { Panes } from './tabs/Panes.tsx';
@@ -36,6 +37,7 @@ export function App() {
             </>
           }
         />
+        <FileTree />
         <CommentsPanel onSend={sendPanel} />
       </div>
       <SelectionButton onComment={setPending} />

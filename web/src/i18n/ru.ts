@@ -86,4 +86,9 @@ export const ru = {
   toolInput: 'Вход',
   toolNoOutput: 'нет вывода',
   toolOutput: 'Результат',
+  // file tree (M3-07)
+  files: 'Файлы',
+  refresh: 'Обновить',
+  filterPh: 'Фильтр файлов…',
+  fileTree: 'Дерево файлов',
 };

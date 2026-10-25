@@ -88,3 +88,10 @@ const selectSentByMessage = createSelector([selectComments], (items) => {
   return m;
 });
 export const selectSentFor = (s: RootState, messageId: string): Comment[] => selectSentByMessage(s)[messageId] ?? EMPTY;
+
+/** Pending comments per project-relative file path (anchor.source of kind 'file'). */
+export const selectPendingCountByPath = createSelector([selectComments], (items) => {
+  const m: Record<string, number> = {};
+  for (const c of items) if (c.status === 'pending' && c.anchor.source.kind === 'file') m[c.anchor.source.path] = (m[c.anchor.source.path] ?? 0) + 1;
+  return m;
+});

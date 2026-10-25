@@ -234,3 +234,12 @@ test('command_lifecycle cancelled removes that send from waiting', () => {
   expect(reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'u1', state: 'started' }))).toBe(s1);
   expect(reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'zz', state: 'cancelled' })).waiting).toEqual(['u1']);
 });
+
+test('turnSeq counts live results only; a replay keeps the live counter', () => {
+  const res = { kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as unknown as ServerEvent;
+  let s = reduce(emptyFeed, res);
+  expect(s.turnSeq).toBe(1);
+  s = reduce(s, { kind: 'replay', events: [res, res] });
+  expect(s.turnSeq).toBe(1);
+  expect(reduce(s, res).turnSeq).toBe(2);
+});

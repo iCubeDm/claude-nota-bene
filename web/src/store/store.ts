@@ -6,7 +6,7 @@ import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { readSavedTabs, restoreTabs, serializeTabs, tabsKey, tabsSlice } from '../tabs/slice.ts';
-import { treeSlice } from '../tree/slice.ts';
+import { readSavedDirs, setDirs, treeKey, treeSlice } from '../tree/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** The only way server data enters the store. */
@@ -53,6 +53,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect }) {
   // the ONE place that persists UI state, whoever changed it (toggle, ×, auto-open after adding a comment, tab changes)
   let panelOpen = store.getState().comments.ui.panelOpen;
   let tabs = store.getState().tabs;
+  let dirs = store.getState().tree.dirs;
   let restoredRoot: string | null = null;
   store.subscribe(() => {
     const st = store.getState();
@@ -67,6 +68,14 @@ export function makeStore(o: { url: string; connect?: typeof realConnect }) {
       restoredRoot = root;
       const saved = readSavedTabs(root);
       if (saved) store.dispatch(restoreTabs(saved));
+      const savedDirs = readSavedDirs(root);
+      if (savedDirs) store.dispatch(setDirs([...new Set([...savedDirs, ...store.getState().tree.dirs])]));
+    }
+    if (st.tree.dirs !== dirs) {
+      dirs = st.tree.dirs;
+      if (restoredRoot) {
+        try { localStorage.setItem(treeKey(restoredRoot), JSON.stringify(dirs)); } catch { /* not persisted */ }
+      }
     }
     if (st.tabs !== tabs) {
       tabs = st.tabs;
@@ -98,6 +107,7 @@ export const useAppDispatch: () => AppDispatch = useDispatch;
 export const selectFeed = (s: RootState): FeedState => s.feed;
 export const selectBusy = (s: RootState): boolean => s.feed.busy;
 export const selectConn = (s: RootState): ConnState => s.conn.state;
+export const selectTurnSeq = (s: RootState): number => s.feed.turnSeq;
 export const selectSession = (s: RootState) => s.feed.session;
 
 export const sendMessage =
