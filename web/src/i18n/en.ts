@@ -26,7 +26,7 @@ export const en: Dict = {
   hidePanel: 'Hide panel',
   stopTip: 'Stop the agent · Esc',
   keysTip: 'Enter — send\nShift+Enter — new line\n⌘Enter — interrupt the agent and send\nEsc — stop the agent',
-  composerPh: 'Message the agent… @ to reference a file, select text in the chat or a file to comment on it',
+  composerPh: 'Message the agent… select text in the chat to comment on it',
   allowQ: (tool) => `Allow ${tool}?`,
   allow: 'Allow',
   deny: 'Deny',
