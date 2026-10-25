@@ -7,7 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { Composer } from '@/composer/Composer.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
-import { planApproved } from './slice.ts';
+import { planApproved, restartAgent, selectRestarting, selectSwitching, switchSession } from './slice.ts';
 
 // Radix popper measures with ResizeObserver, which jsdom lacks
 globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
@@ -113,4 +113,63 @@ it('the pill menu picks a mode and Esc closes it with preventDefault', async () 
   await userEvent.click(await screen.findByText('Plan'));
   expect(modes(sent)).toEqual([{ type: 'mode', mode: 'plan' }]);
   expect(pill).toHaveTextContent('Plan');
+});
+
+// --- switching across a reconnect, and plan-restore across a replay ---
+function setupConn() {
+  const sent: ClientMessage[] = [];
+  let ev!: (e: ServerEvent) => void;
+  let st!: (s: 'open' | 'closed') => void;
+  const connect = vi.fn((_u: string, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
+    ev = onEvent; st = onState;
+    onState('open');
+    return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };
+  });
+  const store = makeStore({ url: 'ws://x', connect: connect as never });
+  return { sent, store, ev: (e: ServerEvent) => act(() => ev(e)), conn: (s: 'open' | 'closed') => act(() => st(s)) };
+}
+const sess = { kind: 'session', id: 's1', root: '/r', title: null, model: null } as const;
+
+it('a replay that carries the settled session ends a switch after a socket drop', () => {
+  const { store, ev, conn } = setupConn();
+  act(() => void store.dispatch(switchSession('s1', '/r')));
+  expect(selectSwitching(store.getState())).toBe(true);
+  conn('closed');
+  conn('open');
+  ev({ kind: 'replay', events: [sess] });
+  expect(selectSwitching(store.getState())).toBe(false);
+  expect(store.getState().controls.restarting).toBe(false);
+});
+
+it('a restart interrupted by a socket drop is released by a replay with the session', () => {
+  const { store, ev, conn } = setupConn();
+  act(() => void store.dispatch(restartAgent()));
+  expect(selectRestarting(store.getState())).toBe(true);
+  conn('closed');
+  conn('open');
+  ev({ kind: 'replay', events: [sess] });
+  expect(selectSwitching(store.getState())).toBe(false);
+  expect(selectRestarting(store.getState())).toBe(false);
+});
+
+it('an empty replay keeps the switch until the live session arrives', () => {
+  const { store, ev, conn } = setupConn();
+  act(() => void store.dispatch(switchSession('s1', '/r')));
+  conn('closed');
+  conn('open');
+  ev({ kind: 'replay', events: [] });
+  expect(selectSwitching(store.getState())).toBe(true);
+  ev(sess);
+  expect(selectSwitching(store.getState())).toBe(false);
+});
+
+it('a replay drops the plan-restore state: a later mode echo sends nothing', () => {
+  const { sent, store, ev } = setupConn();
+  ev({ kind: 'mode', mode: 'acceptEdits' });
+  ev({ kind: 'mode', mode: 'plan' });
+  act(() => void store.dispatch(planApproved()));
+  ev({ kind: 'replay', events: [] });
+  expect(store.getState().controls.modeBeforePlan).toBeNull();
+  ev({ kind: 'mode', mode: 'default' });
+  expect(modes(sent)).toEqual([]);
 });

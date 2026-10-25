@@ -43,6 +43,7 @@ export const controlsSlice = createSlice({
       const ev = a.payload;
       if (ev.kind === 'mode') setMode(s, ev.mode);
       // stale once the conversation moves on: a user turn (live or replayed), a reset, a replay, another session
+      if (ev.kind === 'replay') { s.modeBeforePlan = null; s.restoreAfterPlan = null; } // plan-restore belongs to one conversation
       if (ev.kind === 'user' || ev.kind === 'replay') s.suggestion = '';
       else if (ev.kind === 'session') {
         // the server re-announces after every result (title refresh): only a different id or root is a new session
@@ -58,7 +59,10 @@ export const controlsSlice = createSlice({
       // Only these end a switch. A `session` before the reset is the old session's (a title refresh); a `busy` error
       // answers someone's send or command (any socket's: errors are broadcast), never a switch, which the server
       // refuses as `switch`. Clearing on those would let a send go out mid-switch and lose the draft.
-      if (ev.kind === 'replay' && s.switching === 'asked') s.switching = 'committed';
+      // A replay that already carries the settled session (a reconnect after the switch finished) ends it too; an empty
+      // one (the teardown's reset, or a reconnect mid-switch) keeps it until the live `session` arrives.
+      if (ev.kind === 'replay' && ev.events.some((e) => e.kind === 'session' && (e.id || e.root))) s.switching = null;
+      else if (ev.kind === 'replay' && s.switching === 'asked') s.switching = 'committed';
       else if (ev.kind === 'session' && s.switching === 'committed') s.switching = null;
       else if (ev.kind === 'server-error' && ev.where === 'switch') s.switching = null;
       if (!s.switching) s.restarting = false;
