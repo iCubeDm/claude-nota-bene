@@ -1,6 +1,7 @@
 import type { RequestListener, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pipeline } from 'node:stream';
 import type { EventHub } from './hub.ts';
 import { reportError } from './errors.ts';
 
@@ -39,6 +40,7 @@ export function httpHandler(o: {
   webDist: string;
   info: () => object;
   allowedHosts: string[]; // read per request, so the caller may fill it after listen()
+  allowedOrigins?: string[]; // same; any method other than GET/HEAD needs an Origin from this list
   extra?: Record<string, RequestListener>;
 }): RequestListener {
   const root = path.resolve(o.webDist);
@@ -52,19 +54,19 @@ export function httpHandler(o: {
       res.end();
       return;
     }
-    const stream = fs.createReadStream(file);
-    stream.on('error', (e) => {
-      reportError(o.hub, req.url ?? '', e);
-      stream.destroy();
-      res.destroy();
+    pipeline(fs.createReadStream(file), res, (e) => {
+      if (e && (e as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') reportError(o.hub, req.url ?? '', e);
     });
-    stream.pipe(res);
   }
 
   return (req, res) => {
     try {
       if (!isAllowedHost(req.headers.host, o.allowedHosts)) {
         text(res, 403, 'forbidden host');
+        return;
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.headers.origin !== undefined && (o.allowedOrigins ?? []).includes(req.headers.origin))) {
+        text(res, 403, 'forbidden origin');
         return;
       }
       const raw = req.url ?? '/';

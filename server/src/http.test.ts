@@ -12,6 +12,7 @@ let server: http.Server;
 let port: number;
 const hub = new EventHub();
 const allowedHosts: string[] = [];
+const allowedOrigins: string[] = [];
 
 beforeAll(async () => {
   dist = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-http-'));
@@ -22,6 +23,7 @@ beforeAll(async () => {
       hub,
       webDist: dist,
       allowedHosts,
+      allowedOrigins,
       info: () => ({ name: 'nb' }),
       extra: {
         '/boom': () => {
@@ -33,6 +35,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   port = (server.address() as AddressInfo).port;
   allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
+  allowedOrigins.push(`http://127.0.0.1:${port}`);
 });
 
 afterAll(async () => {
@@ -96,7 +99,13 @@ describe('httpHandler', () => {
   });
 
   it('non-GET is 405', async () => {
-    expect((await raw('POST', '/info')).status).toBe(405);
-    expect((await raw('POST', '/a.js')).status).toBe(405);
+    const origin = { origin: `http://127.0.0.1:${port}` };
+    expect((await raw('POST', '/info', origin)).status).toBe(405);
+    expect((await raw('POST', '/a.js', origin)).status).toBe(405);
+  });
+
+  it('non-GET without an allowed Origin is 403, before any route', async () => {
+    expect((await raw('POST', '/info')).status).toBe(403);
+    expect((await raw('POST', '/boom', { origin: 'http://evil.example' })).status).toBe(403);
   });
 });

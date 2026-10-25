@@ -8,6 +8,8 @@ import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
+import { completeFiles } from './files.ts';
+import { fileRoutes } from './fileRoutes.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
 import { createSessionManager } from './session.ts';
 import { stateDir } from './state.ts';
@@ -54,16 +56,19 @@ export async function startServer(o: {
       broadcastComments(store.get(id));
     });
     const allowedHosts: string[] = []; // filled after listen, once the port is known
+    const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
+    const root = manager.info().root;
     const server = http.createServer(httpHandler({
       hub,
       allowedHosts,
+      allowedOrigins,
+      extra: fileRoutes({ root, hub, complete: (q) => completeFiles(root, q) }),
       webDist: o.webDist,
       info: () => {
         const { id, root } = manager.info();
         return { root, session: id };
       },
     }));
-    const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     const wss = new WebSocketServer({
       server,
       verifyClient: ({ req }, done) => {
