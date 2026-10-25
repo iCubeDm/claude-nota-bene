@@ -1,10 +1,10 @@
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { Comment } from '@nota-bene/shared';
 // store.ts imports this file for the reducer; every use of serverEvent below is lazy (inside callbacks), so the cycle is safe.
-import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
+import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
 
 export type CommentCard = { id: string; x: number; y: number };
-export type CommentsState = { items: Comment[]; /** a local change the server has not received */ unsynced: boolean; /** local set re-sent on reconnect; the server's initial (stale) push is still to come and must be ignored once */ resent: boolean; ui: { panelOpen: boolean; card: CommentCard | null } };
+export type CommentsState = { items: Comment[]; /** a local change the server has not received */ unsynced: boolean; /** local set re-sent on reconnect; the server's initial (stale) push is still to come and must be ignored once */ resent: boolean; /** ids handed to the socket whose `comments` echo has not arrived yet (client-only; keeps a double send out) */ sendingIds: string[]; ui: { panelOpen: boolean; card: CommentCard | null } };
 
 const readPanelOpen = (): boolean => {
   try {
@@ -16,9 +16,10 @@ const readPanelOpen = (): boolean => {
 
 export const commentsSlice = createSlice({
   name: 'comments',
-  initialState: (): CommentsState => ({ items: [], unsynced: false, resent: false, ui: { panelOpen: readPanelOpen(), card: null } }),
+  initialState: (): CommentsState => ({ items: [], unsynced: false, resent: false, sendingIds: [], ui: { panelOpen: readPanelOpen(), card: null } }),
   reducers: {
     setItems: (s, a: PayloadAction<Comment[]>) => void (s.items = a.payload),
+    markSending: (s, a: PayloadAction<string[]>) => void (s.sendingIds = [...s.sendingIds, ...a.payload]),
     setUnsynced: (s, a: PayloadAction<boolean>) => void (s.unsynced = a.payload),
     markResent: (s) => void ((s.unsynced = false), (s.resent = true)),
     setPanelOpen: (s, a: PayloadAction<boolean>) => void (s.ui.panelOpen = a.payload),
@@ -27,7 +28,14 @@ export const commentsSlice = createSlice({
   },
   // only a `comments` event replaces items; `replay` must not clear them (the server sends replay first)
   extraReducers: (b) =>
-    b.addCase(serverEvent, (s, a) => {
+    b.addCase(connState, (s, a) => {
+      if (a.payload !== 'open') s.sendingIds = []; // the in-flight send may be lost with the socket
+    }).addCase(serverEvent, (s, a) => {
+      if (a.payload.kind === 'comments') {
+        // drop an id once the echo shows it sent or gone; a foreign echo that still lists it as pending keeps it in flight
+        const items = a.payload.items;
+        s.sendingIds = s.sendingIds.filter((id) => items.find((c) => c.id === id)?.status === 'pending');
+      }
       // while unsynced, local offline edits win; they are re-sent on reconnect (resyncComments)
       if (a.payload.kind !== 'comments') return;
       if (s.unsynced) return;
@@ -36,7 +44,7 @@ export const commentsSlice = createSlice({
     }),
 });
 
-export const { setPanelOpen, openCommentCard, closeCommentCard } = commentsSlice.actions;
+export const { markSending, setPanelOpen, openCommentCard, closeCommentCard } = commentsSlice.actions;
 
 /** Update locally first, then send the FULL set; a closed socket keeps the local change for the next sync. */
 // Accepted race: two edits within one round trip can see the first echo overwrite the second locally until the second echo lands.
@@ -67,7 +75,10 @@ export const removeComment = (id: string): AppThunk => (d, getState) => {
 export const selectComments = (s: RootState): Comment[] => s.comments.items;
 export const selectCommentsUi = (s: RootState) => s.comments.ui;
 const EMPTY: Comment[] = Object.freeze([]) as unknown as Comment[];
-export const selectPending = createSelector([selectComments], (items) => items.filter((c) => c.status === 'pending'));
+const selectSendingIds = (s: RootState) => s.comments.sendingIds;
+/** Pending and not already on the wire. */
+export const selectPending = createSelector([selectComments, selectSendingIds], (items, sending) =>
+  items.filter((c) => c.status === 'pending' && !sending.includes(c.id)));
 const selectSentByMessage = createSelector([selectComments], (items) => {
   const m: Record<string, Comment[]> = {};
   for (const c of items) if (c.status === 'sent' && c.sentIn !== undefined) (m[c.sentIn] ??= []).push(c);

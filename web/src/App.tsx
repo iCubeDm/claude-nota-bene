@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react';
+import { sendBatch } from './comments/send.ts';
+import { useAppDispatch } from './store/store.ts';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { CommentCardPopover } from './comments/CommentCard.tsx';
 import { HighlightLayer } from './comments/HighlightLayer.tsx';
@@ -9,9 +11,9 @@ import { Feed } from './feed/Feed.tsx';
 import { Footer } from './shell/Footer.tsx';
 import { Header } from './shell/Header.tsx';
 
-const noopSend = () => {}; // M1-16 wires the batch send
-
 export function App() {
+  const dispatch = useAppDispatch();
+  const sendPanel = useCallback(() => void dispatch(sendBatch(false)), [dispatch]);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const close = useCallback(() => setPending(null), []);
   return (
@@ -27,7 +29,7 @@ export function App() {
           </div>
           <HighlightLayer />
         </main>
-        <CommentsPanel onSend={noopSend} />
+        <CommentsPanel onSend={sendPanel} />
       </div>
       <SelectionButton onComment={setPending} />
       {pending && <CommentPopup pending={pending} onClose={close} />}

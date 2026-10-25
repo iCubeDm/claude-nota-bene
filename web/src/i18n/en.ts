@@ -38,6 +38,9 @@ export const en: Dict = {
   commentPh: 'Comment…',
   popHint: '⌘/Ctrl+Enter — add · Esc — cancel',
   add: 'Add',
+  nComments: (n) => `${n} comment${n === 1 ? '' : 's'}`,
+  commentsLc: 'comments',
+  srcChat: 'chat',
   batchHead: 'Comments on fragments:',
   resumed: (id) => `↻ resumed session ${id}`,
   // quick labels (M1-08)

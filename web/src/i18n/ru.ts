@@ -35,6 +35,9 @@ export const ru = {
   commentPh: 'Комментарий…',
   popHint: '⌘/Ctrl+Enter — добавить · Esc — отмена',
   add: 'Добавить',
+  nComments: (n: number) => `${n} ${{ one: 'комментарий', few: 'комментария' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'комментариев'}`,
+  commentsLc: 'комментарии',
+  srcChat: 'чат',
   batchHead: 'Комментарии к фрагментам:',
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
   // quick labels (M1-08)

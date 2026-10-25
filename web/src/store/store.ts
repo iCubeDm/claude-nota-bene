@@ -3,12 +3,13 @@ import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
+import { composerSlice } from '../composer/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** The only way server data enters the store. */
 export const serverEvent = createAction<ServerEvent>('server/event');
-const connState = createAction<'open' | 'closed'>('conn/state');
+export const connState = createAction<'open' | 'closed'>('conn/state');
 
 // reduce() is pure and returns a new object. Returning a new state from an Immer case reducer is
 // allowed, so we hand it the draft cast to FeedState: reduce only reads it and spreads/slices
@@ -43,7 +44,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect }) {
   let conn: ReturnType<typeof realConnect> | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }),
     devTools: devToolsEnabled(),
   });
