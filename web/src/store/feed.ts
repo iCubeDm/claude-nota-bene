@@ -191,6 +191,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'resumed':
       return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
     case 'server-error':
+    case 'comments': // handled by the comments store, not the feed
       return s;
     default: {
       const never: never = ev;
