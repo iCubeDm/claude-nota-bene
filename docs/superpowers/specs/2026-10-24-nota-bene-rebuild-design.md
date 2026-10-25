@@ -5,7 +5,7 @@ Source of truth for features: `prototype/` (working spike) and the session journ
 
 ## Goal
 
-Rebuild the prototype as a maintainable React + TypeScript app with feature parity. Then switch daily use over to it and retire `prototype/`. Parity means everything listed in [Parity checklist](#parity-checklist) works at least as well as in the prototype. No new features until parity, with three exceptions that fix the prototype's structural problems: stable comment anchors, in-process session switching and a state directory outside the repo.
+Rebuild the prototype as a maintainable React + TypeScript app with feature parity. Then switch daily use over to it and retire `prototype/`. Parity means everything listed in [Parity checklist](#parity-checklist) works at least as well as in the prototype. No new features until parity, with three exceptions that fix the prototype's structural problems: stable comment anchors, in-process session switching and a state directory outside the repo. One feature is added by decision (2026-10-25) although the prototype never had it: **subagents and background tasks** (see below).
 
 ## Non-goals (until parity)
 
@@ -39,7 +39,7 @@ flowchart LR
 - **State management: Redux Toolkit.**
   - Every server event enters the store as one action, `serverEvent(ev)`, and the slices are pure reducers over it. The app is event-sourced by nature, so this fits directly.
   - Redux DevTools gives a replayable log of exactly what the server sent, which is the main debugging need: streaming, replay and mid-turn races.
-  - Slices: `feed`, `conn`, then `comments` (M1), `tabs` (M2), `session`/`stats`/`mode` (M3).
+  - Slices: `feed`, `conn`, then `comments` (M1), `tasks` and `tabs` (M2), `session`/`stats`/`mode` (M4).
   - The WebSocket lives in a middleware: inbound frames are dispatched as `serverEvent`, and outbound messages are thunks.
   - Components read only through typed selectors and never touch the socket.
 - **`AgentSession` interface** between the server and the SDK. There are two implementations:
@@ -87,6 +87,27 @@ type Anchor = {
   - a block that is still streaming cannot be commented on until it is final.
 - **Persistence.** The server stores comments in `comments/<sessionId>.json`. They survive reloads, restarts and resumes, and sent comments keep their dimmed marks.
 
+## Agents and background tasks
+
+Decided 2026-10-25. The prototype never had this; Claude Code's terminal does, and it is part of daily work.
+
+- **Source of truth: the SDK's task events.**
+  - `system/task_started`, `task_updated` (patch), `task_progress` (usage, last tool, one-line summary) and `task_notification` (completed / failed / stopped, `output_file`) drive a `tasks` slice keyed by `task_id`.
+  - `background_tasks_changed` replaces the set of live background tasks.
+  - Options turned on: `forwardSubagentText` (the full subagent conversation, tagged with `parent_tool_use_id`) and `agentProgressSummaries` (the one-line status).
+- **Where it lives in the UI** (modelled on Claude Code):
+  - An **indicator under the composer** shows the running count. Click → a **bottom drawer** slides up over the feed (overlay, not resizing it).
+  - The drawer holds the task tree and its actions.
+  - The indicator is chosen over a third side sheet because tasks are live activity tied to the turn in progress: their status must be visible at a glance next to the composer, while the side sheets hold content you browse.
+- **Tabs:**
+  - A subagent opens as a tab with its own feed (the same reducer, filtered by the subagent's `tool_use_id`).
+  - A shell task opens as a tab with its output tail: `get_task_output`, polled every second while the tab is visible.
+  - Agent tabs are commentable like the main chat. Anchors use the same stable ids.
+- **Prompting subagents is out of scope.** Comments on a subagent's chat are sent to the **main session** (the orchestrator), labelled with the subagent and the reply they refer to.
+- **Control:** `stopTask(task_id)`; `backgroundTasks(tool_use_id)` (Ctrl+B for one task). These are new client messages: `{type:'task-stop', id}`, `{type:'task-background', toolUseId}`, `{type:'task-output', id}`.
+- **Resume:** on `--continue`, `listSubagents` + `getSubagentMessages` restore subagent chats, so their tabs open with history.
+- **Parked:** messaging a running agent (agent teams / teammates).
+
 ## Protocol
 
 All messages are JSON over one WebSocket. The types live in `shared/src/protocol.ts`, and SDK message types are imported from the SDK package rather than redefined.
@@ -126,8 +147,8 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Messages sent while the agent works are injected mid-turn (`priority: 'next'`); ⌘Enter interrupts and sends (`'now'`); Stop button and Esc interrupt.
 - [ ] Tool lines (`▸ Tool · arg`), subagent tool lines indented, errored tool lines red.
 - [ ] Done line with duration and time; interrupted turns marked.
-- [ ] Permission cards (allow / deny) — moved into M0 from M3: without them the real agent stalls on its first prompt.
-- [ ] Transcript replay on reconnect and on resume (`getSessionMessages`); user images in replay come with attachments in M2.
+- [ ] Permission cards (allow / deny) — moved into M0 from M4: without them the real agent stalls on its first prompt.
+- [ ] Transcript replay on reconnect and on resume (`getSessionMessages`); user images in replay come with attachments in M3.
 - [ ] i18n ru/en, auto from the browser language, toggle in the header (every string through `t()` from day one).
 - [ ] Plannotator palette and chrome: header, tab pills, paper card over a grid, footer.
 
@@ -138,7 +159,15 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Batch send: one message of fragments plus comments plus image references.
 - [ ] Anchors persist across reloads and resumes; orphaned comments are shown, not dropped.
 
-**Files & media (M2)**
+**Agents & tasks (M2)** — new, beyond the prototype; see [Agents and background tasks](#agents-and-background-tasks)
+- [ ] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer.
+- [ ] Drawer: tree of tasks (subagents, shell, monitors; nested by `parent_task_id`) with status, elapsed time, tokens, last tool, one-line summary; actions: open, stop (`stopTask`), move to background (`backgroundTasks(toolUseId)`).
+- [ ] Subagent chat in its own tab (live via `forwardSubagentText`), commentable; comments go to the main session.
+- [ ] Shell task output in its own tab (`get_task_output` tail, polled while the tab is open), stop.
+- [ ] Main feed: a subagent call renders as a card (type, description, status) that opens its tab.
+- [ ] Resume: subagent chats of a resumed session restored from disk (`listSubagents` / `getSubagentMessages`).
+
+**Files & media (M3)**
 - [ ] File tree sheet (overlay, collapsible, filter, ↻ refresh keeping the open folders, auto-refresh after each live turn).
 - [ ] File tabs: md (rendered, commentable), code (highlighted), image, video, audio; HTTP Range seeking.
 - [ ] A playing video goes to picture-in-picture when its tab is left; audio keeps playing; ▶ dot on the tab; closing the tab stops it.
@@ -146,7 +175,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] `@` mentions: the CLI's `file_suggestions` with our own fuzzy fallback; ↑↓ Enter/Tab, folder keeps the picker open, quoted paths with spaces; clickable in sent messages.
 - [ ] Image attachments: paste, drop, 📎; downscale to ≤1568px; png→jpeg over 3.5 MB; thumbnails, lightbox; in the composer and in comments.
 
-**Session & agent controls (M3)**
+**Session & agent controls (M4)**
 - [ ] Session picker over all folders: grouped by cwd, filter, current project first, new session; in-process switch (no restart).
 - [ ] `cwd` for sessions where `listSessions` omits it (read from the transcript head).
 - [ ] Tab and document title = session title (skipping `/commands`).
@@ -159,7 +188,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Server errors as toasts (dedup ×N).
 - [ ] `--chrome` (Claude in Chrome tools) enabled.
 
-**Launch & self-hosting (M4)**
+**Launch & self-hosting (M5)**
 - [ ] `nota-bene [dir] [--port] [--resume id [--fork]] [--new]` bin; resumes the folder's last session by default.
 - [ ] `/nb` skill (`new`, `fork`) using `windows.json`; never opens a second window on the same folder.
 - [ ] Dev mode (Vite HMR + server watch) on its own port, separate from the window you work in.
@@ -173,9 +202,10 @@ Each milestone gets its own implementation plan in `docs/superpowers/plans/` whe
 |---|---|---|
 | **M0 Foundation** | workspaces, protocol, AgentSession (SDK + fake), EventHub, HTTP/WS server, web shell, store, chat feed, composer, i18n, e2e harness | you can chat with the real agent in the new UI; e2e green on the fake agent |
 | **M1 Comments** | anchors, selection → popup → cards → batch, persistence | the review loop works across reloads |
-| **M2 Files & media** | tree, tabs, viewers, Range, PiP, refs, `@`, attachments | daily media workflow works |
-| **M3 Controls** | sessions, meters, compact/clear, permissions, modes and plan, suggestions, favicon, toasts | full parity |
-| **M4 Launch** | bin, `/nb`, dev mode, retire the prototype | you open the new app with `/nb` |
+| **M2 Agents & tasks** | task indicator + bottom drawer, subagent chat tabs, shell output tabs, stop / background, resume of subagent chats | you can watch and steer every subagent and shell task |
+| **M3 Files & media** | tree, file tabs, viewers, Range, PiP, refs, `@`, attachments | daily media workflow works |
+| **M4 Controls** | sessions, meters, compact/clear, modes and plan, suggestions, favicon, toasts | full parity |
+| **M5 Launch** | bin, `/nb`, dev mode, retire the prototype | you open the new app with `/nb` |
 
 Feature freeze on `prototype/` from M0's start, except for bug fixes.
 
