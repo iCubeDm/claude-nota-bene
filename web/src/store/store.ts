@@ -4,6 +4,7 @@ import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
+import { controlsListener, controlsSlice } from '../controls/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { activate, readSavedTabs, restoreTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
 import { loadSources } from '../files/sources.ts';
@@ -78,8 +79,8 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
     },
   });
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).concat(mediaMiddleware(media)),
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer },
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
   mediaByStore.set(store, media);

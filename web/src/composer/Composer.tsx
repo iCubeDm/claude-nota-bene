@@ -4,6 +4,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useT } from '@/i18n/index.ts';
 import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
+import { ModePill } from '@/controls/ModePill.tsx';
+import { nextMode, pickMode, selectMode } from '@/controls/slice.ts';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
@@ -16,6 +18,7 @@ export function Composer() {
   const busy = useAppSelector(selectBusy);
   const conn = useAppSelector(selectConn);
   const nPending = useAppSelector(selectPending).length;
+  const mode = useAppSelector(selectMode);
   const text = useAppSelector(selectDraft);
   const images = useAppSelector(selectImages);
   const uploading = useAppSelector(selectUploading) > 0;
@@ -103,6 +106,12 @@ export function Composer() {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // an open @ / : picker takes Tab at window capture and stops it, so this is only reached with no picker to serve
+    if (e.key === 'Tab' && e.shiftKey && !e.nativeEvent.isComposing && mode) {
+      e.preventDefault();
+      dispatch(pickMode(nextMode(mode)));
+      return;
+    }
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
     const force = e.metaKey || e.ctrlKey;
     if (e.shiftKey && !force) return;
@@ -179,6 +188,7 @@ export function Composer() {
             e.target.value = '';
           }}
         />
+        <ModePill />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button type="button" variant="ghost" size="icon-sm" aria-label={t('attach')} onClick={() => fileIn.current?.click()}>

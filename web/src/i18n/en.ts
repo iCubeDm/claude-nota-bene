@@ -120,4 +120,14 @@ export const en: Dict = {
   uploadWait: 'Wait for the image to finish uploading',
   attachHere: 'Attach an image (or paste / drop here)',
   imgFail: 'Could not read the image',
+  // permission mode (M4-06)
+  modeTip: 'Agent mode · Shift+Tab in the message field — next',
+  mode_default: 'Default',
+  mode_default_desc: 'Asks before edits and commands',
+  mode_acceptEdits: 'Accept edits',
+  mode_acceptEdits_desc: 'Edits files without asking, asks before commands',
+  mode_plan: 'Plan',
+  mode_plan_desc: 'Only reads and thinks, changes nothing; ends with a plan to approve',
+  mode_auto: 'Auto',
+  mode_auto_desc: 'A classifier approves safe actions itself, asks about the rest',
 };

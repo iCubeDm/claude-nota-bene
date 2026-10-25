@@ -1,0 +1,53 @@
+import { MODES, type Mode } from '@nota-bene/shared';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.tsx';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
+import { useT } from '@/i18n/index.ts';
+import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { pickMode, selectMode } from './slice.ts';
+
+// colours as in the CLI's mode line (prototype #modeBtn.m-*)
+const TONE: Record<Mode, string> = {
+  default: 'text-muted-foreground border-border-soft',
+  acceptEdits: 'text-primary border-[oklch(0.75_0.18_280/0.45)]',
+  plan: 'text-[oklch(0.80_0.12_185)] border-[oklch(0.78_0.12_185/0.45)]',
+  auto: 'text-[oklch(0.84_0.13_80)] border-[oklch(0.82_0.13_80/0.4)]',
+};
+
+export function ModePill() {
+  const t = useT();
+  const dispatch = useAppDispatch();
+  const mode = useAppSelector(selectMode);
+  if (!mode) return null; // unknown until the server says
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t('modeTip')}
+              className={`inline-flex h-[26px] items-center gap-1.5 rounded-full border bg-transparent px-2.5 text-xs font-medium hover:bg-muted hover:text-foreground ${TONE[mode]}`}
+            >
+              <span aria-hidden className="size-[7px] rounded-full bg-current opacity-80" />
+              {t(`mode_${mode}`)}
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent className="whitespace-pre-line">{t('modeTip')}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent side="top" align="start" className="w-[340px]">
+        {MODES.map((m) => (
+          <DropdownMenuItem
+            key={m}
+            aria-current={m === mode || undefined}
+            onSelect={() => void dispatch(pickMode(m))}
+            className={`block px-2.5 py-[7px] ${m === mode ? 'bg-muted' : ''}`}
+          >
+            <b className="block text-[13px] font-medium">{t(`mode_${m}`)}</b>
+            <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">{t(`mode_${m}_desc`)}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
