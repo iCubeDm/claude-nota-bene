@@ -10,7 +10,8 @@
 - clickable project paths;
 - `@` mentions;
 - image attachments;
-- comments on files.
+- comments on files;
+- read-only browsing of other branches and worktrees.
 
 M3 is the first of three milestones (M3 → M4 → M5) that bring the rebuild to full prototype parity, so that the user can switch. M2 comes after M5 (spec → Milestones → Order).
 
@@ -102,6 +103,8 @@ web/src/refs/refs.ts                  ref marking + open
 web/src/composer/MentionPicker.tsx    @ picker
 web/src/attachments/image.ts          prepareImage, upload
 web/src/attachments/Attachments.tsx   thumbs + Lightbox
+server/src/git.ts                     sources: this checkout, worktrees, branches
+web/src/files/SourcePicker.tsx        source selector in the tree
 e2e/files.spec.ts, e2e/fixtures/project/   test project with media, Cyrillic names, symlink
 ```
 
@@ -540,7 +543,54 @@ Specs:
 - [ ] **Run** `npm run e2e` twice, then with `--repeat-each=2` → green.
 - [ ] **Commit** `test(e2e): files, tabs, media and attachments`.
 
-### M3-15: Real-agent smoke and docs
+### M3-16: Branches and worktrees (read-only)
+
+This is new and goes beyond the prototype. The user asked for it on 2026-10-25, because they cannot see what agents write on other branches. The window's own checkout is **never** switched: a live window may run from it.
+
+**Files:**
+- Create: `server/src/git.ts`, `web/src/files/SourcePicker.tsx`, and their tests.
+- Modify:
+  - `shared/src/protocol.ts` (`AnchorSource` file gains `ref?: string`, and `toSource` keeps it);
+  - `server/src/fileRoutes.ts` (`src` parameter);
+  - `FileTree.tsx`, the tabs slice, `FileView.tsx`, `refs.ts`;
+  - `send.ts` (`whereOf` gives `path @ branch`);
+  - i18n.
+
+**Interfaces:**
+- Produces:
+```ts
+// git.ts — every git call is execFile('git', [...], { cwd: root }), never a shell
+export type Source = { id: string; kind: 'checkout' | 'worktree' | 'branch'; label: string; ref: string; dir?: string };
+// id: 'here' for this checkout; 'wt:<n>' for worktrees, in `git worktree list --porcelain` order; 'br:<name>' for local branches without a worktree
+export function listSources(root: string): Promise<Source[]>;   // [] beyond 'here' when root is not a git repo
+export function readTree(root: string, src: Source, rel: string): Promise<TreeEntry[]>;   // worktree: listDir in src.dir; branch: git ls-tree <ref> -- <rel>/
+export function readFile(root: string, src: Source, rel: string): Promise<Buffer | null>; // branch: git show <ref>:<rel>, maxBuffer 50 MB
+```
+- Routes:
+  - `GET /sources` returns `Source[]`.
+  - `/tree`, `/file` and `/complete` accept `src=<id>`, which must be an id from the current `listSources`; any other value gives 400.
+    - For worktree sources, `resolveInRoot` applies with `src.dir` as the root, and Range works.
+    - For branch sources, `/file` serves the blob whole, with no Range, and a 50 MB cap (413 above).
+    - Raw paths are never accepted.
+- Tabs:
+  - The file tab id becomes ``file:${src}:${path}``, with `src` defaulting to `here`, and the tab shows a branch chip when the source is not `here`.
+  - Views of non-`here` sources are read-only. There is no edit UI anyway; they also skip the `turnSeq` reload, except for worktrees, which do reload.
+- Tree: the picker sits at the top of the sheet. Switching it keeps a separate set of open folders per source.
+- Refs: `isPath` stays the same. Additionally, an absolute path inside the `dir` of any worktree source opens from that source. A relative ref that is missing in `here` is tried in the worktrees, and the first hit wins.
+- Comments: a file anchor has `ref` set to the branch name when the source is not `here`. The batch line reads `path @ branch`.
+
+- [ ] **Step 1: Failing tests.** Use a temp git repo with a main checkout, a worktree on `feature/x` and a branch `old` without a worktree.
+  - `listSources` lists all three. A non-repo returns only `here`.
+  - `readTree` and `readFile` on `old` return committed content that is absent from the working tree.
+  - `src=wt:0` with `path=../x` gives 403.
+  - An unknown `src` gives 400.
+  - A branch name with `/` and a Cyrillic file name work.
+  - An absolute worktree path in a reply opens from that worktree.
+  - A comment on an `old` file has `ref: 'old'`, and the batch line says `@ old`.
+- [ ] **Step 2–4.** Also add an e2e spec in `e2e/files.spec.ts`: the fixture project is a git repo with one worktree; pick it in the tree, open a file, and the tab chip shows its branch.
+- [ ] **Step 5: Commit** `feat: read-only branches and worktrees in the file tree`.
+
+### M3-17: Real-agent smoke and docs
 
 - [ ] Run on port 4790 with a temp project that holds a real video and a Cyrillic md file, through Chrome:
   - open the tree, the md file and the video;
@@ -548,7 +598,8 @@ Specs:
   - paste a screenshot and ask the agent what it shows;
   - `@`-mention a file and ask about it;
   - comment on the md file and send;
-  - restart with `--continue`: the tabs, the file comments and the bubble thumbnails are restored.
+  - restart with `--continue`: the tabs, the file comments and the bubble thumbnails are restored;
+  - open a file from a worktree that an agent created, and comment on it.
 
   Record the results in the task report, then clean up.
 - [ ] Update root `CLAUDE.md`: `~/.nota-bene/attachments/` and the new routes.

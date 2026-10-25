@@ -182,6 +182,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Image attachments: paste, drop, 📎; downscale to ≤1568px; png→jpeg over 3.5 MB; thumbnails, lightbox; in the composer and in comments.
 - [ ] Attachments are stored on the server by content hash (`~/.nota-bene/attachments/<sha256>.<ext>`) and travel over the socket as ids, never as base64 in the replayed history (a session with screenshots would resend megabytes on every reload). Images in a resumed transcript are written to the same store on replay.
 - [ ] Comments on open files (md rendered and code), with count badges on tabs and tree rows; image references in a batch (moved here from M1).
+- [ ] **Branches and worktrees** (requested 2026-10-25: "у меня нет доступа к веткам отсюда"; new, beyond the prototype). The window's checkout is never switched — a live window may run from it. Instead, the tree has a source selector: this checkout (default), every other worktree of the repo (`git worktree list`), and local branches without a worktree (read through `git ls-tree` / `git show`). Files from another source open read-only in tabs marked with the branch name, and are commentable (the anchor carries the ref). Paths the agent prints inside another worktree (absolute, or relative to it) open from that worktree instead of failing as missing.
 
 **Session & agent controls (M4)**
 - [ ] Session picker over all folders: grouped by cwd, filter, current project first, new session; in-process switch (no restart).
@@ -212,7 +213,7 @@ Each milestone gets its own implementation plan in `docs/superpowers/plans/` whe
 |---|---|---|
 | **M0 Foundation** | workspaces, protocol, AgentSession (SDK + fake), EventHub, HTTP/WS server, web shell, store, chat feed, composer, i18n, e2e harness | you can chat with the real agent in the new UI; e2e green on the fake agent |
 | **M1 Comments** | anchors, selection → popup → cards → batch, persistence | the review loop works across reloads |
-| **M3 Files & media** | tabs (strip, context menu), tree, file tabs, viewers, Range, PiP, refs, `@`, attachments, comments on files | daily media workflow works |
+| **M3 Files & media** | tabs (strip, context menu), tree, file tabs, viewers, Range, PiP, refs, `@`, attachments, comments on files, branches and worktrees (read-only) | daily media workflow works |
 | **M4 Controls** | sessions, meters, compact/clear, modes and plan, suggestions, favicon, toasts, ↻ server restart, background-task line | full parity |
 | **M5 Launch** | bin, `/nb`, dev mode, retire the prototype | you open the new app with `/nb` |
 | **M2 Agents & tasks** | task indicator + bottom drawer, subagent chat tabs, shell output tabs, stop / background, resume of subagent chats | you can watch and steer every subagent and shell task |
