@@ -117,6 +117,18 @@ test('select, comment, card, send @chat', async ({ page }) => {
   // the agent answers the batch
   await expect(sent.locator('xpath=following-sibling::*[@data-kind="assistant"]').first()).toHaveAttribute('data-final', 'true');
   await expect(page.getByText(/agent is working|агент работает/)).toBeHidden();
+
+  // sent comments are server state: a reload brings back the mark and the bubble's summary
+  const sentAfter = await marks(page, 'sent').count();
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await settled(page, text);
+  await expect(marks(page, 'sent')).toHaveCount(sentAfter);
+  await expect(marks(page, 'pending')).toHaveCount(0);
+  const again = bubble(page, note);
+  await expect(again).toHaveCount(1);
+  await again.locator('summary').click();
+  await expect(again).toContainText(note);
 });
 
 test('a quick label adds a comment in one click @chat', async ({ page }) => {
@@ -287,4 +299,36 @@ test('selection survives a streaming turn @slow', async ({ page }) => {
   await page.getByRole('button', { name: /^(Add|Добавить)$/ }).click();
   await expect(cards(page)).toHaveCount(1);
   await clearPending(page);
+});
+
+test('Esc while the agent works: picker, then popup, then the turn @slow', async ({ page }) => {
+  test.setTimeout(60_000);
+  await open(page);
+  await clearPending(page);
+  const earlier = await turn(page, 'esc base');
+  const next = uniq('esc busy');
+  await composer(page).fill(next);
+  await composer(page).press('Enter');
+  const working = page.getByText(/agent is working|агент работает/);
+  await expect(working).toBeVisible();
+
+  await openPopup(page, earlier);
+  const box = commentBox(page);
+  await box.pressSequentially(':smi');
+  const list = page.getByRole('listbox');
+  await expect(list).toBeVisible();
+
+  await box.press('Escape'); // 1: the picker only
+  await expect(list).toBeHidden();
+  await expect(popup(page)).toBeVisible();
+  await expect(working).toBeVisible();
+
+  await box.press('Escape'); // 2: the popup only
+  await expect(popup(page)).toBeHidden();
+  await expect(working).toBeVisible();
+  await expect(donesAfter(page, next)).toHaveCount(0);
+
+  await page.keyboard.press('Escape'); // 3: now it interrupts the turn
+  await expect(donesAfter(page, next).first()).toHaveText(/прервано|interrupted/);
+  await expect(working).toBeHidden();
 });
