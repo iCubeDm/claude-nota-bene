@@ -14,9 +14,11 @@ import { Footer } from './shell/Footer.tsx';
 import { Panes } from './tabs/Panes.tsx';
 import { TabStrip } from './tabs/TabStrip.tsx';
 import { Header } from './shell/Header.tsx';
+import { useFavicon } from './shell/Favicon.ts';
 
 export function App() {
   const dispatch = useAppDispatch();
+  useFavicon();
   const sendPanel = useCallback(() => void dispatch(sendBatch(false)), [dispatch]);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const close = useCallback(() => setPending(null), []);

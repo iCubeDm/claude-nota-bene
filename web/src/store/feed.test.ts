@@ -250,7 +250,7 @@ test('a live reset frame empties the feed and adds the cleared line, keeping the
   const s = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7)], s0);
   expect(s.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
   expect(s.busy).toBe(false);
-  expect(s.session).toEqual({ id: 'old', root: '/r' }); // the session event that follows updates it
+  expect(s.session).toEqual({ id: 'old', root: '/r', title: null, model: null }); // the session event that follows updates it
 });
 
 test('a replay of the new session carries no cleared line', () => {

@@ -20,7 +20,7 @@ export type FeedItem =
 export type FeedState = {
   items: FeedItem[];
   busy: boolean;
-  session: { id: string | null; root: string } | null;
+  session: { id: string | null; root: string; title: string | null; model: string | null } | null;
   /** a forced user message was sent: the next result ends the interrupted turn but not the new one. */
   forcePending: boolean;
   /** ids of live sends no result has answered yet (results name them in user_message_uuids). */
@@ -223,7 +223,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       return { ...s, items: replaceAt(s.items, i, { ...cur, answer: ev.allow }) };
     }
     case 'session': // sent again whenever the id changes; never a notice (the CLI inits every turn)
-      return { ...s, session: { id: ev.id, root: ev.root } };
+      return { ...s, session: { id: ev.id, root: ev.root, title: ev.title, model: ev.model } };
     case 'resumed':
       return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
     case 'server-error': // shown to the user, never swallowed (M0 error policy); live only, not stored in the replay

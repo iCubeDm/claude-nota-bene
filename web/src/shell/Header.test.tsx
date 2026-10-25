@@ -74,3 +74,13 @@ it('the tree toggle sits after the project path, as an icon button named by its 
   const path = document.getElementById('root-path')!;
   expect(path.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
+
+it('document title: session title first when there is one; header shows model · id8, or id8 alone', () => {
+  const { ev } = setup();
+  ev({ kind: 'session', id: '5f0c2a9e-7d41', root: '/p/proj', title: 'Fix login', model: 'opus' });
+  expect(document.title).toBe('Fix login · proj · Nota Bene');
+  expect(document.getElementById('session')).toHaveTextContent(/^opus · 5f0c2a9e$/);
+  ev({ kind: 'session', id: '5f0c2a9e-7d41', root: '/p/proj', title: null, model: null });
+  expect(document.title).toBe('proj · Nota Bene');
+  expect(document.getElementById('session')).toHaveTextContent(/^5f0c2a9e$/);
+});

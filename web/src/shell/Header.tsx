@@ -19,7 +19,8 @@ export function Header() {
   const pendingN = useAppSelector(selectPending).length;
   // the project, not the app, names the window: several windows on different projects must be told apart
   const project = session?.root.split('/').filter(Boolean).pop() ?? 'Nota Bene';
-  useEffect(() => { document.title = `${project} · Nota Bene`; }, [project]);
+  const title = session?.title ?? null;
+  useEffect(() => { document.title = `${title ? title + ' · ' : ''}${project} · Nota Bene`; }, [title, project]);
   return (
     <header className="relative z-[6] flex h-12 flex-none items-center gap-3 border-b border-border-soft bg-chrome px-4 text-xs text-muted-foreground backdrop-blur-[24px]">
       <img id="logo" src="/icon.svg" alt="Nota Bene" className="-mr-1 size-6" />
@@ -40,7 +41,7 @@ export function Header() {
       <span className="flex-1" />
       <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : switching ? t('switching') : ''}</span>
       <SessionPicker />
-      <span id="session" className="font-mono text-[11px]">{session?.id?.slice(0, 8) ?? ''}</span>
+      <span id="session" className="font-mono text-[11px]">{[session?.model, session?.id?.slice(0, 8)].filter(Boolean).join(' · ')}</span>
       {/* moves into the tab strip in M2 */}
       <button
         type="button"

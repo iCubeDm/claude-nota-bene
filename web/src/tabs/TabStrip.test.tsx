@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '@/i18n/index.ts';
-import { makeStore } from '@/store/store.ts';
+import { makeStore, serverEvent } from '@/store/store.ts';
 import { App } from '@/App.tsx';
 import { openFile, selectTabs } from './slice.ts';
 
@@ -79,4 +79,13 @@ it('the chat pane is the same element across tab switches, only hidden', () => {
   expect(pane).not.toHaveAttribute('hidden');
   expect(pane.scrollTop).toBe(120);
   expect(document.querySelector('[data-pane="file:a.ts"]')).toHaveAttribute('hidden');
+});
+
+it('the chat tab shows the session title and tooltip; without one, Chat and the chatTip', () => {
+  const store = setup();
+  const chat = screen.getByRole('tab', { name: /Chat/ });
+  expect(chat).toHaveAttribute('title', 'Chat with the agent');
+  act(() => void store.dispatch(serverEvent({ kind: 'session', id: 'abcdefgh', root: '/p', title: 'Fix login', model: null })));
+  const titled = screen.getByRole('tab', { name: /Fix login/ });
+  expect(titled).toHaveAttribute('title', 'Fix login');
 });

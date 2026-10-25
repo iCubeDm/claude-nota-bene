@@ -21,6 +21,7 @@ export const en: Dict = {
   send: 'Send',
   sendN: (n) => `Send (${n})`,
   chat: 'Chat',
+  chatTip: 'Chat with the agent',
   close: 'Close',
   closeOthers: 'Close others',
   closeRight: 'Close to the right',

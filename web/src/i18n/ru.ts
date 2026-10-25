@@ -18,6 +18,7 @@ export const ru = {
   send: 'Отправить',
   sendN: (n: number) => `Отправить (${n})`,
   chat: 'Чат',
+  chatTip: 'Чат с агентом',
   close: 'Закрыть',
   closeOthers: 'Закрыть другие',
   closeRight: 'Закрыть справа',
