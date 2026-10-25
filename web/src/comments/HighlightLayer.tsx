@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { resolveAnchor } from '@/anchors/resolve.ts';
-import { rangeFromOffsets, textOf } from '@/anchors/text.ts';
+import type { Comment } from '@nota-bene/shared';
+import { rangeForAnchor } from '@/anchors/text.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { openCommentCard, selectComments } from './slice.ts';
 
@@ -25,16 +25,23 @@ function lineRects(range: Range): DOMRect[] {
 }
 
 type Drawn = { id: string; range: Range };
+type Cached = { c: Comment; root: HTMLElement; range: Range };
 
-/** The Range of a comment's text, or null for an orphan / a source that is not (yet) in the DOM or not commentable. */
-function rangeOf(items: Element, c: { anchor: import('@nota-bene/shared').Anchor }): Range | null {
+/**
+ * The Range of a comment's text, or null for an orphan / a source that is not (yet) in the DOM or not commentable.
+ * A cached range is reused while the comment object and its root element are unchanged and the range is still live;
+ * otherwise the anchor is resolved again (one text-model build).
+ */
+function rangeOf(roots: Map<string, HTMLElement>, cache: Map<string, Cached>, c: Comment): Range | null {
   const { source } = c.anchor;
   if (source.kind !== 'message') return null; // file sources wait for file tabs (M3)
-  const root = [...items.querySelectorAll<HTMLElement>('[data-item-id]')].find((e) => e.dataset.itemId === source.id);
-  if (!root) return null;
-  if (root.dataset.kind === 'assistant' && root.dataset.final !== 'true') return null;
-  const o = resolveAnchor(c.anchor, textOf(root));
-  return o ? rangeFromOffsets(root, o.start, o.end) : null;
+  const root = roots.get(source.id);
+  if (!root || (root.dataset.kind === 'assistant' && root.dataset.final !== 'true')) return null;
+  const hit = cache.get(c.id);
+  if (hit && hit.c === c && hit.root === root && hit.range.startContainer.isConnected && !hit.range.collapsed) return hit.range;
+  const range = rangeForAnchor(root, c.anchor);
+  if (range) cache.set(c.id, { c, root, range });
+  return range;
 }
 
 /**
@@ -45,6 +52,7 @@ function rangeOf(items: Element, c: { anchor: import('@nota-bene/shared').Anchor
 export function HighlightLayer() {
   const layer = useRef<HTMLDivElement>(null);
   const drawn = useRef<Drawn[]>([]); // topmost last
+  const cache = useRef(new Map<string, Cached>());
   const paint = useRef<() => void>(() => {});
   const dispatch = useAppDispatch();
   const comments = useAppSelector(selectComments);
@@ -62,10 +70,18 @@ export function HighlightLayer() {
       raf = 0;
       const base = pane.getBoundingClientRect();
       const list: (Drawn & { kind: 'sent' | 'pending' })[] = [];
+      const roots = new Map<string, HTMLElement>();
+      for (const e of items.querySelectorAll<HTMLElement>('[data-item-id]')) if (e.dataset.itemId) roots.set(e.dataset.itemId, e);
+      const prev = cache.current;
+      const next = new Map<string, Cached>(); // only what this paint drew survives: removed / orphaned comments drop out
       for (const c of state.current.comments) {
-        const range = rangeOf(items, c);
+        const hit = prev.get(c.id);
+        if (hit) next.set(c.id, hit);
+        const range = rangeOf(roots, next, c);
         if (range) list.push({ id: c.id, range, kind: c.status });
+        else next.delete(c.id);
       }
+      cache.current = next;
       list.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'sent' ? -1 : 1)); // pending painted last = on top
       drawn.current = list;
       const nodes: HTMLElement[] = [];
