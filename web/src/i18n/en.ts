@@ -134,6 +134,8 @@ export const en: Dict = {
   mode_plan_desc: 'Only reads and thinks, changes nothing; ends with a plan to approve',
   mode_auto: 'Auto',
   mode_auto_desc: 'A classifier approves safe actions itself, asks about the rest',
+  // background tasks (M4-14)
+  tasksLabel: 'Background tasks',
   // meters (M4-08)
   ctx: 'context',
   ctxTip: (u: string, m: string) => `${u} of ${m} tokens — auto-compact after that`,

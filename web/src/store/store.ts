@@ -14,6 +14,7 @@ import { browserPip, MediaController, type PipApi } from '../media/mediaControll
 import { filesSlice } from '../files/slice.ts';
 import { readSavedDirs, treeKey, treeSlice } from '../tree/slice.ts';
 import { statsSlice } from '../stats/slice.ts';
+import { tasksSlice } from '../tasks/slice.ts';
 import { toast } from '../shell/toast.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
@@ -98,7 +99,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
     },
   });
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
