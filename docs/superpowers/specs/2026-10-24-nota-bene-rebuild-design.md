@@ -106,7 +106,7 @@ Decided 2026-10-25. The prototype never had this; Claude Code's terminal does, a
 - **Prompting subagents is out of scope.** Comments on a subagent's chat are sent to the **main session** (the orchestrator), labelled with the subagent and the reply they refer to.
 - **Control:** `stopTask(task_id)`; `backgroundTasks(tool_use_id)` (Ctrl+B for one task). These are new client messages: `{type:'task-stop', id}`, `{type:'task-background', toolUseId}`, `{type:'task-output', id}`.
 - **Resume:** on `--continue`, `listSubagents` + `getSubagentMessages` restore subagent chats, so their tabs open with history.
-- **Tabs:** the main chat is always the first tab and cannot be closed. A **Close all tabs** action closes every other tab (agent, shell, file, media) in one step. The `tabs` slice is introduced here and reused by files in M3.
+- **Tabs:** the main chat is always the first tab and cannot be closed. A right-click menu on any tab, as in VS Code / IntelliJ, offers Close, Close Others, Close to the Right and Close All (the main chat is never closed by them). The `tabs` slice is introduced here and reused by files in M3.
 - **Parked:** messaging a running agent (agent teams / teammates).
 
 ## Protocol
@@ -167,7 +167,8 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Shell task output in its own tab (`get_task_output` tail, polled while the tab is open), stop.
 - [ ] Main feed: a subagent call renders as a card (type, description, status) that opens its tab.
 - [ ] Resume: subagent chats of a resumed session restored from disk (`listSubagents` / `getSubagentMessages`).
-- [ ] Tab strip: the main chat is pinned as the first tab and cannot be closed; a **Close all tabs** action closes every other tab (agent, shell, file, media) at once. Media in a closed tab stops; picture-in-picture closes.
+- [ ] Tab strip: the main chat is pinned as the first tab and cannot be closed. Media in a closed tab stops; picture-in-picture closes.
+- [ ] Tab context menu (right click), modelled on VS Code / IntelliJ: **Close**, **Close Others**, **Close to the Right**, **Close All**; on the main chat tab only the actions that leave it open (Close Others, Close All). File tabs add **Copy Path** and **Reveal in File Tree** (M3). Middle click closes a tab.
 
 **Files & media (M3)**
 - [ ] File tree sheet (overlay, collapsible, filter, ↻ refresh keeping the open folders, auto-refresh after each live turn).
