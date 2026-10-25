@@ -88,6 +88,8 @@ const mdRoot = (page: Page) => page.locator(`[data-file-path="${MD}"]`);
 const tabs = (page: Page) => page.getByRole('tablist').getByRole('tab');
 const tabOf = (page: Page, path: string) => page.locator(`[data-tab="file:${path}"]`);
 const chatTab = (page: Page) => page.getByRole('tab', { name: /Chat|Чат/ });
+// set by playwright.config.ts (1/0): without ffmpeg serve.mjs generates no media, and the media tests skip
+const hasFfmpeg = process.env.NB_E2E_FFMPEG !== '0';
 let seq = 0;
 const uniq = (label: string) => `${label} ${Date.now().toString(36)}-${process.pid}-${seq++}`;
 const bubble = (page: Page, text: string) => page.locator('[data-kind="user"]').filter({ hasText: text });
@@ -164,6 +166,7 @@ test('tab menu: Close others keeps chat and the current tab, Close all leaves th
 });
 
 test('video: a seek is a 206 range request; switching A to B to C leaves one video playing and never uses PiP; leaving a playing video for the chat does @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
   await page.addInitScript(() => {
     const w = window as unknown as { __pip: number };
     w.__pip = 0;

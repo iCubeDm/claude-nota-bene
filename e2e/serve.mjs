@@ -16,17 +16,30 @@ fs.cpSync(path.join(root, 'e2e/project'), project, { recursive: true });
 fs.mkdirSync(home);
 if (fixture === 'files') seedFiles(project);
 
+function hasFfmpeg() {
+  if (process.env.NB_E2E_FFMPEG !== undefined) return process.env.NB_E2E_FFMPEG === '1';
+  try {
+    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Binary and big fixtures are generated, never committed: mp4/mp3 (ffmpeg; the mp4s are noisy and about 3 MB so that a seek really needs a range request), a 1x1 png, a 3 MB log, a symlink out of the project.
 function seedFiles(dir) {
   fs.cpSync(path.join(root, 'e2e/fixtures/project'), dir, { recursive: true });
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   fs.writeFileSync(path.join(dir, 'docs/pic.png'), Buffer.from(png, 'base64'));
   fs.mkdirSync(path.join(dir, 'media'));
-  const ff = (...a) => execFileSync('ffmpeg', ['-v', 'error', '-y', ...a], { stdio: 'inherit' });
-  for (const [name, color] of [['a', 'red'], ['b', 'green'], ['c', 'blue']]) {
-    ff('-f', 'lavfi', '-i', `color=c=${color}:s=320x240:d=30:r=10,noise=alls=100:allf=t`, '-b:v', '1M', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-movflags', '+faststart', path.join(dir, `media/${name}.mp4`));
-  }
-  ff('-f', 'lavfi', '-i', 'sine=d=3', path.join(dir, 'media/s.mp3'));
+  // the config sets NB_E2E_FFMPEG (1/0); run alone, serve.mjs asks ffmpeg itself. Without it the media tests skip
+  if (hasFfmpeg()) {
+    const ff = (...a) => execFileSync('ffmpeg', ['-v', 'error', '-y', ...a], { stdio: 'inherit' });
+    for (const [name, color] of [['a', 'red'], ['b', 'green'], ['c', 'blue']]) {
+      ff('-f', 'lavfi', '-i', `color=c=${color}:s=320x240:d=30:r=10,noise=alls=100:allf=t`, '-b:v', '1M', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-movflags', '+faststart', path.join(dir, `media/${name}.mp4`));
+    }
+    ff('-f', 'lavfi', '-i', 'sine=d=3', path.join(dir, 'media/s.mp3'));
+  } else console.warn('e2e/serve.mjs: no ffmpeg, media fixtures skipped');
   fs.writeFileSync(path.join(dir, 'big.log'), 'x'.repeat(3 * 1024 * 1024));
   fs.symlinkSync(os.tmpdir(), path.join(dir, 'link-out'));
   // M3-16: the project is a git repo with one more worktree, on feature/x, outside the project (removed with tmp)
