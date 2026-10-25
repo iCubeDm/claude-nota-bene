@@ -8,6 +8,7 @@ import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { activate, readSavedTabs, restoreTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
 import { AUDIO, VIDEO } from '../files/kinds.ts';
 import { browserPip, MediaController, type PipApi } from '../media/mediaController.ts';
+import { filesSlice } from '../files/slice.ts';
 import { readSavedDirs, setDirs, treeKey, treeSlice } from '../tree/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
@@ -76,7 +77,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
     },
   });
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).concat(mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });

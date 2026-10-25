@@ -30,7 +30,7 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
   }));
   const text = composeBatch(
     body, pending, lang, (c) => labelOf(c, lang),
-    (c) => (c.anchor.source.kind === 'message' ? selectReplyLabel(st, c.anchor.source.id) : null) ?? t('srcChat'),
+    (c) => (c.anchor.source.kind === 'message' ? (selectReplyLabel(st, c.anchor.source.id) ?? t('srcChat')) : c.anchor.source.path),
     instructionOf, refs,
   );
   const ids = pending.map((c) => c.id);

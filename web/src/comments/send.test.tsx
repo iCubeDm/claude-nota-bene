@@ -53,6 +53,13 @@ it('send carries composed text and commentIds', async () => {
   expect(m.text).toMatch(/^please\n\nComments on fragments:\n\n1\. \[my message\]\n> quote c1\n→ text c1\n\n2\./);
 });
 
+it('a file comment names its path in the batch line', async () => {
+  const f = cm('f1', { anchor: { source: { kind: 'file', path: 'docs/n.md' }, start: 0, end: 5, quote: 'hello', prefix: '', suffix: '' } });
+  const { sent, box } = setup([f]);
+  await userEvent.type(box, 'go{Enter}');
+  expect((sent[0] as Extract<ClientMessage, { type: 'send' }>).text).toContain('1. [docs/n.md]\n> hello\n→ text f1');
+});
+
 it('the label shows the count', () => {
   setup([cm('c1'), cm('c2')]);
   expect(screen.getByRole('button', { name: 'Send (2)' })).toBeInTheDocument(); // composer (the closed panel is aria-hidden)

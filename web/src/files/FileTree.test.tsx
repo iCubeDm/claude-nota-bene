@@ -118,7 +118,10 @@ it('shows the pending-comment badge on a file row', async () => {
   act(() => {
     store.dispatch(serverEvent({ kind: 'comments', items: [
       { id: '1', status: 'pending', text: 't', createdAt: 1, anchor: { source: { kind: 'file', path: 'zed.txt' } } },
+      { id: '2', status: 'sent', text: 't', createdAt: 1, anchor: { source: { kind: 'file', path: 'zed.txt' } } },
+      { id: '3', status: 'pending', text: 't', createdAt: 1, anchor: { source: { kind: 'file', path: 'a+b.md' } } },
+      { id: '4', status: 'pending', text: 't', createdAt: 1, anchor: { source: { kind: 'message', id: 'zed.txt' } } },
     ] } as never));
   });
-  expect(screen.getByRole('button', { name: /^zed\.txt/ })).toHaveTextContent('1');
+  expect(screen.getByRole('button', { name: /^zed\.txt/ }).querySelector('[data-badge]')).toHaveTextContent(/^1$/);
 });
