@@ -37,7 +37,7 @@ export class EventHub {
   }
 
   private stamp(ev: EmitInput): ServerEvent {
-    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'comments') return ev;
+    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode') return ev;
     return { ...ev, ts: ev.ts ?? Date.now() } as ServerEvent;
   }
 }

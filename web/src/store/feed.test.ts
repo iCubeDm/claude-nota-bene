@@ -109,11 +109,11 @@ test('subagent tool lines are sub; subagent text is not added', () => {
 
 test('session only sets the session; the resumed marker alone adds the notice; server-error, immutability', () => {
   const frozen = Object.freeze({ ...emptyFeed, items: Object.freeze([]) as never });
-  expect(reduce(frozen, { kind: 'session', id: 'abcdefghij', root: '/r' })).toMatchObject({ items: [], session: { id: 'abcdefghij', root: '/r' } });
+  expect(reduce(frozen, { kind: 'session', id: 'abcdefghij', root: '/r', title: null, model: null })).toMatchObject({ items: [], session: { id: 'abcdefghij', root: '/r' } });
   const withItem = fold([user()]);
   Object.freeze(withItem); Object.freeze(withItem.items);
   // the CLI sends init (-> session) every turn: it must never add a notice
-  expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r' }).items).toEqual(withItem.items);
+  expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r', title: null, model: null }).items).toEqual(withItem.items);
   expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
   expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ kind: 'notice', text: 'abcdefgh' }]);
   const err = reduce(withItem, { kind: 'server-error', where: 'comments', message: 'EACCES' });
@@ -125,7 +125,7 @@ test('session only sets the session; the resumed marker alone adds the notice; s
 
 test('a conversation with init every turn shows no notice; replayed history plus marker shows exactly one', () => {
   const init = (id: string) => sdk({ type: 'system', subtype: 'init', session_id: id });
-  const session = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r' });
+  const session = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r', title: null, model: null });
   const live = fold([session('s1'), user(), init('s1'), result(), user({ id: 'u2' }), init('s1'), session('s1'), result()]);
   expect(live.items.some((i) => i.kind === 'notice')).toBe(false);
   const resumed = reduce(emptyFeed, { kind: 'replay', events: [user({ historic: true }), { kind: 'resumed', id: 's1' }, session('s1')] });

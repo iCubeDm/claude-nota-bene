@@ -335,7 +335,7 @@ describe('session manager', () => {
     hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') replayed.push(...e.events); } });
     expect(replayed.map((e) => e.kind)).toEqual(['user', 'resumed', 'session']);
     expect(replayed[1]).toEqual({ kind: 'resumed', id: 'old-session' });
-    expect(replayed[2]).toEqual({ kind: 'session', id: 'old-session', root: '/proj' });
+    expect(replayed[2]).toEqual({ kind: 'session', id: 'old-session', root: '/proj', title: null, model: null });
     s.send({ id: 'u1', text: 'one' });
     await until(() => sdkOf(events, 'result').length === 1);
     s.send({ id: 'u2', text: 'two' });

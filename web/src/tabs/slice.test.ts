@@ -9,7 +9,7 @@ function mk() {
     url: 'u',
     connect: ((_u: string, e: typeof onEvent) => ((onEvent = e), { send: (_m: ClientMessage) => true, close() {} })) as never,
   });
-  return { store, session: (root: string) => onEvent({ kind: 'session', id: null, root }) };
+  return { store, session: (root: string) => onEvent({ kind: 'session', id: null, root, title: null, model: null }) };
 }
 const ids = (s: ReturnType<typeof mk>['store']) => selectTabs(s.getState()).open.map((t) => t.id);
 

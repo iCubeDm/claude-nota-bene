@@ -52,15 +52,15 @@ export const { markSending, setPanelOpen, openCommentCard, closeCommentCard } = 
 
 /** Update locally first, then send the FULL set; a closed socket keeps the local change for the next sync. */
 // Accepted race: two edits within one round trip can see the first echo overwrite the second locally until the second echo lands.
-const sync = (items: Comment[]): AppThunk => (d, _g, { send }) => {
+const sync = (items: Comment[]): AppThunk => (d, getState, { send }) => {
   d(commentsSlice.actions.setItems(items));
-  d(commentsSlice.actions.setUnsynced(!send({ type: 'comments', items })));
+  d(commentsSlice.actions.setUnsynced(!send({ type: 'comments', sessionId: getState().feed.session?.id ?? null, items })));
 };
 
 /** On socket open: re-send local changes made while offline (local wins; last-writer-wins between windows is accepted). */
 export const resyncComments = (): AppThunk => (d, getState, { send }) => {
   const st = getState().comments;
-  if (st.unsynced && send({ type: 'comments', items: st.items })) d(commentsSlice.actions.markResent());
+  if (st.unsynced && send({ type: 'comments', sessionId: getState().feed.session?.id ?? null, items: st.items })) d(commentsSlice.actions.markResent());
 };
 
 export const addComment = (c: Omit<Comment, 'id' | 'status' | 'createdAt'>): AppThunk => (d, getState) => {

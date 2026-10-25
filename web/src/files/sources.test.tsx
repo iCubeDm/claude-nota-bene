@@ -66,7 +66,7 @@ function mk() {
     url: 'u',
     connect: ((_u: string, e: typeof onEvent, onState: (s: 'open') => void) => ((onEvent = e), onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never,
   });
-  return { store, sent, session: (root: string) => act(() => onEvent({ kind: 'session', id: null, root })) };
+  return { store, sent, session: (root: string) => act(() => onEvent({ kind: 'session', id: null, root, title: null, model: null })) };
 }
 const ids = (s: ReturnType<typeof mk>['store']) => selectTabs(s.getState()).open.map((t) => t.id);
 const tick = () => act(() => new Promise((r) => setTimeout(r, 0)));

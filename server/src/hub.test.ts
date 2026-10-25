@@ -50,7 +50,7 @@ describe('EventHub', () => {
     const s = sock();
     hub.attach(s);
     hub.emit({ kind: 'user', id: 'a', text: 'a' });
-    hub.emit({ kind: 'session', id: null, root: '/r' });
+    hub.emit({ kind: 'session', id: null, root: '/r', title: null, model: null });
     expect(typeof JSON.parse(s.frames[1]!).ts).toBe('number');
     expect(JSON.parse(s.frames[2]!)).not.toHaveProperty('ts');
   });

@@ -72,7 +72,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     if (id === announced) return;
     const prev = announced ?? null;
     announced = id;
-    hub.emit({ kind: 'session', id, root: cwd });
+    hub.emit({ kind: 'session', id, root: cwd, title: null, model: null });
     if (id !== null) {
       for (const cb of idListeners) {
         try { cb(id, prev); } catch (e) { reportError(hub, 'session-id', e); }

@@ -221,6 +221,8 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'server-error': // shown to the user, never swallowed (M0 error policy); live only, not stored in the replay
       return { ...s, items: [...s.items, { kind: 'notice', text: ev.message, tone: 'error', where: ev.where }] };
     case 'comments': // handled by the comments store, not the feed
+    case 'stats': // handled by the stats store (M4)
+    case 'mode':
       return s;
     default: {
       const never: never = ev;
