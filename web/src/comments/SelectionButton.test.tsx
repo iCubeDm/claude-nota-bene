@@ -296,3 +296,21 @@ it('a selection left in a hidden pane makes no button', async () => {
   await up(view.container.querySelector('[data-file-path]')!);
   expect(screen.queryByRole('button')).toBeNull();
 });
+
+it('no button on an interrupted reply (unstable stream:N id)', async () => {
+  const { q } = setup('<div data-kind="assistant" data-item-id="stream:3" data-final="true"><p>interrupted text</p></div>');
+  const t = q('stream:3').querySelector('p')!.firstChild!;
+  select(t, 0, t, 5);
+  await up(q('stream:3'));
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('a mouseup inside a dialog does not re-show the button', async () => {
+  const { q } = setup(A + '<div role="dialog"><span id="in">popup text</span></div>');
+  const t = q('a1').querySelector('p')!.firstChild!;
+  select(t, 6, t, 11);
+  await up(document.getElementById('in')!);
+  expect(screen.queryByRole('button')).toBeNull();
+  await up(q('a1')); // control: outside the dialog it shows
+  expect(screen.getByRole('button', { name: '💬 Comment' })).toBeInTheDocument();
+});

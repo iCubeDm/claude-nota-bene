@@ -28,6 +28,7 @@ function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | n
     const root = start.closest<HTMLElement>('[data-item-id]');
     const id = root?.dataset.itemId;
     if (!root || !id || !pane.contains(root)) return null;
+    if (id.startsWith('stream:')) return null; // an interrupted reply keeps its per-run id, unstable across restarts: a comment on it would orphan
     const kind = root.dataset.kind;
     if (!(kind === 'user' || kind === 'plan' || (kind === 'assistant' && root.dataset.final === 'true'))) return null;
     return { root, source: { kind: 'message', id } };
@@ -90,6 +91,8 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
   useEffect(() => {
     const onUp = (e: MouseEvent) => {
       if (btn.current?.contains(e.target as Node)) return;
+      // a popup / dialog is open over the text: re-reading the selection would show the button behind it
+      if ((e.target as Element | null)?.closest?.('[role="dialog"]')) return;
       dismissed.current = false;
       // the browser updates the selection after mouseup, so read it one tick later
       setTimeout(() => setSel(readSelection()));

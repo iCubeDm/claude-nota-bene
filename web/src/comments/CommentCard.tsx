@@ -1,5 +1,5 @@
 import type { Comment } from '@nota-bene/shared';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
@@ -253,7 +253,7 @@ export function CommentCardPopover() {
     };
   }, [card, dispatch]);
 
-  useLayoutEffect(() => {
+  const place = useCallback(() => {
     if (!card || !root.current) return;
     const { offsetWidth: w, offsetHeight: h } = root.current;
     const below = card.y + 6 + h <= window.innerHeight;
@@ -261,7 +261,16 @@ export function CommentCardPopover() {
       left: Math.max(8, Math.min(card.x, window.innerWidth - w - 8)),
       top: Math.max(8, below ? card.y + 6 : card.y - h - 6),
     });
-  }, [card, items]);
+  }, [card]);
+  useLayoutEffect(place, [place, items]);
+  // the card grows while its text is edited: keep it inside the viewport
+  const shown = !!card && !!c;
+  useEffect(() => {
+    if (!shown || !root.current || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(place);
+    ro.observe(root.current);
+    return () => ro.disconnect();
+  }, [shown, place]);
 
   if (!card || !c) return null;
   return (
