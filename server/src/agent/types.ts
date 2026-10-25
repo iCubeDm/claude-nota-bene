@@ -21,8 +21,20 @@ export interface AgentSession {
   close(): void;
 }
 
+/** One entry of the CLI's session list (the fields of the SDK's SDKSessionInfo we read). */
+export type SessionListEntry = {
+  sessionId: string; customTitle?: string; summary?: string; firstPrompt?: string;
+  lastModified: number; fileSize?: number; cwd?: string;
+};
+
+export type SessionInfo = { customTitle?: string; summary?: string; firstPrompt?: string; cwd?: string };
+
 export interface AgentBackend {
   start(o: { cwd: string; resume?: string; permissionMode: Mode; ask: PermissionAsk }): AgentSession;
   /** `attachments` receives the images found in the transcript; the events carry ImageRefs only. */
+  /** Every project's sessions, newest first (sdk: listSessions({ limit: 300 })). */
+  listSessions(): Promise<SessionListEntry[]>;
+  /** The session's title fields when it belongs to `dir` (or one of its worktrees); null when it does not. */
+  sessionInfo(id: string, dir: string): Promise<SessionInfo | null>;
   history(sessionId: string, cwd: string, attachments: AttachmentStore, onError?: (e: unknown) => void): Promise<ServerEvent[]>;
 }

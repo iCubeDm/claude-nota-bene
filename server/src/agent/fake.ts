@@ -1,5 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Mode, Stats } from '@nota-bene/shared';
+import type { Mode, ServerEvent, Stats } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
@@ -20,7 +22,28 @@ export type FakeTurn = {
   context?: { used: number; max: number; pct: number };
   /** what `usage` returns once this turn has run (default: no cost, no plan limits) */
   usage?: { cost: number | null; limits: Stats['limits'] };
+  /** the `model` this turn's init frame carries (default none) */
+  model?: string;
 };
+
+/**
+ * A scripted entry of the session list. `cwd` may be relative (to the fake's `base`, the project dir) so that an e2e
+ * script can name a sibling folder of its temp project; '' means "no cwd" (the list drops it). `history` is what a
+ * resume of this id replays.
+ */
+export type FakeSessionScript = {
+  id: string;
+  cwd: string;
+  customTitle?: string;
+  summary?: string;
+  firstPrompt?: string;
+  lastModified?: number;
+  fileSize?: number;
+  history?: { role: 'user' | 'assistant'; text: string }[];
+};
+
+/** A --fake script: the turns alone (the M0-M3 format), or the turns and a session list. */
+export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessionScript[] };
 
 /**
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
@@ -128,7 +151,10 @@ class FakeSession implements AgentSession {
     let inTools = false;
     try {
       // like the CLI: init at the start of every turn
-      yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}`, ...(t.initMode ? { permissionMode: t.initMode } : {}) });
+      yield sdk({
+        type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}`,
+        ...(t.initMode ? { permissionMode: t.initMode } : {}), ...(t.model ? { model: t.model } : {}),
+      });
       const size = Math.max(1, t.chunk ?? 8);
       yield sdk({
         type: 'stream_event', session_id: this.sessionId, uuid: `fake-s-${n}-0`, parent_tool_use_id: null,
@@ -196,17 +222,53 @@ class FakeSession implements AgentSession {
   }
 }
 
-/** `startModes` records the mode each agent started with, `setModes` every setPermissionMode call. */
-export function fakeBackend(turns: FakeTurn[]): AgentBackend & { startModes: Mode[]; setModes: Mode[] } {
+type Started = { cwd: string; permissionMode: Mode; resume?: string };
+
+/**
+ * `startModes` records the mode each agent started with, `setModes` every setPermissionMode call, `starts` every
+ * start's cwd, mode and resume id. `sessions` scripts listSessions / sessionInfo / history; `base` resolves their
+ * relative cwds.
+ */
+export function fakeBackend(
+  turns: FakeTurn[],
+  o: { sessions?: FakeSessionScript[]; base?: string } = {},
+): AgentBackend & { startModes: Mode[]; setModes: Mode[]; starts: Started[] } {
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
+  const starts: Started[] = [];
+  const cwdOf = (x: FakeSessionScript) => (x.cwd ? path.resolve(o.base ?? '/', x.cwd) : undefined);
+  const real = (p: string) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+  const sessions = o.sessions ?? [];
+  const titles = (x: FakeSessionScript) => ({
+    ...(x.customTitle !== undefined ? { customTitle: x.customTitle } : {}),
+    ...(x.summary !== undefined ? { summary: x.summary } : {}),
+    ...(x.firstPrompt !== undefined ? { firstPrompt: x.firstPrompt } : {}),
+  });
   return {
     startModes,
     setModes,
-    start: (o) => {
-      startModes.push(o.permissionMode);
-      return new FakeSession(turns, o.ask, setModes, o.resume);
+    starts,
+    start: (s) => {
+      startModes.push(s.permissionMode);
+      starts.push({ cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}) });
+      return new FakeSession(turns, s.ask, setModes, s.resume);
     },
-    history: async () => [],
+    listSessions: async () => sessions.map((x) => {
+      const cwd = cwdOf(x);
+      return { sessionId: x.id, ...titles(x), lastModified: x.lastModified ?? 0, fileSize: x.fileSize ?? 0, ...(cwd ? { cwd } : {}) };
+    }),
+    // like getSessionInfo({ dir }): only a session of that project dir is found
+    sessionInfo: async (id, dir) => {
+      const x = sessions.find((e) => e.id === id && cwdOf(e) !== undefined && real(cwdOf(e)!) === real(dir));
+      return x ? { ...titles(x), cwd: cwdOf(x)! } : null;
+    },
+    history: async (id) => (sessions.find((e) => e.id === id)?.history ?? []).map((h, i): ServerEvent => (h.role === 'user'
+      ? { kind: 'user', id: `fake-h-${i}`, text: h.text, historic: true, ts: 0 }
+      : { kind: 'sdk', m: sdk({ type: 'assistant', uuid: `fake-h-${i}`, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: h.text }] } }), ts: 0 })),
   };
+}
+
+/** Reads a --fake script (either format). */
+export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
+  return Array.isArray(script) ? fakeBackend(script, { base }) : fakeBackend(script.turns, { sessions: script.sessions ?? [], base });
 }

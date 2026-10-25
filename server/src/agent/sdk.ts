@@ -1,4 +1,4 @@
-import { getSessionMessages, query } from '@anthropic-ai/claude-agent-sdk';
+import { getSessionInfo, getSessionMessages, listSessions, query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Mode } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './types.ts';
@@ -137,6 +137,8 @@ class SdkSession implements AgentSession {
 export function sdkBackend(): AgentBackend {
   return {
     start: (o) => new SdkSession(o),
+    listSessions: () => listSessions({ limit: 300 }),
+    sessionInfo: async (id, dir) => (await getSessionInfo(id, { dir })) ?? null,
     history: async (sessionId, cwd, attachments, onError) => transcriptToEvents(await getSessionMessages(sessionId, { dir: cwd }), attachments, onError),
   };
 }

@@ -42,7 +42,7 @@ beforeAll(async () => {
       allowedOrigins,
       info: () => ({}),
       extra: {
-        ...fileRoutes({ root, hub, complete: async (q) => [q] }),
+        ...fileRoutes({ root: () => root, hub, complete: async (q) => [q] }),
         '/attach': (_req, res) => res.end('ok'), // filled in M3-03
       },
     }),

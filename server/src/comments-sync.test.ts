@@ -141,6 +141,7 @@ describe('comment sync', () => {
     store().set('other-id', [c('o')]);
     const inner = fakeBackend([{ text: 'hello' }]);
     const backend: AgentBackend = {
+      ...inner,
       history: inner.history,
       start: (o) => inner.start({ ...o, resume: 'other-id' }),
     };
@@ -158,11 +159,11 @@ describe('comment sync', () => {
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi', commentIds: ['a'] }));
     await until(() => lastComments(a)?.find((x) => x.id === 'a')?.status === 'sent');
     // a stale full set from another window: 'a' still pending
-    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a', { text: 'stale' }), c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: 'fake-session', items: [c('a', { text: 'stale' }), c('b')] }));
     await until(() => lastComments(a)?.find((x) => x.id === 'a')?.text === 't-a' && a.events.filter((e) => e.kind === 'comments').length >= 4);
     expect(lastComments(a)!.find((x) => x.id === 'a')).toMatchObject({ status: 'sent', sentIn: 'u1', text: 't-a' });
     // a set that lacks the sent comment keeps it
-    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: 'fake-session', items: [c('b')] }));
     await until(() => a.events.filter((e) => e.kind === 'comments').length >= 5);
     expect(lastComments(a)!.map((x) => [x.id, x.status])).toEqual([['b', 'pending'], ['a', 'sent']]);
   });
@@ -175,9 +176,10 @@ describe('comment sync', () => {
     const dir = path.join(home, 'comments');
     fs.chmodSync(dir, 0o555);
     closers.push(async () => { fs.chmodSync(dir, 0o755); });
-    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c('a'), c('b')] }));
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: 'sess-ro', items: [c('a'), c('b')] }));
     await until(() => a.events.some((e) => e.kind === 'server-error'));
     expect(a.events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'comments' });
+    expect(a.events.find((e) => e.kind === 'server-error')).not.toMatchObject({ message: 'stale session' });
     expect(store().get('sess-ro')).toEqual([c('a')]);
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
     await until(() => a.events.some(isResult));

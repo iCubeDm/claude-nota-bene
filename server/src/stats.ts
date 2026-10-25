@@ -87,6 +87,15 @@ export class StatsService {
     return this.stats;
   }
 
+  /**
+   * For another session: the context and the cost were the old session's and are dropped; the plan limits are the
+   * account's and stay. Does not emit (the caller announces the new session's stats itself).
+   */
+  reset(): void {
+    this.stats = { context: null, cost: null, limits: this.stats.limits };
+    this.lastEmitted = JSON.stringify(this.stats);
+  }
+
   /** Context always; limits at most once a minute unless `limits: true` forces them. Never rejects. */
   refresh(o: { limits?: boolean } = {}): Promise<void> {
     if (this.running) {

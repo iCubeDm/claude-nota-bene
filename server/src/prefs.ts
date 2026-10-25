@@ -12,7 +12,7 @@ let reported = false; // a broken file is reported once per process, not on ever
 /** Keys are real project dirs, so a symlinked path and its target share one setting. */
 export function prefsKey(dir: string): string {
   try {
-    return fs.realpathSync(dir);
+    return fs.realpathSync.native(dir);
   } catch {
     return path.resolve(dir);
   }

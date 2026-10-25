@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
-import type { AgentBackend } from './agent/types.ts';
+import type { AgentBackend, PermissionAsk } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager } from './session.ts';
 import { lastSession } from './state.ts';
@@ -35,6 +35,8 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
   }
 }
 
+const noSessions = { listSessions: async () => [], sessionInfo: async () => null };
+
 const sdkOf = (events: ServerEvent[], type: string) =>
   events.filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === type);
 
@@ -48,6 +50,7 @@ describe('session manager', () => {
       { type: 'result', subtype: 'success' },
     ];
     const backend: AgentBackend = {
+      ...noSessions,
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
@@ -66,6 +69,7 @@ describe('session manager', () => {
 
   it('fileSuggestions delegates to the agent and rejects once it has died', async () => {
     const backend: AgentBackend = {
+      ...noSessions,
       history: async () => [],
       start: () => ({
         messages: (async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })(),
@@ -95,6 +99,7 @@ describe('session manager', () => {
     let interrupts = 0;
     const inner = fakeBackend([{ text: 'x'.repeat(200), chunk: 1, delayMs: 5 }, { text: 'second' }]);
     const backend: AgentBackend = {
+      ...noSessions,
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
@@ -149,7 +154,7 @@ describe('session manager', () => {
     s.send({ id: 'u1', text: 'hi' });
     await until(() => events.some((e) => e.kind === 'session' && e.id !== null));
     expect(lastSession('/proj')).toBe('fake-session');
-    expect(s.info()).toEqual({ id: 'fake-session', root: '/proj' });
+    expect(s.info()).toEqual({ id: 'fake-session', root: '/proj', title: null, model: null });
   });
 
   it('crash surfaces an error and recovers', async () => {
@@ -158,6 +163,7 @@ describe('session manager', () => {
     const resumes: (string | undefined)[] = [];
     let n = 0;
     const backend: AgentBackend = {
+      ...noSessions,
       history: ok.history,
       start: (o) => { resumes.push(o.resume); return (n++ === 0 ? crash : ok).start(o); },
     };
@@ -179,6 +185,7 @@ describe('session manager', () => {
     const log: string[] = [];
     const inner = fakeBackend([{ text: 'x'.repeat(300), chunk: 1, delayMs: 5 }]);
     const backend: AgentBackend = {
+      ...noSessions,
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
@@ -207,6 +214,7 @@ describe('session manager', () => {
     const resumes: (string | undefined)[] = [];
     let n = 0;
     const backend: AgentBackend = {
+      ...noSessions,
       history: first.history,
       start: (o) => {
         resumes.push(o.resume);
@@ -240,6 +248,7 @@ describe('session manager', () => {
   it('crash with a pending permission denies it and closes the agent', async () => {
     let closed = 0;
     const backend: AgentBackend = {
+      ...noSessions,
       history: async () => [],
       start: (o) => ({
         messages: (async function* () {
@@ -264,6 +273,7 @@ describe('session manager', () => {
     const inner = fakeBackend([{ text: 'fine' }]);
     let first = true;
     const backend: AgentBackend = {
+      ...noSessions,
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
@@ -288,6 +298,7 @@ describe('session manager', () => {
     const delivered: string[] = [];
     let n = 0;
     const backend: AgentBackend = {
+      ...noSessions,
       history: async () => [],
       start: (o) => {
         resumes.push(o.resume);
@@ -315,7 +326,8 @@ describe('session manager', () => {
 
   it('a failing transcript read on resume is reported and starts with empty history', async () => {
     const inner = fakeBackend([{ text: 'fine' }]);
-    const backend: AgentBackend = { start: inner.start, history: async () => { throw new Error('transcript gone'); } };
+    const backend: AgentBackend = {
+      ...noSessions, start: inner.start, history: async () => { throw new Error('transcript gone'); } };
     const { hub, events } = setup(backend);
     const s = await createSessionManager({ hub, backend, cwd: '/proj', resume: 'old' });
     expect(events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'history', message: 'transcript gone' });
@@ -329,7 +341,8 @@ describe('session manager', () => {
   it('resume: history, then exactly one resumed marker, then live events; one session per distinct id', async () => {
     const inner = fakeBackend([{ text: 'a' }]);
     const old: ServerEvent[] = [{ kind: 'user', id: 'h1', text: 'before', ts: 1, historic: true }];
-    const backend: AgentBackend = { start: inner.start, history: async () => old };
+    const backend: AgentBackend = {
+      ...noSessions, start: inner.start, history: async () => old };
     const { hub, events } = setup(backend);
     const s = await createSessionManager({ hub, backend, cwd: '/proj', resume: 'old-session' });
     const replayed: ServerEvent[] = [];
@@ -370,6 +383,7 @@ describe('busy cannot get stuck', () => {
   it('a failed agent.send answers the send with a stored error result', async () => {
     const inner = fakeBackend([{ text: 'x' }]);
     const backend: AgentBackend = {
+      ...noSessions,
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
@@ -395,6 +409,7 @@ describe('busy cannot get stuck', () => {
     const gate = new Promise<void>((r) => { release = r; });
     let sent = 0;
     const backend: AgentBackend = {
+      ...noSessions,
       history: async () => [],
       start: () => ({
         messages: (async function* () {
@@ -430,6 +445,7 @@ describe('busy cannot get stuck', () => {
       const refs = ['a', 'b'].map((n, i) => ({ id: attachments.put(png(n), 'image/png'), mediaType: 'image/png' as const, label: `Comment ${i + 1}` }));
       const got: unknown[] = [];
       const backend: AgentBackend = {
+      ...noSessions,
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
@@ -460,6 +476,7 @@ describe('busy cannot get stuck', () => {
       const bad = { id: 'f'.repeat(64), mediaType: 'image/png' as const, label: 'bad' };
       const got: { text: string; images?: unknown[] }[] = [];
       const backend: AgentBackend = {
+      ...noSessions,
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
@@ -518,6 +535,7 @@ describe('permission mode', () => {
   it('an SDK rejection reports and re-emits the old mode', async () => {
     const inner = fakeBackend([{ text: 'x' }]);
     const backend: AgentBackend = {
+      ...noSessions,
       history: inner.history,
       start: (o) => ({ ...inner.start(o), setPermissionMode: async () => { throw new Error('nope'); } }),
     };
@@ -556,6 +574,7 @@ describe('permission mode', () => {
 
   it('follows a status message too', async () => {
     const backend: AgentBackend = {
+      ...noSessions,
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield { type: 'system', subtype: 'status', permissionMode: 'acceptEdits' } as never; await new Promise(() => {}); })(),
@@ -581,6 +600,7 @@ describe('permission mode', () => {
   // an agent whose frames the test pushes by hand; setPermissionMode runs `onSet` before it resolves
   function manual(onSet: (push: (f: object) => void) => Promise<void>): AgentBackend {
     return {
+      ...noSessions,
       history: async () => [],
       start: () => {
         const q: object[] = [];
@@ -617,5 +637,121 @@ describe('permission mode', () => {
     push(status('plan'));
     await new Promise((r) => setTimeout(r, 20));
     expect(modeEvents(events)).toEqual(['plan']);
+  });
+});
+
+describe('switch', () => {
+  const stubs = {
+    send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [],
+    contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }),
+  };
+
+  it('a late message from the old agent after the reset is not emitted', async () => {
+    const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-b-')));
+    let release!: () => void;
+    const late = new Promise<void>((r) => { release = r; });
+    let oldAsk: PermissionAsk | null = null;
+    let n = 0;
+    const fresh = fakeBackend([{ text: 'new' }]);
+    const backend: AgentBackend = {
+      ...noSessions,
+      listSessions: async () => [{ sessionId: 'b', lastModified: 0, cwd: dirB }], // a new session may open in B
+      history: async () => [],
+      start: (o) => {
+        if (++n > 1) return fresh.start(o);
+        oldAsk = o.ask;
+        return {
+          ...stubs,
+          // ignores close(): the loop never ends, and it speaks again after the switch
+          messages: (async function* () {
+            await late;
+            yield { type: 'assistant', uuid: 'late-from-old', message: { content: [] } } as never;
+            yield { type: 'system', subtype: 'init', session_id: 'old-late', permissionMode: 'plan' } as never;
+            await new Promise(() => {});
+          })(),
+          close() {},
+        };
+      },
+    };
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj', closeTimeoutMs: 20 });
+    await s.switch({ id: null, dir: dirB });
+    expect(s.info().root).toBe(dirB);
+    const mark = events.length;
+    release();
+    // the old agent also asks for a permission after the reset: denied, never shown
+    const allowed = await oldAsk!('Bash', {}, new AbortController().signal);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(allowed).toBe(false);
+    const after = events.slice(mark);
+    expect(JSON.stringify(after)).not.toContain('late-from-old');
+    expect(after.filter((e) => e.kind === 'session' || e.kind === 'mode' || e.kind === 'permission')).toEqual([]);
+    expect(s.info()).toMatchObject({ id: null, root: dirB });
+    expect(s.mode()).toBe('auto');
+    s.close();
+    fs.rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it('a busy restart: a forced send stuck in its interrupt neither reaches the new agent nor toasts', async () => {
+    const dirA = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-restart-')));
+    const log: string[] = [];
+    const sent: string[][] = [];
+    const inner = fakeBackend([{ text: 'x'.repeat(2000), chunk: 1, delayMs: 5 }]);
+    const backend: AgentBackend = {
+      ...noSessions,
+      history: async () => [],
+      start: (o) => {
+        const a = inner.start(o);
+        const mine: string[] = [];
+        sent.push(mine);
+        log.push(`start${sent.length}`);
+        let closed!: () => void;
+        const onClose = new Promise<void>((r) => { closed = r; });
+        return {
+          ...a,
+          messages: a.messages,
+          send: (m) => { mine.push(m.uuid); a.send(m); },
+          // like the SDK: an interrupt that hangs and is rejected when the query closes
+          interrupt: () => onClose.then(() => { throw new Error('Query closed'); }),
+          setPermissionMode: (m) => a.setPermissionMode(m), fileSuggestions: (q) => a.fileSuggestions(q),
+          contextUsage: () => a.contextUsage(), usage: () => a.usage(),
+          close: () => { closed(); a.close(); },
+        };
+      },
+    };
+    const hub = new EventHub();
+    const events: ServerEvent[] = [];
+    hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') log.push('replay'); events.push(e); } });
+    const s = await createSessionManager({ hub, backend, cwd: dirA, closeTimeoutMs: 50, interruptTimeoutMs: 50 });
+    s.send({ id: 'u1', text: 'long' });
+    await until(() => sdkOf(events, 'stream_event').length > 2);
+    s.send({ id: 'u2', text: 'now', force: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(s.busy()).toBe(true);
+    await s.restart();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(log.slice(log.indexOf('start1') + 1)).toEqual(['replay', 'replay', 'start2']); // agent2 after the replay
+    expect(sent[1]).toEqual([]);
+    expect(events.filter((e) => e.kind === 'server-error')).toEqual([]);
+    expect(s.busy()).toBe(false);
+    const mark = events.length;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(events.slice(mark).filter((e) => e.kind === 'sdk')).toEqual([]); // agent2 is idle
+    s.close();
+    fs.rmSync(dirA, { recursive: true, force: true });
+  });
+
+  it('a send during a switch is refused, not delivered to either agent', async () => {
+    const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-b-')));
+    const backend = fakeBackend([{ text: 'x' }], { sessions: [{ id: 'b', cwd: dirB }] });
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj' });
+    const p = s.switch({ id: null, dir: dirB });
+    s.send({ id: 'u1', text: 'too early' });
+    await p;
+    expect(events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'busy' });
+    expect(events.some((e) => e.kind === 'user')).toBe(false);
+    s.close();
+    fs.rmSync(dirB, { recursive: true, force: true });
   });
 });
