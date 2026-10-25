@@ -614,18 +614,32 @@ $('sRefresh').onclick = () => refreshTree();
 
 // leaving a tab doesn't stop its media: a playing video moves to picture-in-picture (allowed here because the
 // switch comes from a click), audio keeps playing; the tab shows a ▶ mark. Coming back closes the PiP window.
+// media tab = a video/audio file tab (by path: the pane is still empty when a new tab is activated)
+const isMediaTab = (id) => id !== 'chat' && (VIDEO.test(id) || AUDIO.test(id));
+let ownPipExit = false; // a PiP exit we caused: its leavepictureinpicture must not pull focus back
 function activate(id) {
   activeTab = id;
+  const toMedia = isMediaTab(id);
+  const pipEl = document.pictureInPictureElement;
+  // opening another media: only one thing plays — a PiP video elsewhere stops instead of hopping between tabs
+  // (moving it around is what made three videos select each other in an endless loop)
+  if (toMedia && pipEl && !tabs.find((tb) => tb.id === id)?.pane.contains(pipEl)) {
+    pipEl.pause(); ownPipExit = true; document.exitPictureInPicture().catch(() => {});
+  }
   for (const tb of tabs) {
     const on = tb.id === id;
-    if (on && tb.pane.contains(document.pictureInPictureElement)) document.exitPictureInPicture().catch(() => {});
+    if (on && tb.pane.contains(document.pictureInPictureElement)) { ownPipExit = true; document.exitPictureInPicture().catch(() => {}); }
     if (!on && tb.pane.classList.contains('active')) {
-      const playing = [...tb.pane.querySelectorAll('video')].filter((v) => !v.paused && v !== document.pictureInPictureElement);
-      const [pip, ...rest] = playing;
-      rest.forEach((v) => v.pause()); // the browser has one PiP window
-      if (pip) {
-        if (document.pictureInPictureEnabled && !pip.disablePictureInPicture) pip.requestPictureInPicture().catch(() => pip.pause());
-        else pip.pause();
+      const playing = [...tb.pane.querySelectorAll('video, audio')].filter((m) => !m.paused && m !== document.pictureInPictureElement);
+      if (toMedia) playing.forEach((m) => m.pause()); // media → media: pause, never PiP
+      else {
+        // media → chat/file: a playing video goes PiP (one window), audio keeps playing
+        const [pip, ...rest] = playing.filter((m) => m.tagName === 'VIDEO');
+        rest.forEach((v) => v.pause());
+        if (pip) {
+          if (document.pictureInPictureEnabled && !pip.disablePictureInPicture) pip.requestPictureInPicture().catch(() => pip.pause());
+          else pip.pause();
+        }
       }
     }
     tb.pane.classList.toggle('active', on);
@@ -675,6 +689,7 @@ for (const ev of ['play', 'pause', 'ended', 'emptied']) document.addEventListene
 // PiP window: «back to tab» keeps it playing → open its tab; closing it pauses, so nothing to do then
 document.addEventListener('leavepictureinpicture', (e) => {
   const v = e.target;
+  if (ownPipExit) { ownPipExit = false; return; } // we closed it ourselves: no tab switch
   setTimeout(() => { if (!v.paused && v.isConnected) { const tb = tabs.find((x) => x.pane.contains(v)); if (tb && tb.id !== activeTab) activate(tb.id); } }, 50);
 }, true);
 
