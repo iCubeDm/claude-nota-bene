@@ -5,6 +5,7 @@ import { connect as realConnect } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
+import { readSavedTabs, restoreTabs, serializeTabs, tabsKey, tabsSlice } from '../tabs/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** The only way server data enters the store. */
@@ -44,17 +45,35 @@ export function makeStore(o: { url: string; connect?: typeof realConnect }) {
   let conn: ReturnType<typeof realConnect> | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }),
     devTools: devToolsEnabled(),
   });
-  // the ONE place that persists the panel state, whoever changed it (toggle, ×, auto-open after adding a comment)
+  // the ONE place that persists UI state, whoever changed it (toggle, ×, auto-open after adding a comment, tab changes)
   let panelOpen = store.getState().comments.ui.panelOpen;
+  let tabs = store.getState().tabs;
+  let restoredRoot: string | null = null;
   store.subscribe(() => {
-    const now = store.getState().comments.ui.panelOpen;
-    if (now === panelOpen) return;
-    panelOpen = now;
-    try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
+    const st = store.getState();
+    const now = st.comments.ui.panelOpen;
+    if (now !== panelOpen) {
+      panelOpen = now;
+      try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
+    }
+    const root = st.feed.session?.root;
+    if (root && root !== restoredRoot) {
+      // first time this root is known: restore its saved tabs (the dispatch re-enters this subscriber and persists the result)
+      restoredRoot = root;
+      const saved = readSavedTabs(root);
+      if (saved) store.dispatch(restoreTabs(saved));
+    }
+    if (st.tabs !== tabs) {
+      tabs = st.tabs;
+      // before the root is known there is nothing to key by; the restore merges these tabs in later
+      if (restoredRoot) {
+        try { localStorage.setItem(tabsKey(restoredRoot), JSON.stringify(serializeTabs(tabs))); } catch { /* not persisted */ }
+      }
+    }
   });
   conn = connectFn(
     o.url,
