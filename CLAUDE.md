@@ -21,7 +21,7 @@ Node >= 23.6 (the server runs `.ts` directly). From the repo root:
 
 Ports: 4777 real use, 4780 dev server, 5173 Vite, 4790 manual smoke, 4791-4793 e2e. Never use 4777-4779 for tests while live windows run.
 
-State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo.
+State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo: `sessions.json` (last session per project and port) and `comments/<sessionId>.json` (pending and sent margin comments of one agent session).
 
 ## You may be running inside this tool
 
