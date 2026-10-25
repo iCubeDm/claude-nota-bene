@@ -93,22 +93,35 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const mediaUrl = bust ? `${url}&r=${bust}` : url;
   // the media controller tracks this tab's <video|audio> while it is mounted (pause/PiP rules, the ▶ dot)
   const mediaCtl = useMedia();
-  const mediaRef = useCallback((el: HTMLMediaElement | null) => (el ? mediaCtl.register(tabId, el) : undefined), [mediaCtl, tabId]);
+  const mediaEl = useRef<HTMLMediaElement | null>(null);
+  const mediaRef = useCallback((el: HTMLMediaElement | null) => {
+    mediaEl.current = el;
+    return el ? mediaCtl.register(tabId, el) : undefined;
+  }, [mediaCtl, tabId]);
+  // image/media reload: a new cache-busting key; a video/audio resumes where it was (a new src starts at 0)
+  const resumeAt = useRef(0);
+  const reloadMedia = useCallback(() => {
+    const el = mediaEl.current;
+    resumeAt.current = el && !el.ended ? el.currentTime : 0;
+    setFailed(false);
+    setBust((b) => b + 1);
+  }, []);
 
-  // a finished turn marks the view stale; the fetch effect below only runs while active, so an inactive view catches up on activation
+  // a finished turn marks the view stale; the fetch effect below only runs while active, so an inactive view catches up
+  // on activation. Media: an image always reloads; a video/audio only while paused (a playing one is not cut off)
   const seenTurn = useRef(turnSeq);
   useEffect(() => {
     if (seenTurn.current === turnSeq) return;
     seenTurn.current = turnSeq;
-    if (!fixed) setRev((r) => r + 1);
-  }, [turnSeq, fixed]);
-
-  // image/media: a reload only matters after a failed load; it retries under a new cache-busting key
-  useEffect(() => {
-    if (!media || rev === 0 || !failedRef.current) return;
-    setFailed(false);
-    setBust((b) => b + 1);
-  }, [media, rev]);
+    if (fixed) return;
+    if (!media) return setRev((r) => r + 1);
+    const el = mediaEl.current;
+    if (kind === 'image' || failedRef.current || !el || el.paused) reloadMedia();
+  }, [turnSeq, fixed, media, kind, reloadMedia]);
+  const onMediaMeta = (e: { currentTarget: HTMLMediaElement }) => {
+    if (resumeAt.current > 0) e.currentTarget.currentTime = resumeAt.current;
+    resumeAt.current = 0;
+  };
 
   const loadedRev = useRef<{ path: string; rev: number } | null>(null);
   useEffect(() => {
@@ -190,9 +203,9 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     body = (
       <div data-pane={tabId} hidden={!active} className="grid-pane relative [&:not([hidden])]:grid min-h-0 flex-1 place-items-center overflow-auto p-4">
         {kind === 'video' ? (
-          <video ref={mediaRef} controls preload="metadata" src={mediaUrl} onError={onError} data-media-tab={tabId} className="max-h-full max-w-full" />
+          <video ref={mediaRef} controls preload="metadata" src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="max-h-full max-w-full" />
         ) : (
-          <audio ref={mediaRef} controls src={mediaUrl} onError={onError} data-media-tab={tabId} className="w-full max-w-xl" />
+          <audio ref={mediaRef} controls src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="w-full max-w-xl" />
         )}
       </div>
     );
@@ -221,7 +234,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <span className="min-w-0 flex-1 truncate" title={ref ? `${path} @ ${ref}` : path}>{path}</span>
         {ref && <SourceChip name={ref} />}
         {large && <span>{t('noHighlight')}</span>}
-        <button type="button" aria-label={t('reload')} title={t('reload')} onClick={() => setRev((r) => r + 1)} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
+        <button type="button" aria-label={t('reload')} title={t('reload')} onClick={() => (media ? reloadMedia() : setRev((r) => r + 1))} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
       {body}

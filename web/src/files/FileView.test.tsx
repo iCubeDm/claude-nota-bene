@@ -155,8 +155,33 @@ it('a failed video retries on a turnSeq bump', () => {
   expect(r.container.querySelector('video')?.getAttribute('src')).toBe('/file?path=v.mp4&r=1');
 });
 
-it('a media reload without a failure keeps the same src', () => {
-  const { r } = setup('v.mp4');
-  fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-  expect(r.container.querySelector('video')?.getAttribute('src')).toBe('/file?path=v.mp4');
+it('↻ on an image, a video or an audio tab reloads it under a new key', () => {
+  for (const [path, tag] of [['p.png', 'img'], ['v.mp4', 'video'], ['s.mp3', 'audio']] as const) {
+    const { r } = setup(path);
+    expect(r.container.querySelector(tag)?.getAttribute('src')).toBe(`/file?path=${path}`);
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(r.container.querySelector(tag)?.getAttribute('src')).toBe(`/file?path=${path}&r=1`);
+    cleanup();
+  }
+});
+
+it('after a turn an image always reloads; a video only while paused, and it keeps its position', () => {
+  const img = setup('p.png');
+  act(() => { img.store.dispatch(serverEvent(result())); });
+  expect(img.r.container.querySelector('img')?.getAttribute('src')).toBe('/file?path=p.png&r=1');
+  cleanup();
+
+  const { r, store } = setup('v.mp4');
+  const v = () => r.container.querySelector('video')!;
+  let paused = false;
+  Object.defineProperty(v(), 'paused', { get: () => paused });
+  act(() => { store.dispatch(serverEvent(result())); });
+  expect(v().getAttribute('src')).toBe('/file?path=v.mp4'); // playing: not cut off
+  paused = true;
+  v().currentTime = 12;
+  act(() => { store.dispatch(serverEvent(result())); });
+  expect(v().getAttribute('src')).toBe('/file?path=v.mp4&r=1');
+  v().currentTime = 0; // a new src starts over
+  fireEvent.loadedMetadata(v());
+  expect(v().currentTime).toBe(12);
 });
