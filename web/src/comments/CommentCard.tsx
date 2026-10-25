@@ -1,10 +1,16 @@
 import type { Comment } from '@nota-bene/shared';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
+import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
+import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
+import { jumpToFileComment, selectFileLoad } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
+import { activate } from '@/tabs/slice.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { labelText, QUICK_LABELS } from './labels.ts';
+import { whereOfFile } from './send.ts';
 import { closeCommentCard, editComment, removeComment, selectComments, selectPending, selectSentFor } from './slice.ts';
 
 const BTN = 'inline-flex items-center px-0.5 text-muted-foreground opacity-60 hover:opacity-100 hover:text-foreground [&_svg]:size-[13px]';
@@ -12,6 +18,10 @@ const svg = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'aria-
 
 const itemRoot = (id: string): HTMLElement | null =>
   [...document.querySelectorAll<HTMLElement>('[data-item-id]')].find((e) => e.dataset.itemId === id) ?? null;
+/** The file tab's own text root: its pane element, carrying `data-file-path` (and `data-file-ref` for another source)
+ * while it shows text. A `data-file-path` inside rendered markdown is file content, never a root. */
+const fileRoot = (path: string, ref?: string): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>('[data-pane]')].find((e) => e.dataset.filePath === path && (e.dataset.fileRef ?? '') === (ref ?? '')) ?? null;
 
 /** `noTitle`: the button already sits in a Radix Tooltip, so a native title would show a second one. */
 function IconButton({ label, className = '', noTitle = false, children, ...rest }: { label: string; className?: string; noTitle?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
@@ -42,8 +52,10 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   const srcState = useAppSelector((s) => sourceState(s, c?.anchor.source));
   const where = useAppSelector((s) => {
     const src = c?.anchor.source;
-    return src?.kind === 'message' ? selectReplyLabel(s, src.id) : (src?.path ?? null);
+    return src?.kind === 'message' ? selectReplyLabel(s, src.id) : src ? whereOfFile(src) : null;
   });
+  // a file source: its open view's load state; undefined (tab closed / not loaded yet) means "unknown", not orphaned
+  const fileLoad = useAppSelector((s) => (c?.anchor.source.kind === 'file' ? selectFileLoad(s, c.anchor.source.path, c.anchor.source.ref) : undefined));
   const [editing, setEditing] = useState(false);
   const [orphan, setOrphan] = useState(false);
   const body = useRef<HTMLDivElement>(null);
@@ -51,8 +63,18 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
 
   // a source missing from the feed is an orphan (also an interrupted `stream:N` reply after a restart); for a
   // settled item the DOM is the truth: only a rendered item whose text no longer matches counts
+  // a file: orphaned only once its view has settled, gone (deleted, binary, too large) or with text the quote is not in
   useEffect(() => {
     const src = c?.anchor.source;
+    if (!c || src?.kind !== 'file') return;
+    if (!fileLoad || fileLoad.s === 'loading') return setOrphan(false);
+    if (fileLoad.s === 'gone') return setOrphan(true);
+    const root = fileRoot(src.path, src.ref);
+    setOrphan(!!root && !rangeForAnchor(root, c.anchor));
+  }, [c, fileLoad]);
+  useEffect(() => {
+    const src = c?.anchor.source;
+    if (src?.kind === 'file') return;
     if (!c || src?.kind !== 'message' || srcState === undefined || srcState === 'streaming') return setOrphan(false);
     if (srcState === null) return setOrphan(true);
     const root = itemRoot(src.id);
@@ -97,10 +119,15 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   const noFocusSteal = { onMouseDown: (e: React.MouseEvent) => e.preventDefault() };
   const jump = () => {
     const src = c.anchor.source;
-    const root = src.kind === 'message' ? itemRoot(src.id) : null;
+    // a file: open (or activate) its tab; the view scrolls once its text is loaded (files.jump)
+    if (src.kind === 'file') return void dispatch(jumpToFileComment(src.path, c.id, src.ref));
+    const root = itemRoot(src.id);
     if (!root) return;
-    const target = rangeForAnchor(root, c.anchor)?.startContainer.parentElement ?? root; // the fragment, not the whole message
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    flushSync(() => dispatch(activate('chat'))); // a hidden chat pane cannot scroll: show it before measuring
+    const range = rangeForAnchor(root, c.anchor);
+    const scroller = root.closest<HTMLElement>('[data-chat-pane]');
+    if (range && scroller) scrollRangeIntoView(range, scroller); // the fragment itself, not the whole message
+    else root.scrollIntoView({ behavior: 'smooth', block: 'center' }); // orphan: the message
     root.classList.remove('nb-flash');
     void root.offsetWidth; // restart the animation
     root.classList.add('nb-flash');
@@ -167,6 +194,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
       >
         {c.text}
       </div>
+      {c.images?.length ? <Attachments ids={c.images} /> : null}
       {label && (
         <span className="mt-1.5 inline-block rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80">
           {label.emoji} {labelText(label.id)}
@@ -208,7 +236,7 @@ export function CommentCardPopover() {
       dispatch(closeCommentCard());
     };
     const onDown = (e: MouseEvent) => {
-      if (root.current?.contains(e.target as Node)) return;
+      if (root.current?.contains(e.target as Node) || (e.target as Element).closest?.('[data-lightbox]')) return; // the lightbox is portalled out
       const a = document.activeElement as HTMLElement | null;
       if (a && root.current?.contains(a)) a.blur(); // "click outside = save" before the card unmounts
       dispatch(closeCommentCard());

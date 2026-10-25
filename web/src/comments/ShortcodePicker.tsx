@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { loadEmoji, searchShortcodes } from './emoji.ts';
 import { setValueAndCaret } from './insertText.ts';
+import { placeListFor, revealSelected } from '@/composer/placeList.ts';
 
 // `:` at a word start + >=2 chars, up to the caret; optionally already closed by a second colon
 const TOKEN = /(^|\s):([a-z0-9_+-]{2,})(:?)$/i;
@@ -93,17 +94,16 @@ export function ShortcodePicker({ target }: { target: RefObject<HTMLTextAreaElem
     };
   }, [target]);
 
-  // above the field when there is room, else below
+  // above the field when it fits, else the roomier side, height capped to that side (placeList)
   useLayoutEffect(() => {
     const ta = target.current;
     if (!state || !ta || !menu.current) return;
-    const r = ta.getBoundingClientRect();
-    const { offsetWidth: w, offsetHeight: h } = menu.current;
-    setPos({
-      left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)),
-      top: r.top - h - 6 >= 8 ? r.top - h - 6 : r.bottom + 6,
-    });
+    setPos(placeListFor(menu.current, ta));
   }, [state?.items, target]);
+  // the selected option scrolls into view inside the list only: scrollIntoView would scroll the document too
+  useLayoutEffect(() => {
+    if (menu.current) revealSelected(menu.current);
+  }, [state?.sel, state?.items, pos]);
 
   if (!state) return null;
   const pick = (k: number) => {
@@ -117,7 +117,7 @@ export function ShortcodePicker({ target }: { target: RefObject<HTMLTextAreaElem
     <div
       ref={menu}
       role="listbox"
-      className="fixed z-20 w-60 rounded-[10px] border border-border bg-popover p-1 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
+      className="fixed z-20 max-h-[min(20rem,40vh)] overflow-y-auto w-60 rounded-[10px] border border-border bg-popover p-1 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       {state.items.map((it, k) => (
@@ -127,7 +127,6 @@ export function ShortcodePicker({ target }: { target: RefObject<HTMLTextAreaElem
           aria-selected={k === state.sel}
           onMouseDown={(e) => e.preventDefault() /* keep focus in the textarea */}
           onClick={() => pick(k)}
-          ref={k === state.sel ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}
           className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 font-mono text-[12.5px] text-foreground ${k === state.sel ? 'bg-primary/15' : 'hover:bg-accent'}`}
         >
           <span className="w-5 text-center text-[15px] leading-none">{it.emoji}</span>

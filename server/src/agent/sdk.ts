@@ -1,6 +1,6 @@
 import { getSessionMessages, query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
+import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './types.ts';
 import { transcriptToEvents } from './transcript.ts';
 
 const APPEND = `
@@ -9,6 +9,18 @@ You are running inside a browser-based chat window that renders GitHub-flavored 
 - To show an image or video from the project, embed it with markdown image syntax and a path relative to the project root, e.g. ![frame](part_1/frames/1.01.png) or ![clip](part_1/video/1.01.mp4). Videos and audio files render as players.
 - Refer to project files as inline code with a path relative to the project root (\`media/pilot/notes.md\`, not an absolute or ~ path): the UI makes these clickable and opens them in a tab. Paths outside the project cannot be opened, so do not present them as links.
 - The user may send batched inline comments: each item quotes a fragment from the conversation or a file, followed by their comment. Address every item.`;
+
+/** A text block first, then a [label text, image block] pair per image, so the agent can tell which image is which. */
+export function toContent(text: string, images?: SendImage[]): SDKUserMessage['message']['content'] {
+  if (!images?.length) return text;
+  return [
+    { type: 'text', text: text || ' ' },
+    ...images.flatMap((im) => [
+      { type: 'text' as const, text: im.label || '[image]' },
+      { type: 'image' as const, source: { type: 'base64' as const, media_type: im.mediaType, data: im.data } },
+    ]),
+  ];
+}
 
 // Async queue feeding the SDK's streaming input; ends after close().
 class InputQueue implements AsyncIterable<SDKUserMessage> {
@@ -41,6 +53,7 @@ class SdkSession implements AgentSession {
   readonly messages: AsyncIterable<SDKMessage>;
   private readonly input = new InputQueue();
   private readonly q: ReturnType<typeof query>;
+  private readonly warmup: NodeJS.Timeout;
 
   constructor(o: { cwd: string; resume?: string; ask: PermissionAsk }) {
     this.q = query({
@@ -60,12 +73,25 @@ class SdkSession implements AgentSession {
       },
     });
     this.messages = this.q;
+    // warm the CLI's file index (it answers [] for a few seconds after start); the failure does not matter
+    this.warmup = setTimeout(() => void this.fileSuggestions('').catch(() => {}), 2000);
+    this.warmup.unref();
   }
 
-  send(m: { uuid: string; text: string; priority: 'next' | 'now' }): void {
+  async fileSuggestions(query: string): Promise<string[]> {
+    // `request` is the SDK's internal control channel, not public API (the prototype does the same), so it is
+    // reached through a narrow cast; any throw or odd shape is the caller's cue to fall back
+    const { q } = this as unknown as {
+      q: { request(r: { subtype: 'file_suggestions'; query: string }, o?: { signal?: AbortSignal }): Promise<{ response: { suggestions: { path: string }[] } }> };
+    };
+    const r = await q.request({ subtype: 'file_suggestions', query }, { signal: AbortSignal.timeout(1500) });
+    return r.response.suggestions.map((x) => x.path);
+  }
+
+  send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: SendImage[] }): void {
     this.input.push({
       type: 'user',
-      message: { role: 'user', content: m.text },
+      message: { role: 'user', content: toContent(m.text, m.images) },
       parent_tool_use_id: null,
       uuid: m.uuid as SDKUserMessage['uuid'],
       priority: m.priority,
@@ -77,6 +103,7 @@ class SdkSession implements AgentSession {
   }
 
   close(): void {
+    clearTimeout(this.warmup);
     this.input.end();
     try {
       this.q.close();
@@ -89,6 +116,6 @@ class SdkSession implements AgentSession {
 export function sdkBackend(): AgentBackend {
   return {
     start: (o) => new SdkSession(o),
-    history: async (sessionId, cwd) => transcriptToEvents(await getSessionMessages(sessionId, { dir: cwd })),
+    history: async (sessionId, cwd, attachments, onError) => transcriptToEvents(await getSessionMessages(sessionId, { dir: cwd }), attachments, onError),
   };
 }

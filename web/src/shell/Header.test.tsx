@@ -63,3 +63,14 @@ it('the project name, not the app name, titles the header and the browser tab', 
   expect(document.getElementById('proj')).toHaveTextContent(/^my-project$/);
   expect(document.title).toBe('my-project · Nota Bene');
 });
+
+it('the tree toggle sits after the project path, as an icon button named by its aria-label', () => {
+  setLang('en');
+  setup();
+  const btn = screen.getByRole('button', { name: 'File tree' });
+  expect(btn.id).toBe('toggleTree');
+  expect(btn).toHaveAttribute('title', 'File tree');
+  expect(btn.textContent).toBe('');
+  const path = document.getElementById('root-path')!;
+  expect(path.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});

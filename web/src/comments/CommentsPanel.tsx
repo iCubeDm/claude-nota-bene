@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { selectUploading } from '@/composer/slice.ts';
 import { CommentCard } from './CommentCard.tsx';
 import { selectCommentsUi, selectPending, setPanelOpen } from './slice.ts';
 
@@ -12,6 +13,7 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
   const open = useAppSelector(selectCommentsUi).panelOpen;
   const pending = useAppSelector(selectPending);
   const n = pending.length;
+  const uploading = useAppSelector(selectUploading) > 0;
   const aside = useRef<HTMLElement>(null);
   // a closing panel becomes invisible: do not leave focus inside it, hand it back to the header toggle
   useEffect(() => {
@@ -46,9 +48,11 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
         )}
       </div>
       <div className="flex-none border-t border-border-soft p-2">
-        <Button type="button" id="cSend" className="h-[34px] w-full" disabled={n === 0} onClick={onSend}>
-          {n ? t('sendN', n) : t('send')}
-        </Button>
+        <span className="block" title={uploading ? t('uploadWait') : undefined}>
+          <Button type="button" id="cSend" className="h-[34px] w-full" disabled={n === 0 || uploading} onClick={onSend}>
+            {n ? t('sendN', n) : t('send')}
+          </Button>
+        </span>
       </div>
     </aside>
   );

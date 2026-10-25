@@ -6,7 +6,11 @@ import { useAppDispatch } from '@/store/store.ts';
 import { instructionOf, labelText, QUICK_LABELS } from './labels.ts';
 import { EmojiMenu } from './EmojiMenu.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
+import { MentionPicker } from '@/composer/MentionPicker.tsx';
 import { ShortcodePicker } from './ShortcodePicker.tsx';
+import { Attachments } from '@/attachments/Attachments.tsx';
+import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
+import type { ImageEntry } from '@/composer/slice.ts';
 import { addComment, setPanelOpen } from './slice.ts';
 
 /** The popup next to a fresh selection: a note plus optional quick-label chips; a chip adds at once. */
@@ -17,17 +21,39 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   const area = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [images, setImages] = useState<ImageEntry[]>([]);
+  const [note, setNote] = useState('');
+  const [dropping, setDropping] = useState(false);
+  const fileIn = useRef<HTMLInputElement>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const intake = useImageIntake({
+    onUploaded: (im) => setImages((l) => (l.some((x) => x.id === im.id) ? l : [...l, im])),
+    notify: (m) => {
+      setNote(m);
+      clearTimeout(noteTimer.current);
+      noteTimer.current = setTimeout(() => setNote(''), 3000);
+    },
+  });
+  useEffect(() => () => clearTimeout(noteTimer.current), []);
+  const uploading = intake.pending.length > 0;
 
   const add = (label?: QuickLabelId) => {
+    if (uploading) return;
     const body = text.trim();
-    if (body || label) dispatch(addComment({ anchor: pending.anchor, text: body, ...(label && { label }) }));
+    const has = !!(body || label || images.length);
+    if (has) dispatch(addComment({ anchor: pending.anchor, text: body, ...(label && { label }), ...(images.length && { images: images.map((i) => i.id) }) }));
     window.getSelection()?.removeAllRanges();
     onClose();
-    if (body || label) dispatch(setPanelOpen(true));
+    if (has) dispatch(setPanelOpen(true));
   };
 
+  // focus once positioned: a `visibility:hidden` textarea (before the layout effect sets pos) cannot take focus
+  const placed = pos !== null;
   useEffect(() => {
-    area.current?.focus();
+    if (placed) area.current?.focus({ preventScroll: true });
+  }, [placed]);
+
+  useEffect(() => {
     // capture + preventDefault: this Esc must not also interrupt the agent (Composer skips defaultPrevented)
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -35,7 +61,8 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       onClose();
     };
     const onDown = (e: MouseEvent) => {
-      if (!root.current?.contains(e.target as Node)) onClose();
+      // the lightbox is portalled out of the popup: a click there is not an outside click
+      if (!root.current?.contains(e.target as Node) && !(e.target as Element).closest?.('[data-lightbox]')) onClose();
     };
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('mousedown', onDown);
@@ -67,7 +94,22 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
     <div
       ref={root}
       role="dialog"
-      className="fixed z-10 w-[340px] rounded-[10px] border border-border bg-popover p-2 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
+      className="fixed z-10 w-[340px] rounded-[10px] border border-border bg-popover p-2 data-[dropping]:outline-2 data-[dropping]:outline-dashed data-[dropping]:outline-primary shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
+      data-dropping={dropping || undefined}
+      onDragOver={(e) => {
+        if (!hasFiles(e.nativeEvent)) return;
+        e.preventDefault();
+        e.stopPropagation(); // not the composer's window-wide drop
+        setDropping(true);
+      }}
+      onDragLeave={(e) => { if (!root.current?.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+      onDrop={(e) => {
+        if (!hasFiles(e.nativeEvent)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDropping(false);
+        intake.add(e.dataTransfer.files);
+      }}
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       <div className="mb-1.5 truncate border-l-2 border-accent pl-1.5 text-[11px] text-muted-foreground">«{pending.anchor.quote.trim()}»</div>
@@ -76,17 +118,27 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={intake.onPaste}
         placeholder={t('commentPh')}
         aria-label={t('commentPh')}
         className="min-h-16 w-full resize-y rounded-md border border-border-soft bg-background px-2 py-1.5 text-[13px] leading-[1.45] text-foreground focus:border-primary focus:outline-none"
       />
+      <Attachments
+        data-testid="popup-thumbs"
+        ids={images.map((i) => i.id)}
+        pending={intake.pending}
+        onRemove={(id) => setImages((l) => l.filter((x) => x.id !== id))}
+      />
+      {note && <div className="mt-1 text-[11px] text-warn">{note}</div>}
       <ShortcodePicker target={area} />
+      <MentionPicker target={area} />
       <div className="mt-1.5 flex flex-wrap gap-1">
         {QUICK_LABELS.map((l) => (
           <button
             key={l.id}
             type="button"
             title={instructionOf({ label: l.id })}
+            disabled={uploading}
             onClick={() => add(l.id)}
             className="rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
           >
@@ -97,8 +149,29 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       <div className="mt-1.5 flex items-center justify-between gap-2 text-[10.5px] text-muted-foreground">
         <span>{t('popHint')}</span>
         <span className="flex items-center gap-1">
+          <input
+            ref={fileIn}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            data-testid="popup-file-input"
+            onChange={(e) => {
+              intake.add(e.target.files ?? []);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            title={t('attachHere')}
+            aria-label={t('attachHere')}
+            onClick={() => fileIn.current?.click()}
+            className="rounded px-1 text-sm hover:bg-muted"
+          >
+            📎
+          </button>
           <span data-slot="emoji"><EmojiMenu target={area} /></span>
-          <Button size="xs" onClick={() => add()}>{t('add')}</Button>
+          <Button size="xs" disabled={uploading} onClick={() => add()}>{t('add')}</Button>
         </span>
       </div>
     </div>

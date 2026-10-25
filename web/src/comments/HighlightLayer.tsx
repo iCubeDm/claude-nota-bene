@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { Comment } from '@nota-bene/shared';
 import { rangeForAnchor } from '@/anchors/text.ts';
-import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { fileKey } from '@/files/sources.ts';
 import { openCommentCard, selectComments } from './slice.ts';
 
 const PAD_X = 2;
@@ -26,16 +27,39 @@ function lineRects(range: Range): DOMRect[] {
 
 type Drawn = { id: string; range: Range };
 type Cached = { c: Comment; root: HTMLElement; range: Range };
+type Source = Comment['anchor']['source'];
+
+/** The file a file pane shows: its path and, for another source, the ref (M3-16). undefined = the chat. */
+type PaneFile = { path: string; ref?: string } | undefined;
+
+/** Whether a source lives in this pane: message sources in the chat, a file source in the tab of that path AND ref. */
+const inPane = (src: Source, file: PaneFile): boolean =>
+  file === undefined ? src.kind === 'message' : src.kind === 'file' && src.path === file.path && (src.ref ?? '') === (file.ref ?? '');
+
+/**
+ * The commentable roots inside a pane, keyed by source: the chat's items (by id), or the file view's own text root:
+ * the pane element itself, while FileView marks it with this tab's path and ref (only while it shows text). A
+ * `data-file-path` inside rendered markdown is file content and never a root.
+ */
+function rootsIn(pane: HTMLElement, file: PaneFile | null): Map<string, HTMLElement> {
+  const roots = new Map<string, HTMLElement>();
+  if (file === undefined) {
+    for (const e of pane.querySelectorAll<HTMLElement>('#items [data-item-id]')) if (e.dataset.itemId) roots.set(`m:${e.dataset.itemId}`, e);
+  } else if (file && pane.dataset.filePath === file.path && (pane.dataset.fileRef ?? '') === (file.ref ?? '')) {
+    roots.set(`f:${fileKey(file.path, file.ref)}`, pane);
+  }
+  return roots;
+}
+const keyOf = (src: Source) => (src.kind === 'message' ? `m:${src.id}` : `f:${fileKey(src.path, src.ref)}`);
 
 /**
  * The Range of a comment's text, or null for an orphan / a source that is not (yet) in the DOM or not commentable.
  * A cached range is reused while the comment object and its root element are unchanged and the range is still live;
- * otherwise the anchor is resolved again (one text-model build).
+ * otherwise the anchor is resolved again (one text-model build). A file reload with new text replaces the text nodes
+ * (Markdown sets innerHTML, CodeText sets textContent), so `isConnected` drops the stale range; an unchanged text keeps them.
  */
 function rangeOf(roots: Map<string, HTMLElement>, cache: Map<string, Cached>, c: Comment): Range | null {
-  const { source } = c.anchor;
-  if (source.kind !== 'message') return null; // file sources wait for file tabs (M3)
-  const root = roots.get(source.id);
+  const root = roots.get(keyOf(c.anchor.source));
   if (!root || (root.dataset.kind === 'assistant' && root.dataset.final !== 'true')) return null;
   const hit = cache.get(c.id);
   if (hit && hit.c === c && hit.root === root && hit.range.startContainer.isConnected && !hit.range.collapsed) return hit.range;
@@ -44,34 +68,84 @@ function rangeOf(roots: Map<string, HTMLElement>, cache: Map<string, Cached>, c:
   return range;
 }
 
+/** Positions one box per line of `range`, in the coordinates of a layer at the pane's content origin. */
+function boxes(range: Range, pane: HTMLElement, className: string, data?: Record<string, string>): HTMLElement[] {
+  const base = pane.getBoundingClientRect();
+  return lineRects(range).map((r) => {
+    const m = document.createElement('div');
+    if (data) Object.assign(m.dataset, data);
+    m.className = `absolute rounded-[4px] ${className}`;
+    m.style.left = `${r.left - base.left + pane.scrollLeft - PAD_X}px`;
+    m.style.top = `${r.top - base.top + pane.scrollTop - PAD_Y}px`;
+    m.style.width = `${r.width + PAD_X * 2}px`;
+    m.style.height = `${r.height + PAD_Y * 2}px`;
+    return m;
+  });
+}
+
+/** A one-off flash over a fragment (jump to source in a file): drawn in the pane's layer, apart from the marks it repaints. */
+export function flashRange(pane: HTMLElement, range: Range) {
+  const host = pane.querySelector<HTMLElement>(':scope > [data-hl-layer] > [data-hl-flash]');
+  if (!host) return;
+  const nodes = boxes(range, pane, 'nb-flash');
+  host.append(...nodes);
+  setTimeout(() => nodes.forEach((n) => n.remove()), 1300);
+}
+
 /**
- * Highlight marks over commented text. Lives inside the scrolling chat pane so the marks scroll with the
- * content; the layer ignores pointer events (marks would block text selection), so clicks are hit-tested
- * against the ranges' line rects on the pane in the capture phase.
+ * Highlight marks over commented text, one layer per pane (`pane` is the tab id: 'chat' or a file tab). Lives inside
+ * the pane's scroll element so the marks scroll with the content, and paints only the comments whose source lives in
+ * that pane. A hidden pane paints nothing (its rects are all zero) and repaints when it becomes active. The layer
+ * ignores pointer events (marks would block text selection), so clicks are hit-tested against the ranges' line rects
+ * on the pane in the capture phase.
  */
-export function HighlightLayer() {
+export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
   const layer = useRef<HTMLDivElement>(null);
+  const marks = useRef<HTMLDivElement>(null);
   const drawn = useRef<Drawn[]>([]); // topmost last
   const cache = useRef(new Map<string, Cached>());
   const paint = useRef<() => void>(() => {});
   const dispatch = useAppDispatch();
-  const comments = useAppSelector(selectComments);
-  const feed = useAppSelector(selectFeed);
-  const state = useRef({ comments });
-  state.current = { comments };
+  const all = useAppSelector(selectComments);
+  const active = useAppSelector((s) => s.tabs.active === paneId);
+  // the file this pane shows (path + ref); null = a file pane whose tab is gone
+  const path = useAppSelector((s) => {
+    const tab = s.tabs.open.find((t) => t.id === paneId);
+    return tab?.kind === 'file' ? tab.path : undefined;
+  });
+  const ref = useAppSelector((s) => {
+    const tab = s.tabs.open.find((t) => t.id === paneId);
+    return tab?.kind === 'file' ? tab.ref : undefined;
+  });
+  const file: PaneFile | null = useMemo(() => (paneId === 'chat' ? undefined : path === undefined ? null : { path, ref }), [paneId, path, ref]);
+  const comments = useMemo(() => (file === null ? [] : all.filter((c) => inPane(c.anchor.source, file))), [all, file]);
+  // what moves this pane's text: the feed for the chat; a settled (re)load for a file tab
+  const content = useAppSelector((s) => (paneId === 'chat' ? s.feed : path === undefined ? undefined : s.files.load[fileKey(path, ref)]));
+  const state = useRef({ comments, active, file });
+  state.current = { comments, active, file };
 
   useEffect(() => {
     const el = layer.current;
     const pane = el?.parentElement;
-    const items = pane?.querySelector('#items');
-    if (!el || !pane || !items) return;
+    const host = marks.current;
+    if (!el || !pane || !host) return;
     let raf = 0;
+    // layout changes that do not resize the pane: the chat's #items, and a file root's content (it is the scroll element itself)
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => paint.current());
+    const observed = new WeakSet<Element>();
+    const observe = (e: Element) => {
+      if (!observed.has(e)) { observed.add(e); ro?.observe(e); }
+    };
     const draw = () => {
       raf = 0;
-      const base = pane.getBoundingClientRect();
+      if (!state.current.active) {
+        drawn.current = [];
+        host.replaceChildren();
+        return; // the cache is kept: its ranges stay valid while hidden, and are re-checked on the next paint
+      }
       const list: (Drawn & { kind: 'sent' | 'pending' })[] = [];
-      const roots = new Map<string, HTMLElement>();
-      for (const e of items.querySelectorAll<HTMLElement>('[data-item-id]')) if (e.dataset.itemId) roots.set(e.dataset.itemId, e);
+      const roots = rootsIn(pane, state.current.file);
+      for (const [k, r] of roots) if (k.startsWith('f:')) for (const e of r.children) if (!e.hasAttribute('data-hl-layer')) observe(e);
       const prev = cache.current;
       const next = new Map<string, Cached>(); // only what this paint drew survives: removed / orphaned comments drop out
       for (const c of state.current.comments) {
@@ -84,28 +158,15 @@ export function HighlightLayer() {
       cache.current = next;
       list.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'sent' ? -1 : 1)); // pending painted last = on top
       drawn.current = list;
-      const nodes: HTMLElement[] = [];
-      for (const { range, kind } of list) {
-        for (const r of lineRects(range)) {
-          const m = document.createElement('div');
-          m.dataset.hl = kind;
-          m.className = `absolute rounded-[4px] ${MARK[kind]}`;
-          m.style.left = `${r.left - base.left + pane.scrollLeft - PAD_X}px`;
-          m.style.top = `${r.top - base.top + pane.scrollTop - PAD_Y}px`;
-          m.style.width = `${r.width + PAD_X * 2}px`;
-          m.style.height = `${r.height + PAD_Y * 2}px`;
-          nodes.push(m);
-        }
-      }
-      el.replaceChildren(...nodes);
+      host.replaceChildren(...list.flatMap(({ range, kind }) => boxes(range, pane, MARK[kind], { hl: kind })));
     };
     paint.current = () => {
       if (!raf) raf = requestAnimationFrame(draw);
     };
 
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => paint.current());
-    ro?.observe(pane);
-    ro?.observe(items);
+    observe(pane);
+    const items = pane.querySelector('#items');
+    if (items) observe(items);
     const onLoad = () => paint.current(); // images / video change layout once loaded
     pane.addEventListener('load', onLoad, true);
     void document.fonts?.ready.then(() => paint.current());
@@ -134,8 +195,13 @@ export function HighlightLayer() {
     };
   }, [dispatch]);
 
-  // comments or feed changed: React has committed the DOM, repaint on the next frame
-  useEffect(() => paint.current(), [comments, feed]);
+  // comments, content or visibility changed: React has committed the DOM (and unhidden the pane), repaint on the next frame
+  useEffect(() => paint.current(), [comments, content, active]);
 
-  return <div ref={layer} aria-hidden="true" data-anchor-skip className="pointer-events-none absolute inset-0" />;
+  return (
+    <div ref={layer} aria-hidden="true" data-anchor-skip data-hl-layer={paneId} className="pointer-events-none absolute inset-0">
+      <div ref={marks} />
+      <div data-hl-flash />
+    </div>
+  );
 }

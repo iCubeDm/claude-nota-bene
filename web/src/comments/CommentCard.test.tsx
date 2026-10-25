@@ -24,7 +24,7 @@ function setup(c: Comment = comment(), dom = true, inFeed = true) {
   const view = render(
     <Provider store={store}>
       <TooltipProvider>
-        {dom && <div id="items"><div data-item-id="a1" data-kind="user"><p>hello brave world</p></div></div>}
+        {dom && <main data-chat-pane><div id="items"><div data-item-id="a1" data-kind="user"><p>hello brave world</p></div></div></main>}
         <CommentCard id={c.id} index={0} />
       </TooltipProvider>
     </Provider>,
@@ -113,15 +113,22 @@ it('a sent comment is read-only', () => {
   expect(screen.getByText(/отправлено/)).toBeInTheDocument();
 });
 
-it('clicking the quote scrolls to the fragment, not the whole message, and flashes the message', () => {
-  const targets: Element[] = [];
-  const scroll = vi.fn(function (this: Element) { targets.push(this); });
-  Element.prototype.scrollIntoView = scroll;
+it('clicking the quote centres the fragment’s own rect in the chat pane and flashes the message', () => {
+  const calls: { el: Element; top?: number }[] = [];
+  Element.prototype.scrollTo = function (this: Element, o?: ScrollToOptions | number) { calls.push({ el: this, top: (o as ScrollToOptions).top }); } as never;
+  Range.prototype.getBoundingClientRect = function (this: Range) {
+    return { left: 0, top: 300 + this.startOffset, width: 50, height: 20, right: 50, bottom: 320 + this.startOffset, x: 0, y: 300, toJSON() {} } as DOMRect;
+  };
   setup();
+  const pane = document.querySelector<HTMLElement>('[data-chat-pane]')!;
+  pane.getBoundingClientRect = () => ({ left: 0, top: 100, width: 300, height: 200, right: 300, bottom: 300, x: 0, y: 100, toJSON() {} }) as DOMRect;
+  Object.defineProperty(pane, 'clientHeight', { value: 200, configurable: true });
+  pane.scrollTop = 40;
   fireEvent.click(screen.getByText('brave world'));
-  expect(scroll).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' });
-  expect(targets).toEqual([document.querySelector('[data-item-id="a1"] p')]);
+  // scrollTop + (r.top - pane.top) - clientHeight/2 + r.height/2 = 40 + (306 - 100) - 100 + 10
+  expect(calls).toEqual([{ el: pane, top: 156 }]);
   expect(document.querySelector('[data-item-id="a1"]')).toHaveClass('nb-flash');
+  delete (Range.prototype as Partial<Range>).getBoundingClientRect;
 });
 
 it('clicking the quote of an orphan scrolls to the message itself', () => {
@@ -186,4 +193,13 @@ it('popover uses the popover background only', () => {
   const card = view.container.querySelector('[role="dialog"] [data-comment-id]')!;
   expect(card).toHaveClass('bg-popover');
   expect(card).not.toHaveClass('bg-card/50');
+});
+
+it('thumbnails of the comment sit outside the anchor text', () => {
+  const H = 'a'.repeat(64);
+  const { view } = setup(comment({ images: [H] }));
+  const img = view.container.querySelector(`img[src="/attach/${H}"]`)!;
+  expect(img).toBeTruthy();
+  expect(img.closest('[data-anchor-skip]')).toBeTruthy();
+  expect(img.getAttribute('loading')).toBe('lazy');
 });

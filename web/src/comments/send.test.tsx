@@ -8,6 +8,8 @@ import { Composer } from '@/composer/Composer.tsx';
 import { Feed } from '@/feed/Feed.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent, useAppDispatch } from '@/store/store.ts';
+import { addImage, uploadFinished, uploadStarted } from '@/composer/slice.ts';
+import { openFile } from '@/tabs/slice.ts';
 import { sendBatch } from './send.ts';
 import { CommentsPanel } from './CommentsPanel.tsx';
 
@@ -50,6 +52,13 @@ it('send carries composed text and commentIds', async () => {
   const m = sent[0] as Extract<ClientMessage, { type: 'send' }>;
   expect(m.commentIds).toEqual(['c1', 'c2']);
   expect(m.text).toMatch(/^please\n\nComments on fragments:\n\n1\. \[my message\]\n> quote c1\n→ text c1\n\n2\./);
+});
+
+it('a file comment names its path in the batch line', async () => {
+  const f = cm('f1', { anchor: { source: { kind: 'file', path: 'docs/n.md' }, start: 0, end: 5, quote: 'hello', prefix: '', suffix: '' } });
+  const { sent, box } = setup([f]);
+  await userEvent.type(box, 'go{Enter}');
+  expect((sent[0] as Extract<ClientMessage, { type: 'send' }>).text).toContain('1. [docs/n.md]\n> hello\n→ text f1');
 });
 
 it('the label shows the count', () => {
@@ -186,4 +195,66 @@ it('with sent comments server-owned, the echo of a racing stale set reports them
   await userEvent.type(box, 'again{Enter}');
   expect(sent).toHaveLength(2);
   expect(sentOf(sent[1]!).commentIds).toBeUndefined();
+});
+
+it('images: composer first, then comment images; labels and the batch line', async () => {
+  const A = 'a'.repeat(64), B = 'b'.repeat(64);
+  const { sent, store, box } = setup([cm('c1', { images: [B] })]);
+  act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
+  await userEvent.type(box, 'see{Enter}');
+  const m = sentOf(sent[0]!);
+  expect(m.images).toEqual([
+    { id: A, mediaType: 'image/png', label: '[image 1]' },
+    { id: B, mediaType: expect.any(String), label: '[image 2 · for comment 1]' },
+  ]);
+  expect(m.text).toContain('→ text c1\n📎 images: 2');
+  expect(store.getState().composer.images).toEqual([]);
+});
+
+it('images only, no text and no comments, still sends; an upload in flight blocks the send', async () => {
+  const A = 'a'.repeat(64);
+  const { sent, store, box } = setup();
+  act(() => void store.dispatch(uploadStarted()));
+  act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
+  await userEvent.type(box, '{Enter}');
+  expect(sent).toHaveLength(0);
+  act(() => void store.dispatch(uploadFinished()));
+  await userEvent.type(box, '{Enter}');
+  expect(sentOf(sent[0]!)).toMatchObject({ text: '', images: [{ id: A, label: '[image 1]' }] });
+});
+
+it('only comment images: the ref sits on the comment that owns them, numbering is global', async () => {
+  const B = 'b'.repeat(64);
+  const { sent, box } = setup([cm('c1'), cm('c2', { images: [B] })]);
+  await userEvent.type(box, '{Enter}');
+  const m = sentOf(sent[0]!);
+  expect(m.images).toMatchObject([{ id: B, label: '[image 1 · for comment 2]' }]);
+  expect(m.text).toMatch(/1\. \[[^\]]*\]\n> quote c1\n→ text c1\n\n2\. \[[^\]]*\]\n> quote c2\n→ text c2\n📎 images: 1$/);
+});
+
+it('labels follow the language at send time, not at add time', async () => {
+  const A = 'a'.repeat(64);
+  const { sent, store, box } = setup([cm('c1')]);
+  setLang('ru');
+  act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
+  setLang('en');
+  await userEvent.type(box, 'x{Enter}');
+  expect(sentOf(sent[0]!).images?.[0]?.label).toBe('[image 1]');
+});
+
+it('a send from a file tab switches to the chat, where the reply shows; offline stays on the file', () => {
+  const { store } = setup([cm('c1')]);
+  act(() => { store.dispatch(openFile('notes.md')); });
+  expect(store.getState().tabs.active).toBe('file:notes.md');
+  let r: unknown;
+  act(() => { r = store.dispatch(sendBatch(false)); });
+  expect(r).toBe('sent');
+  expect(store.getState().tabs.active).toBe('chat');
+  cleanup();
+
+  const off = setup([cm('c2')], false).store;
+  act(() => { off.dispatch(openFile('notes.md')); });
+  act(() => { r = off.dispatch(sendBatch(false)); });
+  expect(r).toBe('offline');
+  expect(off.getState().tabs.active).toBe('file:notes.md');
 });

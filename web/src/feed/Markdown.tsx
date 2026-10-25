@@ -4,6 +4,9 @@ import 'highlight.js/styles/github-dark.min.css';
 import { marked } from 'marked';
 import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { t } from '@/i18n/index.ts';
+import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
+import { useSources } from '@/files/sources.ts';
+import { markRefs } from '@/refs/refs.ts';
 import './markdown.css';
 
 // external links in agent replies open in a new browser tab instead of replacing the app
@@ -14,34 +17,34 @@ DOMPurify.addHook('afterSanitizeAttributes', (n) => {
   }
 });
 
-const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
-const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
-
-// The /file route arrives in M2.
-const fileUrl = (p: string) => {
-  if (/^(https?:|data:|blob:)/.test(p)) return p;
-  let decoded = p;
-  try {
-    decoded = decodeURI(p);
-  } catch {
-    // keep raw
-  }
-  return `/file?path=${encodeURIComponent(decoded)}`;
-};
-
 const escAttr = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+// marked renderers are global and parse is synchronous, so the current render's baseDir and source live here
+let currentBase: string | undefined;
+let currentSrc: string | undefined;
 
 marked.use({
   gfm: true,
   renderer: {
     image(href: string, _title: string | null, text: string) {
-      const src = escAttr(fileUrl(href));
+      const src = escAttr(fileUrl(href, currentBase, currentSrc));
       if (VIDEO.test(href)) return `<video controls preload="metadata" src="${src}"></video>`;
       if (AUDIO.test(href)) return `<audio controls src="${src}"></audio>`;
       return `<img src="${src}" alt="${escAttr(text || '')}">`;
     },
+    // <input> is forbidden by the sanitizer: a task-list box is a CSS-drawn span (no text, so anchors read the same)
+    checkbox(checked: boolean) {
+      return `<span class="task-box${checked ? ' checked' : ''}" aria-hidden="true"></span> `;
+    },
   },
 });
+
+/**
+ * Markdown from any repo branch is rendered, so it is hostile input: no <style> (global CSS), no form controls, and no
+ * data-* attributes at all (content data-pane / data-file-path / data-lightbox would collide with app hooks; markRefs and
+ * hljs add their own data-* after sanitizing).
+ */
+const HARDEN = { FORBID_TAGS: ['style', 'form', 'input', 'button', 'select', 'textarea'], ALLOW_DATA_ATTR: false };
 
 type MermaidApi = { render: (id: string, code: string) => Promise<{ svg: string }> };
 let mermaidP: Promise<MermaidApi> | undefined;
@@ -79,7 +82,7 @@ function postProcess(root: HTMLElement, final: boolean) {
     } else if (final && lang === 'svg') {
       const out = document.createElement('div');
       out.className = 'svg-out';
-      out.innerHTML = DOMPurify.sanitize(c.textContent ?? '', { USE_PROFILES: { svg: true, svgFilters: true } });
+      out.innerHTML = DOMPurify.sanitize(c.textContent ?? '', { USE_PROFILES: { svg: true, svgFilters: true }, ...HARDEN });
       pre.replaceWith(out);
     } else if (!c.dataset.highlighted) {
       hljs.highlightElement(c);
@@ -89,20 +92,35 @@ function postProcess(root: HTMLElement, final: boolean) {
 }
 
 export const Markdown = memo(
-  function Markdown({ text, final }: { text: string; final: boolean }) {
+  /** `src`: the source of the file being shown (M3-16): its relative images load from that source. */
+  function Markdown({ text, final, baseDir, src }: { text: string; final: boolean; baseDir?: string; src?: string }) {
     const ref = useRef<HTMLDivElement>(null);
+    // absolute paths become refs only inside a known source's dir: re-mark when the list arrives or changes
+    const sources = useSources();
     const html = useMemo(
-      () =>
-        DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
-          ADD_TAGS: ['video', 'audio'],
-          ADD_ATTR: ['controls', 'preload'],
-        }),
-      [text],
+      () => {
+        currentBase = baseDir;
+        currentSrc = src;
+        try {
+          return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
+            ADD_TAGS: ['video', 'audio'],
+            ADD_ATTR: ['controls', 'preload'],
+            ...HARDEN,
+          });
+        } finally {
+          currentBase = undefined;
+          currentSrc = undefined;
+        }
+      },
+      [text, baseDir, src],
     );
+    useLayoutEffect(() => {
+      if (ref.current && final) markRefs(ref.current, baseDir);
+    }, [html, final, baseDir, sources]);
     useLayoutEffect(() => {
       if (ref.current) postProcess(ref.current, final);
     }, [html, final]);
     return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
   },
-  (a, b) => a.text === b.text && a.final === b.final,
+  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src,
 );

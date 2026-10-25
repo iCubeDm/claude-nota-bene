@@ -10,10 +10,24 @@ if (!process.env.NB_E2E_BUILT) {
   process.env.NB_E2E_BUILT = '1';
 }
 
+// ffmpeg generates the media fixtures. Detected once here; the env marker reaches serve.mjs (it skips the media) and
+// the spec workers (media tests skip with a message). NB_E2E_FFMPEG=0 forces the no-ffmpeg path.
+if (process.env.NB_E2E_FFMPEG === undefined) {
+  try {
+    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' });
+    process.env.NB_E2E_FFMPEG = '1';
+  } catch {
+    process.env.NB_E2E_FFMPEG = '0';
+    console.warn('e2e: ffmpeg not found on PATH, the media tests are skipped');
+  }
+}
+
 const fixtures = [
   { name: 'chat', port: 4791 },
   { name: 'slow', port: 4792 },
   { name: 'ask', port: 4793 },
+  // all of 4791-4793 are taken, so files takes 4794 (free: 4777-4781 are live windows, 4790 is the manual smoke)
+  { name: 'files', port: 4794 },
 ];
 
 export default defineConfig({
@@ -26,7 +40,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: 'list',
   use: { channel: 'chrome', headless: true, locale: 'en-US' },
-  // Each project runs only tests whose title carries its @tag (@chat / @slow / @ask).
+  // Each project runs only tests whose title carries its @tag (@chat / @slow / @ask / @files).
   // A test without a tag runs nowhere, so chat.spec.ts must tag every test.
   projects: fixtures.map((f) => ({
     name: f.name,

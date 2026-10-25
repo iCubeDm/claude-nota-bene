@@ -9,6 +9,7 @@ import type { AgentBackend } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager } from './session.ts';
 import { lastSession } from './state.ts';
+import { AttachmentStore } from './attachments.ts';
 
 let home: string;
 const prevHome = process.env.NOTA_BENE_HOME;
@@ -49,7 +50,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
-        send() {}, interrupt: async () => {}, close() {},
+        send() {}, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -60,6 +61,21 @@ describe('session manager', () => {
     });
     expect(JSON.stringify(sdkOf(events, 'user'))).not.toContain('AAAA');
     expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('AAAA'); // only tool_result images are stripped
+  });
+
+  it('fileSuggestions delegates to the agent and rejects once it has died', async () => {
+    const backend: AgentBackend = {
+      history: async () => [],
+      start: () => ({
+        messages: (async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })(),
+        send() {}, interrupt: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], close() {},
+      }),
+    };
+    const { events, make } = setup(backend);
+    const s = await make();
+    expect(await s.fileSuggestions('a')).toEqual(['hit-a']);
+    await until(() => sdkOf(events, 'result').length === 1); // the crash became an error result; the agent is gone
+    await expect(s.fileSuggestions('a')).rejects.toThrow('no agent');
   });
 
   it('send emits user then the agent reply', async () => {
@@ -85,7 +101,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { calls.push({ priority: m.priority }); a.send(m); },
           interrupt: () => { interrupts++; return a.interrupt(); },
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -169,7 +185,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { log.push(`send:${m.priority}`); a.send(m); },
           interrupt: () => { log.push('interrupt'); return a.interrupt(); },
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -199,7 +215,7 @@ describe('session manager', () => {
           ...a,
           send: (m) => a.send(m),
           interrupt: () => a.interrupt(),
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
           messages: (async function* () {
             for await (const m of a.messages) {
               yield m;
@@ -233,7 +249,7 @@ describe('session manager', () => {
         })(),
         send: () => {},
         interrupt: async () => {},
-        close: () => { closed++; },
+        fileSuggestions: async () => [], close: () => { closed++; },
       }),
     };
     const { events, make } = setup(backend);
@@ -254,7 +270,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { if (first) { first = false; throw new Error('send failed'); } a.send(m); },
           interrupt: () => a.interrupt(),
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -283,7 +299,7 @@ describe('session manager', () => {
           })(),
           send: (m) => { delivered.push(`${mine}:${m.text}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          close: () => {},
+          fileSuggestions: async () => [], close: () => {},
         };
       },
     };
@@ -356,7 +372,7 @@ describe('busy cannot get stuck', () => {
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
-        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), close: () => a.close() };
+        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), fileSuggestions: async () => [], close: () => a.close() };
       },
     };
     const { hub, events, make } = setup(backend);
@@ -387,7 +403,7 @@ describe('busy cannot get stuck', () => {
         })(),
         send: () => { sent++; },
         interrupt: async () => {},
-        close: () => {},
+        fileSuggestions: async () => [], close: () => {},
       }),
     };
     const { hub, events, make } = setup(backend);
@@ -403,5 +419,73 @@ describe('busy cannot get stuck', () => {
     const f = await feedOf(attached);
     expect(f.waiting).toEqual([]);
     expect(f.busy).toBe(false);
+  });
+
+  describe('image attachments', () => {
+    const png = (n: string) => Buffer.from(`png-${n}`);
+
+    it('a send with two refs reaches the agent as images and the hub event carries refs only', async () => {
+      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
+      const refs = ['a', 'b'].map((n, i) => ({ id: attachments.put(png(n), 'image/png'), mediaType: 'image/png' as const, label: `Comment ${i + 1}` }));
+      const got: unknown[] = [];
+      const backend: AgentBackend = {
+        history: async () => [],
+        start: () => ({
+          messages: (async function* () { await new Promise(() => {}); })(),
+          send: (m) => { got.push(m); }, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+        }),
+      };
+      const hub = new EventHub();
+      const events: ServerEvent[] = [];
+      hub.attach({ send: (d) => events.push(JSON.parse(d) as ServerEvent) });
+      const s = await createSessionManager({ hub, backend, cwd: '/proj', attachments });
+      s.send({ id: 'u1', text: 'see', images: refs });
+      await until(() => got.length === 1);
+      expect(got[0]).toMatchObject({
+        text: 'see',
+        images: [
+          { mediaType: 'image/png', data: png('a').toString('base64'), label: 'Comment 1' },
+          { mediaType: 'image/png', data: png('b').toString('base64'), label: 'Comment 2' },
+        ],
+      });
+      const user = events.find((e) => e.kind === 'user');
+      expect(user).toMatchObject({ images: refs });
+      expect(JSON.stringify(events)).not.toContain(png('a').toString('base64'));
+    });
+
+    it('an unknown ref id is reported as attach; the text and the other images still go out', async () => {
+      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
+      const ok = { id: attachments.put(png('a'), 'image/png'), mediaType: 'image/png' as const, label: 'ok' };
+      const bad = { id: 'f'.repeat(64), mediaType: 'image/png' as const, label: 'bad' };
+      const got: { text: string; images?: unknown[] }[] = [];
+      const backend: AgentBackend = {
+        history: async () => [],
+        start: () => ({
+          messages: (async function* () { await new Promise(() => {}); })(),
+          send: (m) => { got.push(m); }, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+        }),
+      };
+      const hub = new EventHub();
+      const events: ServerEvent[] = [];
+      hub.attach({ send: (d) => events.push(JSON.parse(d) as ServerEvent) });
+      const s = await createSessionManager({ hub, backend, cwd: '/proj', attachments });
+      s.send({ id: 'u1', text: 'hello', images: [bad, ok] });
+      await until(() => got.length === 1);
+      expect(events).toContainEqual(expect.objectContaining({ kind: 'server-error', where: 'attach' }));
+      expect(got[0]!.text).toBe('hello');
+      expect(got[0]!.images).toHaveLength(1);
+    });
+
+    it('fake echoImages reports how many images the turn received', async () => {
+      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
+      const ref = { id: attachments.put(png('a'), 'image/png'), mediaType: 'image/png' as const, label: 'x' };
+      const hub = new EventHub();
+      const events: ServerEvent[] = [];
+      hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind !== 'replay') events.push(e); } });
+      const s = await createSessionManager({ hub, backend: fakeBackend([{ text: 'ok', echoImages: true }]), cwd: '/proj', attachments });
+      s.send({ id: 'u1', text: 'hi', images: [ref, ref] });
+      await until(() => sdkOf(events, 'result').length === 1);
+      expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('ok\\nimages: 2');
+    });
   });
 });

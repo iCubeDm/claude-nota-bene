@@ -12,6 +12,9 @@ export default defineConfig({
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   server: {
     port: 5173,
-    proxy: { '/info': backend, '/ws': { ...backend, ws: true } },
+    proxy: {
+      ...Object.fromEntries(['/info', '/file', '/tree', '/complete', '/attach', '/sources'].map((p) => [p, backend])),
+      '/ws': { ...backend, ws: true },
+    },
   },
 });

@@ -1,10 +1,16 @@
-import { configureStore, createAction, createSlice, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
-import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
-import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import { configureStore, createAction, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
+import { useDispatch, useSelector, useStore, type TypedUseSelectorHook } from 'react-redux';
+import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
+import { activate, readSavedTabs, restoreTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
+import { loadSources } from '../files/sources.ts';
+import { AUDIO, VIDEO } from '../files/kinds.ts';
+import { browserPip, MediaController, type PipApi } from '../media/mediaController.ts';
+import { filesSlice } from '../files/slice.ts';
+import { readSavedDirs, setDirs, treeKey, treeSlice } from '../tree/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** The only way server data enters the store. */
@@ -35,26 +41,88 @@ type Send = (m: ClientMessage) => boolean;
 /** Whether Redux DevTools are on: dev builds only. Read at call time so tests can stub it. */
 export const devToolsEnabled = (): boolean => import.meta.env.DEV;
 
+const mediaByStore = new WeakMap<object, MediaController>();
+
+/**
+ * Tells the media controller about every tab change, whatever caused it (tab click, openFile, close actions, restore):
+ * removed tabs go to onClose first, then a changed active tab to onSwitch. It runs right after the reducer, inside the
+ * dispatch, so before React renders the new pane, and still inside the click's user activation (PiP needs one).
+ */
+const mediaMiddleware = (media: MediaController): Middleware => (api) => (next) => (action) => {
+  const before = (api.getState() as { tabs: TabsState }).tabs;
+  const result = next(action);
+  const after = (api.getState() as { tabs: TabsState }).tabs;
+  if (after !== before) {
+    const kept = new Set<string>(after.open.map((t) => t.id));
+    for (const t of before.open) if (!kept.has(t.id)) media.onClose(t.id);
+    if (after.active !== before.active) media.onSwitch(before.active, after.active);
+  }
+  return result;
+};
+
 /**
  * Creates the store and exactly one socket connection. The socket lives only in this closure
  * (reached by thunks through the thunk `extra` argument), never in Redux state: it is not serializable.
  */
-export function makeStore(o: { url: string; connect?: typeof realConnect }) {
+export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: PipApi }) {
   const connectFn = o.connect ?? realConnect;
   let conn: ReturnType<typeof realConnect> | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
+  // one media controller per store; it holds DOM elements, so it lives here and not in state (components reach it via useMedia)
+  const media: MediaController = new MediaController({
+    pip: o.pip ?? browserPip,
+    activate: (id) => store.dispatch(activate(id as Tab['id'])),
+    isMedia: (id) => {
+      const tab = store.getState().tabs.open.find((t) => t.id === id);
+      return tab?.kind === 'file' && (VIDEO.test(tab.path) || AUDIO.test(tab.path));
+    },
+  });
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }),
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer },
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).concat(mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
-  // the ONE place that persists the panel state, whoever changed it (toggle, ×, auto-open after adding a comment)
+  mediaByStore.set(store, media);
+  // the ONE place that persists UI state, whoever changed it (toggle, ×, auto-open after adding a comment, tab changes)
   let panelOpen = store.getState().comments.ui.panelOpen;
+  let tabs = store.getState().tabs;
+  let dirs = store.getState().tree.dirs;
+  let restoredRoot: string | null = null;
   store.subscribe(() => {
-    const now = store.getState().comments.ui.panelOpen;
-    if (now === panelOpen) return;
-    panelOpen = now;
-    try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
+    let st = store.getState();
+    const now = st.comments.ui.panelOpen;
+    if (now !== panelOpen) {
+      panelOpen = now;
+      try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
+    }
+    const root = st.feed.session?.root;
+    if (root && root !== restoredRoot) {
+      // first time this root is known: restore its saved tabs (the dispatch re-enters this subscriber and persists the result)
+      restoredRoot = root;
+      const saved = readSavedTabs(root);
+      // source ids are stable (M3-16): every saved tab comes back at once, whatever /sources says; a tab whose source
+      // is gone keeps its place and says so in its view. The load feeds the picker and absolute refs.
+      void loadSources();
+      if (saved) store.dispatch(restoreTabs(saved));
+      const savedDirs = readSavedDirs(root);
+      if (savedDirs) store.dispatch(setDirs([...new Set([...savedDirs, ...store.getState().tree.dirs])]));
+      // the restores re-entered this subscriber, which persisted them; `st` is stale now and would write the
+      // pre-restore (empty) state back over them
+      st = store.getState();
+    }
+    if (st.tree.dirs !== dirs) {
+      dirs = st.tree.dirs;
+      if (restoredRoot) {
+        try { localStorage.setItem(treeKey(restoredRoot, st.tree.src), JSON.stringify(dirs)); } catch { /* not persisted */ }
+      }
+    }
+    if (st.tabs !== tabs) {
+      tabs = st.tabs;
+      // before the root is known there is nothing to key by; the restore merges these tabs in later
+      if (restoredRoot) {
+        try { localStorage.setItem(tabsKey(restoredRoot), JSON.stringify(serializeTabs(tabs))); } catch { /* not persisted */ }
+      }
+    }
   });
   conn = connectFn(
     o.url,
@@ -74,20 +142,24 @@ export type AppThunk<R = void> = ThunkAction<R, RootState, { send: Send }, Unkno
 
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
 export const useAppDispatch: () => AppDispatch = useDispatch;
+/** The store's media controller (see makeStore). */
+export const useMedia = (): MediaController => mediaByStore.get(useStore())!;
 
 export const selectFeed = (s: RootState): FeedState => s.feed;
 export const selectBusy = (s: RootState): boolean => s.feed.busy;
 export const selectConn = (s: RootState): ConnState => s.conn.state;
+export const selectTurnSeq = (s: RootState): number => s.feed.turnSeq;
 export const selectSession = (s: RootState) => s.feed.session;
 
 export const sendMessage =
-  (text: string, force: boolean, commentIds?: string[]): AppThunk<boolean> =>
+  (text: string, force: boolean, commentIds?: string[], images?: ImageRef[]): AppThunk<boolean> =>
   (_d, getState, { send }) => {
     const st = getState();
     if (selectConn(st) !== 'open') return false;
     return send({
       type: 'send', id: crypto.randomUUID(), text, force: force && selectBusy(st),
       ...(commentIds?.length ? { commentIds } : {}),
+      ...(images?.length ? { images } : {}),
     });
   };
 

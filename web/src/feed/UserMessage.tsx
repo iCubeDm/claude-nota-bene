@@ -1,6 +1,8 @@
+import { Attachments } from '@/attachments/Attachments.tsx';
 import { getLang, useT } from '@/i18n/index.ts';
 import { en } from '@/i18n/en.ts';
 import { ru } from '@/i18n/ru.ts';
+import { splitMentionsRaw } from '@/refs/refs.ts';
 import { labelOf } from '@/comments/labels.ts';
 import { selectSentFor } from '@/comments/slice.ts';
 import type { FeedItem } from '@/store/feed.ts';
@@ -33,7 +35,14 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
         {time}
         {mode}
       </div>
-      {general}
+      {splitMentionsRaw(general).map((p, i) =>
+        'mention' in p ? (
+          <span key={i} className="ref mention" data-path={p.mention}>{p.raw}</span>
+        ) : (
+          p.text
+        ),
+      )}
+      {item.images && <Attachments ids={item.images.map((i) => i.id)} />}
       {(sent.length > 0 || raw) && (
         <details data-anchor-skip className="mt-1.5 text-[13px] text-muted-foreground">
           <summary className="cursor-pointer">{sent.length ? t('nComments', sent.length) : t('commentsLc')}</summary>

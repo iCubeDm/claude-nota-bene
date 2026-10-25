@@ -48,3 +48,30 @@ test('comments drop unknown keys on comment, anchor and source', () => {
   const clean = { id: 'c1', anchor, text: 'note', label: 'verify', status: 'pending', createdAt: 1 };
   expect(parseClientMessage(comments(dirty))).toStrictEqual({ type: 'comments', items: [clean] });
 });
+const H = 'a'.repeat(64);
+test('send with images keeps only valid refs', () => {
+  const send = (images: unknown) => JSON.stringify({ type: 'send', id: 'u1', text: 'hi', images });
+  const ok = { id: H, mediaType: 'image/png', label: '[image 1]' };
+  expect(parseClientMessage(send([{ ...ok, extra: 1 }])))
+    .toStrictEqual({ type: 'send', id: 'u1', text: 'hi', images: [ok] });
+  expect(parseClientMessage(send([{ ...ok, id: '../x' }]))).toHaveProperty('error');
+  expect(parseClientMessage(send([{ ...ok, mediaType: 'image/heic' }]))).toHaveProperty('error');
+  expect(parseClientMessage(send([{ ...ok, label: 1 }]))).toHaveProperty('error');
+  expect(parseClientMessage(send('x'))).toHaveProperty('error');
+});
+test('comment images are ids', () => {
+  const c = comment({ images: [H] });
+  expect(parseClientMessage(comments(c))).toStrictEqual({ type: 'comments', items: [c] });
+  expect(parseClientMessage(comments(comment({ images: ['../x'] })))).toHaveProperty('error');
+  expect(parseClientMessage(comments(comment({ images: [H.toUpperCase()] })))).toHaveProperty('error');
+});
+
+test('a file anchor keeps its ref (branch), a string of at most 200 chars', () => {
+  const src = { kind: 'file', path: 'a.md', ref: 'feature/x' };
+  const c = comment({ anchor: { ...anchor, source: { ...src, junk: 1 } } });
+  expect(parseClientMessage(comments(c))).toEqual({ type: 'comments', items: [comment({ anchor: { ...anchor, source: src } })] });
+  expect(parseClientMessage(comments(comment({ anchor: { ...anchor, source: { kind: 'file', path: 'a.md', ref: 3 } } })))).toHaveProperty('error');
+  expect(parseClientMessage(comments(comment({ anchor: { ...anchor, source: { kind: 'file', path: 'a.md', ref: 'x'.repeat(201) } } })))).toHaveProperty('error');
+  const plain = comment({ anchor: { ...anchor, source: { kind: 'file', path: 'a.md' } } });
+  expect(parseClientMessage(comments(plain))).toEqual({ type: 'comments', items: [plain] });
+});

@@ -20,9 +20,13 @@ afterEach(() => {
   delete (Range.prototype as Partial<Range>).getBoundingClientRect;
 });
 
+// the button hides on tab switches, so it reads the store
+const withStore = (ui: React.ReactElement) =>
+  render(<Provider store={makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) })}>{ui}</Provider>);
+
 function setup(items: string) {
   const onComment = vi.fn<(s: PendingSelection) => void>();
-  const view = render(
+  const view = withStore(
     <main data-chat-pane>
       <div id="items" dangerouslySetInnerHTML={{ __html: items }} />
       <SelectionButton onComment={onComment} />
@@ -158,7 +162,7 @@ it('a selection starting in a tool or done line shows no button', async () => {
 });
 
 it('a selection outside #items (composer textarea, header) shows no button', async () => {
-  const view = render(
+  const view = withStore(
     <>
       <header>app header</header>
       <main data-chat-pane><div id="items" dangerouslySetInnerHTML={{ __html: A }} /></main>
@@ -214,4 +218,81 @@ it('Esc dismissing the button does not interrupt a busy agent; the next Esc does
   expect(sent.filter((m) => m.type === 'interrupt')).toHaveLength(0);
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(sent.filter((m) => m.type === 'interrupt')).toHaveLength(1);
+});
+
+// ---- M3-13: selections in an open file view ----
+
+function setupFile(html: string, outside = '') {
+  const onComment = vi.fn<(s: PendingSelection) => void>();
+  const view = withStore(
+    <>
+      <main data-chat-pane data-pane="chat" hidden><div id="items" dangerouslySetInnerHTML={{ __html: A }} /></main>
+      <div data-pane="file:docs/n.md" data-file-path="docs/n.md" dangerouslySetInnerHTML={{ __html: html }} />
+      <div id="outside" dangerouslySetInnerHTML={{ __html: outside }} />
+      <SelectionButton onComment={onComment} />
+    </>,
+  );
+  const root = view.container.querySelector<HTMLElement>('[data-file-path]')!;
+  return { onComment, view, root };
+}
+const MD = '<div class="md"><h1>Title</h1><p>hello brave world</p></div>';
+
+it('a selection in an md file view gives an anchor on that file', async () => {
+  const { root, onComment } = setupFile(MD);
+  const t = root.querySelector('p')!.firstChild!;
+  select(t, 6, t, 11);
+  await up(root);
+  fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
+  const { anchor } = onComment.mock.calls[0][0];
+  expect(anchor.source).toEqual({ kind: 'file', path: 'docs/n.md' });
+  expect(anchor.quote).toBe('brave');
+  expect(anchor.prefix).toBe('Title hello '); // offsets in the rendered text of the whole file root
+});
+
+it('a selection from a file root into something outside is clipped to the file', async () => {
+  const { root, view, onComment } = setupFile(MD, '<p>not the file</p>');
+  const t = root.querySelector('p')!.firstChild!;
+  const o = view.container.querySelector('#outside p')!.firstChild!;
+  select(t, 6, o, 3);
+  await up(root);
+  fireEvent.click(screen.getByRole('button'));
+  expect(onComment.mock.calls[0][0].anchor.quote).toBe('brave world');
+});
+
+it('scrolling the active file pane follows the selection; Esc then a scroll keeps it hidden', async () => {
+  const { root } = setupFile(MD);
+  root.getBoundingClientRect = () => ({ left: 0, right: 300, top: 0, bottom: 200, width: 300, height: 200, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  const t = root.querySelector('p')!.firstChild!;
+  select(t, 6, t, 11);
+  await up(root);
+  fireEvent.scroll(root);
+  expect(screen.getByRole('button', { name: '💬 Comment' })).toBeInTheDocument();
+  root.getBoundingClientRect = () => ({ left: 0, right: 300, top: 100, bottom: 300, width: 300, height: 200, x: 0, y: 100, toJSON() {} }) as DOMRect;
+  fireEvent.scroll(root);
+  expect(screen.queryByRole('button')).toBeNull(); // scrolled out of the file pane, not out of the (hidden) chat
+  await up(root);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  root.getBoundingClientRect = () => ({ left: 0, right: 300, top: 0, bottom: 200, width: 300, height: 200, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  fireEvent.scroll(root);
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('an md file whose content has its own data-file-path: the selection still anchors on the tab’s file', async () => {
+  const { root, onComment } = setupFile('<div class="md"><p>hello</p><div data-file-path="x.md"><p>nested brave text</p></div></div>');
+  const t = root.querySelector('[data-file-path="x.md"] p')!.firstChild!;
+  select(t, 7, t, 12);
+  await up(root);
+  fireEvent.click(screen.getByRole('button'));
+  const { anchor } = onComment.mock.calls[0][0];
+  expect(anchor.source).toEqual({ kind: 'file', path: 'docs/n.md' });
+  expect(anchor.quote).toBe('brave');
+  expect(anchor.prefix).toBe('hello nested '); // offsets in the whole file root, not the nested element
+});
+
+it('a selection left in a hidden pane makes no button', async () => {
+  const { view } = setupFile(MD);
+  const chat = view.container.querySelector('[data-item-id="a1"] p')!.firstChild!; // the chat pane is hidden here
+  select(chat, 6, chat, 11);
+  await up(view.container.querySelector('[data-file-path]')!);
+  expect(screen.queryByRole('button')).toBeNull();
 });

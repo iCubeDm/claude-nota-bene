@@ -6,8 +6,10 @@ import { parseClientMessage } from '@nota-bene/shared';
 import type { Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
+import { AttachmentStore, attachmentRoutes } from './attachments.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
+import { complete, fileRoutes } from './fileRoutes.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
 import { createSessionManager } from './session.ts';
 import { stateDir } from './state.ts';
@@ -39,8 +41,10 @@ export async function startServer(o: {
   installProcessHandlers();
   hubs.add(hub);
   try {
+    const attachments = new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
     const manager = await createSessionManager({
       hub,
+      attachments,
       backend: o.backend,
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
@@ -54,16 +58,19 @@ export async function startServer(o: {
       broadcastComments(store.get(id));
     });
     const allowedHosts: string[] = []; // filled after listen, once the port is known
+    const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
+    const root = manager.info().root;
     const server = http.createServer(httpHandler({
       hub,
       allowedHosts,
+      allowedOrigins,
+      extra: { ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root }, q) }), ...attachmentRoutes(attachments, hub) },
       webDist: o.webDist,
       info: () => {
         const { id, root } = manager.info();
         return { root, session: id };
       },
     }));
-    const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     const wss = new WebSocketServer({
       server,
       verifyClient: ({ req }, done) => {
@@ -100,7 +107,7 @@ export async function startServer(o: {
                 reportError(hub, 'comments', e); // the message itself must still go out
               }
             }
-            manager.send({ id: msg.id, text: msg.text, ...(msg.force ? { force: true } : {}) });
+            manager.send({ id: msg.id, text: msg.text, ...(msg.force ? { force: true } : {}), ...(msg.images?.length ? { images: msg.images } : {}) });
             break;
           case 'comments':
             try {
