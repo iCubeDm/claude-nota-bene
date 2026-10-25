@@ -32,8 +32,19 @@ marked.use({
       if (AUDIO.test(href)) return `<audio controls src="${src}"></audio>`;
       return `<img src="${src}" alt="${escAttr(text || '')}">`;
     },
+    // <input> is forbidden by the sanitizer: a task-list box is a CSS-drawn span (no text, so anchors read the same)
+    checkbox(checked: boolean) {
+      return `<span class="task-box${checked ? ' checked' : ''}" aria-hidden="true"></span> `;
+    },
   },
 });
+
+/**
+ * Markdown from any repo branch is rendered, so it is hostile input: no <style> (global CSS), no form controls, and no
+ * data-* attributes at all (content data-pane / data-file-path / data-lightbox would collide with app hooks; markRefs and
+ * hljs add their own data-* after sanitizing).
+ */
+const HARDEN = { FORBID_TAGS: ['style', 'form', 'input', 'button', 'select', 'textarea'], ALLOW_DATA_ATTR: false };
 
 type MermaidApi = { render: (id: string, code: string) => Promise<{ svg: string }> };
 let mermaidP: Promise<MermaidApi> | undefined;
@@ -71,7 +82,7 @@ function postProcess(root: HTMLElement, final: boolean) {
     } else if (final && lang === 'svg') {
       const out = document.createElement('div');
       out.className = 'svg-out';
-      out.innerHTML = DOMPurify.sanitize(c.textContent ?? '', { USE_PROFILES: { svg: true, svgFilters: true } });
+      out.innerHTML = DOMPurify.sanitize(c.textContent ?? '', { USE_PROFILES: { svg: true, svgFilters: true }, ...HARDEN });
       pre.replaceWith(out);
     } else if (!c.dataset.highlighted) {
       hljs.highlightElement(c);
@@ -94,6 +105,7 @@ export const Markdown = memo(
           return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
             ADD_TAGS: ['video', 'audio'],
             ADD_ATTR: ['controls', 'preload'],
+            ...HARDEN,
           });
         } finally {
           currentBase = undefined;

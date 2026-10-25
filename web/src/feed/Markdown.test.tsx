@@ -1,6 +1,8 @@
 import { render, waitFor } from '@testing-library/react';
 import hljs from 'highlight.js';
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import { describe, expect, it, vi } from 'vitest';
 import { setLang } from '@/i18n/index.ts';
 import { Markdown } from './Markdown';
@@ -31,6 +33,32 @@ describe('Markdown', () => {
     const { container } = render(<Markdown text={MERMAID} final={false} />);
     expect(container.querySelector('.mermaid-out')).toBeNull();
     expect(container.querySelector('pre code')).not.toBeNull();
+  });
+
+  it('strips <style>, form controls and every data-* attribute (they would collide with app hooks like data-pane)', () => {
+    const evil = '<style>body{display:none}</style><p data-pane="chat" data-file-path="x" data-lightbox>hi</p>' +
+      '<form><input value="a"><button>b</button><select><option>c</option></select><textarea>d</textarea></form>';
+    const { container } = render(<Markdown text={evil} final={false} />);
+    const md = container.querySelector('.md')!;
+    expect(md.querySelector('style, form, input, button, select, textarea')).toBeNull();
+    expect(md.querySelector('p')!.attributes).toHaveLength(0);
+    expect(md.innerHTML).not.toMatch(/data-|display:none/);
+  });
+
+  it('leaves ordinary markdown exactly as the default sanitizer did', () => {
+    const doc = '# H1\n\n## H2\n\nSome *em*, **strong**, `code`, ~~del~~.\n\n- a\n- b\n  1. c\n\n> quote\n\n' +
+      '| a | b |\n|---|:-:|\n| 1 | 2 |\n\n[ext](https://x.y/z) [rel](docs/a.md) ![pic](p.png) ![v](m.mp4)\n\n---\n\n<details><summary>s</summary>t</details>\n';
+    const { container } = render(<Markdown text={doc} final={false} />);
+    const before = DOMPurify.sanitize(marked.parse(doc, { async: false }) as string, { ADD_TAGS: ['video', 'audio'], ADD_ATTR: ['controls', 'preload'] });
+    expect(container.querySelector('.md')!.innerHTML).toBe(before);
+  });
+
+  it('a task list keeps its boxes without an <input>', () => {
+    const { container } = render(<Markdown text={'- [x] done\n- [ ] todo'} final={false} />);
+    const md = container.querySelector('.md')!;
+    expect(md.querySelector('input')).toBeNull();
+    expect([...md.querySelectorAll('.task-box')].map((b) => b.classList.contains('checked'))).toEqual([true, false]);
+    expect(md.textContent).not.toMatch(/[☐☑]/); // the box is CSS-only: comment anchors read the same text as before
   });
 
   it('sanitises <script>', () => {

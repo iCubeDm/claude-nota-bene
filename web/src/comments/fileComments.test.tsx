@@ -134,9 +134,11 @@ it('an md file containing its own data-file-path element: roots, marks and orpha
   files['docs/n.md'] = 'hello brave world\n\n<div data-file-path="x.md">nested words</div>\n';
   files['x.md'] = 'something else entirely\n';
   const store = setup([fileComment(), fileComment({ id: 'fx' }, 'nested words', 'x.md')], ['docs/n.md', 'x.md']);
-  // docs/n.md (earlier in the DOM) loads first, so its nested x.md div exists when x.md's own view settles
+  // docs/n.md (earlier in the DOM) loads first, before x.md's own view settles
   act(() => void store.dispatch(activate(fileTabId('docs/n.md'))));
-  await waitFor(() => expect(pane(fileTabId('docs/n.md')).querySelector('[data-file-path="x.md"]')).not.toBeNull()); // survives sanitising
+  // the sanitizer drops content data-* (ALLOW_DATA_ATTR: false); the outermost-root rule below stays as a second line
+  await waitFor(() => expect(pane(fileTabId('docs/n.md'))).toHaveTextContent('nested words'));
+  expect(pane(fileTabId('docs/n.md')).querySelector('[data-file-path="x.md"]')).toBeNull();
   await waitFor(() => expect(marksIn(fileTabId('docs/n.md'))).toHaveLength(1));
   await frames();
   expect(marksIn(fileTabId('docs/n.md'))).toHaveLength(1); // x.md's comment is not painted on the nested element
