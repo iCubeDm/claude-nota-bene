@@ -50,7 +50,7 @@ export function Feed() {
             return <UserMessage key={it.id} item={it} />;
           case 'assistant':
             return (
-              <div key={it.id} data-kind="assistant" data-item-id={it.id} className="my-2.5">
+              <div key={it.id} data-kind="assistant" data-item-id={it.id} data-final={String(it.final)} className="my-2.5">
                 <Markdown text={it.text} final={it.final} />
               </div>
             );
@@ -61,7 +61,7 @@ export function Feed() {
           case 'permission':
             return <PermissionCard key={it.id} item={it} />;
           case 'notice':
-            return <NoticeLine key={`notice:${i}`} text={it.text} />;
+            return <NoticeLine key={`notice:${i}`} item={it} />;
         }
       })}
     </div>

@@ -2,7 +2,8 @@ import { useT } from '@/i18n/index.ts';
 import type { FeedItem } from '@/store/feed.ts';
 import { timeOf } from './UserMessage.tsx';
 
-const LINE = 'mt-4 border-t border-dashed border-border-soft pt-1 font-mono text-[10.5px] text-muted-foreground';
+const BASE = 'mt-4 border-t border-dashed border-border-soft pt-1 font-mono text-[10.5px]';
+const LINE = `${BASE} text-muted-foreground`;
 
 export function DoneLine({ item }: { item: Extract<FeedItem, { kind: 'done' }> }) {
   const t = useT();
@@ -15,11 +16,18 @@ export function DoneLine({ item }: { item: Extract<FeedItem, { kind: 'done' }> }
   );
 }
 
-export function NoticeLine({ text }: { text: string }) {
+export function NoticeLine({ item }: { item: Extract<FeedItem, { kind: 'notice' }> }) {
   const t = useT();
+  if (item.tone === 'error') {
+    return (
+      <div data-kind="notice" role="alert" className={`${BASE} whitespace-pre-wrap text-destructive`}>
+        {t('serverError', item.where)}: {item.text}
+      </div>
+    );
+  }
   return (
     <div data-kind="notice" className={LINE}>
-      {t('resumed', text)}
+      {t('resumed', item.text)}
     </div>
   );
 }

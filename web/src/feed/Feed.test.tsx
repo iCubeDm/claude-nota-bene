@@ -1,12 +1,14 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientMessage } from '@nota-bene/shared';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { Feed } from './Feed.tsx';
+import { inputText } from './ToolLine.tsx';
 
 beforeEach(() => setLang('en'));
+afterEach(cleanup);
 
 function setup() {
   const sent: ClientMessage[] = [];
@@ -74,4 +76,76 @@ it('an empty chat shows a prompt to start, gone after the first message', () => 
   expect(view.container.querySelector('[data-kind="empty"]')).toHaveTextContent('Write to the agent to get started');
   act(() => { store.dispatch(serverEvent({ kind: 'user', id: 'u1', text: 'hi', ts: 1 })); });
   expect(view.container.querySelector('[data-kind="empty"]')).toBeNull();
+});
+
+function toolFeed(command: string, output: unknown, isError = false) {
+  const h = setup();
+  act(() => {
+    h.store.dispatch(serverEvent({ kind: 'sdk', ts: 1, m: { type: 'assistant', uuid: 'a', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command, description: 'd' } }] } } as never }));
+    if (output !== undefined) {
+      h.store.dispatch(serverEvent({ kind: 'sdk', ts: 2, m: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: output, ...(isError ? { is_error: true } : {}) }] } } as never }));
+    }
+  });
+  return h;
+}
+
+it('clicking the line shows the full command and the output', () => {
+  const { view } = toolFeed('ls -la\necho second-line', 'file-a\nfile-b');
+  const btn = screen.getByRole('button', { name: /Bash/ });
+  expect(btn).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByTestId('tool-panel')).toBeNull();
+  fireEvent.click(btn);
+  expect(btn).toHaveAttribute('aria-expanded', 'true');
+  const panel = screen.getByTestId('tool-panel');
+  expect(panel).toHaveAttribute('data-anchor-skip');
+  expect(panel).toHaveTextContent('ls -la');
+  expect(panel).toHaveTextContent('echo second-line');
+  expect(panel).toHaveTextContent('file-a');
+  expect(view.container.querySelector('[data-anchor-skip] pre')).not.toBeNull();
+  fireEvent.click(btn);
+  expect(screen.queryByTestId('tool-panel')).toBeNull();
+});
+
+it('a tool without a result shows the running hint while busy and "no output" otherwise', () => {
+  const { store } = toolFeed('sleep 9', undefined);
+  fireEvent.click(screen.getByRole('button', { name: /Bash/ }));
+  expect(screen.getByText('no output')).toBeInTheDocument();
+  act(() => {
+    store.dispatch(serverEvent({ kind: 'user', id: 'u9', text: 'go', ts: 3 }));
+  });
+  expect(screen.getByText('running…')).toBeInTheDocument();
+});
+
+it('an empty result shows "no output"; the toggle is wired to its panel', () => {
+  toolFeed('true', '');
+  const btn = screen.getByRole('button', { name: /Bash/ });
+  fireEvent.click(btn);
+  expect(screen.getByText('no output')).toBeInTheDocument();
+  expect(btn).toHaveAttribute('aria-controls', screen.getByTestId('tool-panel').id);
+});
+
+it('inputText prints string fields raw with the main argument first', () => {
+  expect(inputText('Task', { subagent_type: 'x', prompt: 'a\nb', opts: { n: 1 } })).toBe('prompt:\na\nb\n\nsubagent_type:\nx\n\nopts:\n{\n  "n": 1\n}');
+  expect(inputText('Bash', { command: 'ls', description: 'd' })).toBe('ls');
+});
+
+it('error output is red', () => {
+  toolFeed('false', 'boom', true);
+  fireEvent.click(screen.getByRole('button', { name: /Bash/ }));
+  expect(screen.getByText('boom')).toHaveClass('text-destructive');
+});
+
+it('renders only the first 20000 characters of a long output until show all', () => {
+  toolFeed('big', 'x'.repeat(20_000) + 'TAIL');
+  fireEvent.click(screen.getByRole('button', { name: /Bash/ }));
+  expect(screen.getByTestId('tool-panel')).not.toHaveTextContent('TAIL');
+  fireEvent.click(screen.getByRole('button', { name: 'show all' }));
+  expect(screen.getByTestId('tool-panel')).toHaveTextContent('TAIL');
+  expect(screen.queryByRole('button', { name: 'show all' })).toBeNull();
+});
+
+it('a server error shows up in the chat', () => {
+  const { store, view } = setup();
+  act(() => void store.dispatch(serverEvent({ kind: 'server-error', where: 'ws', message: 'boom' })));
+  expect(view.container.querySelector('[data-kind="notice"]')).toHaveTextContent('Server error · ws: boom');
 });

@@ -5,7 +5,8 @@ export type FakeTurn = {
   text: string;
   chunk?: number;
   delayMs?: number;
-  tools?: { name: string; input: Record<string, unknown> }[];
+  /** `output` becomes the tool_result the CLI would stream back (default empty) */
+  tools?: { name: string; input: Record<string, unknown>; output?: string; isError?: boolean }[];
   ask?: { toolName: string; input: Record<string, unknown> };
   crash?: boolean;
 };
@@ -119,6 +120,18 @@ class FakeSession implements AgentSession {
             ],
           },
         });
+        if (t.tools?.length) {
+          yield sdk({
+            type: 'user', session_id: this.sessionId, uuid: `fake-u-${n}`, parent_tool_use_id: null,
+            message: {
+              role: 'user',
+              content: t.tools.map((tool, k) => ({
+                type: 'tool_result', tool_use_id: `fake-tool-${n}-${k}`, content: tool.output ?? '',
+                ...(tool.isError ? { is_error: true } : {}),
+              })),
+            },
+          });
+        }
         if (t.ask) {
           inTools = true;
           await Promise.race([this.ask(t.ask.toolName, t.ask.input, ctl.signal), whenAborted(ctl.signal)]);

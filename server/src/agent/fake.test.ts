@@ -27,6 +27,21 @@ async function collectTurn(turns: FakeTurn[], ask?: PermissionAsk) {
 }
 
 describe('fake backend', () => {
+  it('streams a tool_result user message for each tool use, before the result', async () => {
+    const out = await collectTurn([{ text: 'x', tools: [
+      { name: 'Bash', input: { command: 'ls' }, output: 'a\nb' },
+      { name: 'Bash', input: { command: 'false' }, output: 'no', isError: true },
+    ] }]);
+    expect(out.map((m) => m.type)).toEqual(['system', 'stream_event', 'stream_event', 'assistant', 'user', 'result']);
+    expect(out[4]).toMatchObject({
+      type: 'user', parent_tool_use_id: null,
+      message: { content: [
+        { type: 'tool_result', tool_use_id: 'fake-tool-1-0', content: 'a\nb' },
+        { type: 'tool_result', tool_use_id: 'fake-tool-1-1', content: 'no', is_error: true },
+      ] },
+    });
+  });
+
   it('streams deltas then assistant then result', async () => {
     const out = await collectTurn([{ text: 'hello world', chunk: 5 }]);
     expect(out.map((m) => m.type)).toEqual(['system', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'assistant', 'result']);

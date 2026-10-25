@@ -2,14 +2,18 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { Button } from '@/components/ui/button.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
-import { interrupt, selectBusy, selectConn, sendMessage, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { sendBatch } from '@/comments/send.ts';
+import { selectPending } from '@/comments/slice.ts';
+import { selectDraft, setDraft } from './slice.ts';
+import { interrupt, selectBusy, selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
 
 export function Composer() {
   const t = useT();
   const dispatch = useAppDispatch();
   const busy = useAppSelector(selectBusy);
   const conn = useAppSelector(selectConn);
-  const [text, setText] = useState('');
+  const nPending = useAppSelector(selectPending).length;
+  const text = useAppSelector(selectDraft);
   const [failed, setFailed] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -38,15 +42,10 @@ export function Composer() {
   }, [busy, dispatch]);
 
   const submit = (force: boolean) => {
-    const body = text.trim();
-    if (!body) return;
-    if (dispatch(sendMessage(body, force))) {
-      setText('');
-      setFailed(false);
-      ref.current?.focus();
-    } else {
-      setFailed(true);
-    }
+    const r = dispatch(sendBatch(force));
+    if (r === 'empty') return;
+    setFailed(r === 'offline');
+    if (r === 'sent') ref.current?.focus();
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -75,14 +74,14 @@ export function Composer() {
           value={text}
           placeholder={t('composerPh')}
           onChange={(e) => {
-            setText(e.target.value);
+            dispatch(setDraft(e.target.value));
             setFailed(false);
           }}
           onKeyDown={onKeyDown}
           className="max-h-[40vh] min-h-10 flex-1 resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)]"
         />
         <Button type="button" className="h-10" onClick={() => submit(false)}>
-          {t('send')}
+          {nPending ? t('sendN', nPending) : t('send')}
         </Button>
         <Tooltip>
           <TooltipTrigger asChild>

@@ -54,7 +54,41 @@ test('tool_result is_error marks the tool red', () => {
     assistant([{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls\nmore' } }]),
     sdk({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true }] } }),
   ]);
-  expect(s.items).toEqual([{ kind: 'tool', id: 't1', name: 'Bash', arg: 'ls', sub: false, error: true }]);
+  expect(s.items).toEqual([{
+    kind: 'tool', id: 't1', name: 'Bash', arg: 'ls', sub: false,
+    input: { command: 'ls\nmore' }, result: { text: '', isError: true },
+  }]);
+});
+
+const toolUse = (id = 't1', input: Record<string, unknown> = { command: 'ls -la\necho done' }) =>
+  assistant([{ type: 'tool_use', id, name: 'Bash', input }]);
+const toolResult = (blocks: unknown[]) => sdk({ type: 'user', message: { content: blocks } });
+
+test('tool item keeps the full input and gets its result by tool_use_id', () => {
+  const input = { command: 'ls -la\necho done', description: 'list' };
+  const s = fold([
+    toolUse('t1', input), toolUse('t2', { command: 'pwd' }),
+    toolResult([{ type: 'tool_result', tool_use_id: 't2', content: '/tmp' }]),
+    toolResult([{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'a' }, { type: 'image', source: {} }, { type: 'text', text: 'b' }, { type: 'document' }] }]),
+  ]);
+  expect(s.items[0]).toMatchObject({ arg: 'ls -la', input, result: { text: 'a\n[image]\nb\n[document]', isError: false } });
+  expect(s.items[1]).toMatchObject({ result: { text: '/tmp', isError: false } });
+});
+
+test('an error result marks the item and keeps the text', () => {
+  const s = fold([toolUse(), toolResult([{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'boom' }])]);
+  expect(s.items[0]).toMatchObject({ result: { text: 'boom', isError: true } });
+});
+
+test('a tool_result user message never makes a bubble; an orphan result is ignored', () => {
+  const s = fold([
+    toolResult([{ type: 'tool_result', tool_use_id: 'ghost', content: 'early' }]),
+    toolUse(),
+    toolResult([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }, { type: 'text', text: 'stray text' }]),
+  ]);
+  expect(s.items.map((i) => i.kind)).toEqual(['tool']);
+  expect(s.items[0]).toMatchObject({ result: { text: 'ok' } });
+  expect(s.busy).toBe(false);
 });
 
 test('permission-done records the answer', () => {
@@ -70,7 +104,7 @@ test('subagent tool lines are sub; subagent text is not added', () => {
     start('p'), delta('x', 'p'),
     assistant([{ type: 'text', text: 'sub text' }, { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/a' } }], 'a2', 'p'),
   ]);
-  expect(s.items).toEqual([{ kind: 'tool', id: 't2', name: 'Read', arg: '/a', sub: true }]);
+  expect(s.items).toEqual([{ kind: 'tool', id: 't2', name: 'Read', arg: '/a', sub: true, input: { file_path: '/a' } }]);
 });
 
 test('session only sets the session; the resumed marker alone adds the notice; server-error, immutability', () => {
@@ -82,7 +116,9 @@ test('session only sets the session; the resumed marker alone adds the notice; s
   expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r' }).items).toEqual(withItem.items);
   expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
   expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ kind: 'notice', text: 'abcdefgh' }]);
-  expect(reduce(withItem, { kind: 'server-error', where: 'w', message: 'm' })).toBe(withItem);
+  const err = reduce(withItem, { kind: 'server-error', where: 'comments', message: 'EACCES' });
+  expect(err.items.at(-1)).toEqual({ kind: 'notice', text: 'EACCES', tone: 'error', where: 'comments' });
+  expect(err.items.slice(0, -1)).toEqual(withItem.items);
   expect(() => reduce(withItem, start())).not.toThrow();
   expect(() => reduce(withItem, result())).not.toThrow();
 });

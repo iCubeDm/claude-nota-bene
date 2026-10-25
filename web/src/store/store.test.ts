@@ -51,3 +51,20 @@ it('devtools only in dev', () => {
   vi.stubEnv('DEV', false);
   expect(devToolsEnabled()).toBe(false);
 });
+
+it('selectReplyLabel numbers final assistant items and names user messages', async () => {
+  const { setLang } = await import('../i18n/index.ts');
+  const { selectReplyLabel } = await import('./store.ts');
+  setLang('en');
+  const f = fake();
+  const store = makeStore({ url: 'ws://x/ws', connect: f.connect });
+  f.ev({ kind: 'user', id: 'u1', text: 'hi', ts: 1 });
+  const a = (uuid: string, text: string) => f.ev({ kind: 'sdk', ts: 2, m: { type: 'assistant', uuid, message: { content: [{ type: 'text', text }] } } as never });
+  a('a1', 'one');
+  a('a2', 'two');
+  const st = store.getState();
+  expect(selectReplyLabel(st, 'u1')).toBe('my message');
+  expect(selectReplyLabel(st, 'a1:0')).toBe('reply #1');
+  expect(selectReplyLabel(st, 'a2:0')).toBe('reply #2');
+  expect(selectReplyLabel(st, 'nope')).toBeNull();
+});

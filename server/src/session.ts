@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk } from './agent/types.ts';
+import { stripUserFrameImages } from './agent/transcript.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { saveSession } from './state.ts';
@@ -10,6 +11,8 @@ export type SessionManager = {
   interrupt(): void;
   answer(permissionId: string, allow: boolean): void;
   info(): { id: string | null; root: string };
+  /** Called whenever the session id changes to a real id (first init, or a different id after resume/restart). */
+  onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
 
 type Msg = { type?: string; subtype?: string; session_id?: string };
@@ -22,6 +25,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
   let agent: AgentSession | null = null;
   let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
   const pending = new Map<string, (allow: boolean) => void>();
+  const idListeners: ((id: string, prev: string | null) => void)[] = [];
 
   const ask: PermissionAsk = (toolName, input, signal) =>
     new Promise<boolean>((resolve) => {
@@ -43,7 +47,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     try {
       for await (const m of a.messages) {
         if (agent !== a) return;
-        hub.emit({ kind: 'sdk', m });
+        hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) });
         const { type, subtype, session_id } = m as Msg;
         // the CLI sends init at the start of every turn: act only when the id is new
         if (type === 'system' && subtype === 'init' && session_id) {
@@ -60,8 +64,14 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
 
   function announce(id: string | null): void {
     if (id === announced) return;
+    const prev = announced ?? null;
     announced = id;
     hub.emit({ kind: 'session', id, root: cwd });
+    if (id !== null) {
+      for (const cb of idListeners) {
+        try { cb(id, prev); } catch (e) { reportError(hub, 'session-id', e); }
+      }
+    }
   }
 
   function died(a: AgentSession, e: unknown): void {
@@ -128,5 +138,8 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
       pending.get(permissionId)?.(allow);
     },
     info: () => ({ id: sessionId, root: cwd }),
+    onSessionId(cb) {
+      idListeners.push(cb);
+    },
   };
 }

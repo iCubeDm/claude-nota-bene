@@ -37,6 +37,31 @@ const sdkOf = (events: ServerEvent[], type: string) =>
   events.filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === type);
 
 describe('session manager', () => {
+  it('strips base64 from tool_result images before the hub stores the user frame', async () => {
+    const frame = (type: string, content: unknown[]) => ({ type, message: { content } });
+    const img = { type: 'image', source: { type: 'base64', data: 'AAAA' } };
+    const frames = [
+      frame('user', [{ type: 'tool_result', tool_use_id: 't', content: [{ type: 'text', text: 'hi' }, img] }]),
+      frame('assistant', [img]),
+      { type: 'result', subtype: 'success' },
+    ];
+    const backend: AgentBackend = {
+      history: async () => [],
+      start: () => ({
+        messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
+        send() {}, interrupt: async () => {}, close() {},
+      }),
+    };
+    const { events, make } = setup(backend);
+    await make();
+    await until(() => sdkOf(events, 'result').length === 1);
+    expect(sdkOf(events, 'user')[0]).toMatchObject({
+      m: { message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: 'hi' }, { type: 'image' }] }] } },
+    });
+    expect(JSON.stringify(sdkOf(events, 'user'))).not.toContain('AAAA');
+    expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('AAAA'); // only tool_result images are stripped
+  });
+
   it('send emits user then the agent reply', async () => {
     const { events, make } = setup(fakeBackend([{ text: 'hello' }]));
     const s = await make();
