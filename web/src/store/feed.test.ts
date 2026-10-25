@@ -116,7 +116,9 @@ test('session only sets the session; the resumed marker alone adds the notice; s
   expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r' }).items).toEqual(withItem.items);
   expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
   expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ kind: 'notice', text: 'abcdefgh' }]);
-  expect(reduce(withItem, { kind: 'server-error', where: 'w', message: 'm' })).toBe(withItem);
+  const err = reduce(withItem, { kind: 'server-error', where: 'comments', message: 'EACCES' });
+  expect(err.items.at(-1)).toEqual({ kind: 'notice', text: 'EACCES', tone: 'error', where: 'comments' });
+  expect(err.items.slice(0, -1)).toEqual(withItem.items);
   expect(() => reduce(withItem, start())).not.toThrow();
   expect(() => reduce(withItem, result())).not.toThrow();
 });

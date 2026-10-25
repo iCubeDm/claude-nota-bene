@@ -12,7 +12,8 @@ export type FeedItem =
     }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
-  | { kind: 'notice'; text: string };
+  /** `text`: the resumed session id, or for tone 'error' the server's message (`where` = the failing part); translated at render */
+  | { kind: 'notice'; text: string; tone?: 'error'; where?: string };
 
 export type FeedState = {
   items: FeedItem[];
@@ -213,7 +214,8 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       return { ...s, session: { id: ev.id, root: ev.root } };
     case 'resumed':
       return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
-    case 'server-error':
+    case 'server-error': // shown to the user, never swallowed (M0 error policy); live only, not stored in the replay
+      return { ...s, items: [...s.items, { kind: 'notice', text: ev.message, tone: 'error', where: ev.where }] };
     case 'comments': // handled by the comments store, not the feed
       return s;
     default: {

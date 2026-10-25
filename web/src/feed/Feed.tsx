@@ -61,7 +61,7 @@ export function Feed() {
           case 'permission':
             return <PermissionCard key={it.id} item={it} />;
           case 'notice':
-            return <NoticeLine key={`notice:${i}`} text={it.text} />;
+            return <NoticeLine key={`notice:${i}`} item={it} />;
         }
       })}
     </div>
