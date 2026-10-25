@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { offsetsOf, rangeFromOffsets, textOf } from './text';
+import { makeAnchor } from './resolve';
+import { offsetsOf, rangeForAnchor, rangeFromOffsets, textOf } from './text';
 
 function el(html: string): HTMLElement {
   const root = document.createElement('div');
@@ -135,5 +136,29 @@ describe('anchor text model', () => {
     const t = textOf(root).length;
     expect(at(p3, 5, 7)).toEqual({ start: t, end: t }); // inside trailing whitespace
     expect(at(p3, 0, 7)).toEqual({ start: 13, end: t });
+  });
+});
+
+describe('rangeForAnchor', () => {
+  const src = { kind: 'message' as const, id: 'm1' };
+  it('maps an exact anchor to the same range as rangeFromOffsets', () => {
+    const root = el('<p>alpha <b>beta</b> gamma</p>');
+    const a = makeAnchor(src, textOf(root), 6, 10);
+    const r = rangeForAnchor(root, a)!;
+    expect(r.toString()).toBe('beta');
+    const ref = rangeFromOffsets(root, 6, 10)!;
+    expect([r.startContainer, r.startOffset, r.endContainer, r.endOffset]).toEqual([ref.startContainer, ref.startOffset, ref.endContainer, ref.endOffset]);
+  });
+  it('follows the quote when the text before it changed', () => {
+    const root = el('<p>alpha beta gamma</p>');
+    const a = makeAnchor(src, textOf(root), 6, 10);
+    root.innerHTML = '<p>a longer alpha beta gamma</p>';
+    expect(rangeForAnchor(root, a)!.toString()).toBe('beta');
+  });
+  it('returns null when the quote is gone', () => {
+    const root = el('<p>alpha beta gamma</p>');
+    const a = makeAnchor(src, textOf(root), 6, 10);
+    root.innerHTML = '<p>nothing here</p>';
+    expect(rangeForAnchor(root, a)).toBeNull();
   });
 });

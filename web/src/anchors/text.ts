@@ -3,6 +3,9 @@
 // ends trimmed; script/style/aria-hidden/[data-anchor-skip] subtrees are skipped. All three
 // functions share one model (`build`), so round-trips are exact.
 
+import type { Anchor } from '@nota-bene/shared';
+import { resolveAnchor } from './resolve.ts';
+
 type Pt = [Text, number];
 type Entry = {
   node: Text;
@@ -130,8 +133,18 @@ export function offsetsOf(root: Element, range: Range): { start: number; end: nu
 }
 
 export function rangeFromOffsets(root: Element, start: number, end: number): Range | null {
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
+  return rangeIn(root, build(root), start, end);
+}
+
+/** Resolves an anchor against the root's current text and maps it to a DOM range, building the text model once. */
+export function rangeForAnchor(root: Element, anchor: Anchor): Range | null {
   const m = build(root);
+  const hit = resolveAnchor(anchor, m.text);
+  return hit ? rangeIn(root, m, hit.start, hit.end) : null;
+}
+
+function rangeIn(root: Element, m: Model, start: number, end: number): Range | null {
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
   if (start < 0 || end > m.total || start > end) return null;
   const range = root.ownerDocument.createRange();
   if (m.total === 0) {
