@@ -97,9 +97,42 @@ it('Esc hides the button', async () => {
   expect(screen.queryByRole('button')).toBeNull();
 });
 
-it('scrolling the chat pane hides the button', async () => {
+it('Esc then a scroll does not bring the button back', async () => {
   const { view } = await shown();
+  fireEvent.keyDown(document, { key: 'Escape' });
   fireEvent.scroll(view.container.querySelector('[data-chat-pane]')!);
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('the Esc after a dismissed button is not default-prevented (it reaches the composer)', async () => {
+  const { view } = await shown();
+  expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(false);
+  fireEvent.scroll(view.container.querySelector('[data-chat-pane]')!);
+  expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+});
+
+it('scrolling the chat pane keeps the button while the selection is visible', async () => {
+  const { view } = await shown();
+  const pane = view.container.querySelector<HTMLElement>('[data-chat-pane]')!;
+  pane.getBoundingClientRect = () => ({ left: 0, right: 300, top: 0, bottom: 200, width: 300, height: 200, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  fireEvent.scroll(pane);
+  expect(screen.getByRole('button', { name: '💬 Comment' })).toBeInTheDocument();
+});
+
+it('scrolling the selection out of the pane hides the button', async () => {
+  const { view } = await shown();
+  const pane = view.container.querySelector<HTMLElement>('[data-chat-pane]')!;
+  pane.getBoundingClientRect = () => ({ left: 0, right: 300, top: 100, bottom: 300, width: 300, height: 200, x: 0, y: 100, toJSON() {} }) as DOMRect;
+  fireEvent.scroll(pane);
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('scrolling after the selection collapsed hides the button', async () => {
+  const { view } = await shown();
+  const pane = view.container.querySelector<HTMLElement>('[data-chat-pane]')!;
+  pane.getBoundingClientRect = () => ({ left: 0, right: 300, top: 0, bottom: 200, width: 300, height: 200, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  window.getSelection()!.removeAllRanges();
+  fireEvent.scroll(pane);
   expect(screen.queryByRole('button')).toBeNull();
 });
 
