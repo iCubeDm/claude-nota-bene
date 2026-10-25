@@ -1,6 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../store/store.ts';
-import { activate, fileArg, fileTabId, openFile } from '../tabs/slice.ts';
+import { activate, enterRoot, fileArg, fileTabId, openFile } from '../tabs/slice.ts';
 import type { AppThunk } from '../store/store.ts';
 import { fileKey, loadSources, srcIdOfRef } from './sources.ts';
 
@@ -42,6 +42,11 @@ export const filesSlice = createSlice({
     }).addCase(openFile, (s, a) => {
       const f = fileArg(a.payload);
       if (s.jump && (f.path !== s.jump.path || f.src !== s.jump.src)) s.jump = null;
+    }).addCase(enterRoot, (s, a) => {
+      // another root: its paths are other files; what was loaded or awaited belongs to the old one
+      if (a.payload.first) return;
+      s.load = {};
+      s.jump = null;
     }),
 });
 

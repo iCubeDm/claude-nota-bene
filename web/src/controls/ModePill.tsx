@@ -3,7 +3,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { pickMode, selectMode } from './slice.ts';
+import { pickMode, selectMode, selectSwitching } from './slice.ts';
 
 // colours as in the CLI's mode line (prototype #modeBtn.m-*)
 const TONE: Record<Mode, string> = {
@@ -17,6 +17,7 @@ export function ModePill() {
   const t = useT();
   const dispatch = useAppDispatch();
   const mode = useAppSelector(selectMode);
+  const switching = useAppSelector(selectSwitching); // the switch announces the new session's mode
   if (!mode) return null; // unknown until the server says
   return (
     <DropdownMenu>
@@ -26,7 +27,8 @@ export function ModePill() {
             <button
               type="button"
               aria-label={t('modeTip')}
-              className={`inline-flex h-[26px] items-center gap-1.5 rounded-full border bg-transparent px-2.5 text-xs font-medium hover:bg-muted hover:text-foreground ${TONE[mode]}`}
+              disabled={switching}
+              className={`inline-flex h-[26px] items-center gap-1.5 rounded-full border bg-transparent px-2.5 text-xs font-medium enabled:hover:bg-muted enabled:hover:text-foreground disabled:opacity-50 ${TONE[mode]}`}
             >
               <span aria-hidden className="size-[7px] rounded-full bg-current opacity-80" />
               {t(`mode_${mode}`)}

@@ -6,7 +6,7 @@ import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
 import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
-import { nextMode, pickMode, selectMode } from '@/controls/slice.ts';
+import { nextMode, pickMode, selectMode, selectSwitching } from '@/controls/slice.ts';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
@@ -23,6 +23,8 @@ export function Composer() {
   const text = useAppSelector(selectDraft);
   const images = useAppSelector(selectImages);
   const uploading = useAppSelector(selectUploading) > 0;
+  // mid-switch the server refuses sends: Send is off (Enter too) and the draft simply waits for the new session
+  const switching = useAppSelector(selectSwitching);
   const [failed, setFailed] = useState(false);
   const [note, setNote] = useState('');
   const [dropping, setDropping] = useState(false);
@@ -99,9 +101,9 @@ export function Composer() {
   }, [busy, dispatch]);
 
   const submit = (force: boolean) => {
-    if (uploading) return;
+    if (uploading || switching) return;
     const r = dispatch(sendBatch(force));
-    if (r === 'empty') return;
+    if (r === 'empty' || r === 'switching') return;
     setFailed(r === 'offline');
     if (r === 'sent') ref.current?.focus();
   };
@@ -141,6 +143,7 @@ export function Composer() {
       <div data-dropping={dropping || undefined} className="flex items-end gap-2 pt-2.5 pb-1.5 data-[dropping]:rounded-[10px] data-[dropping]:outline data-[dropping]:outline-2 data-[dropping]:outline-dashed data-[dropping]:outline-primary">
         <textarea
           ref={ref}
+          id="composer-input"
           rows={1}
           value={text}
           placeholder={t('composerPh')}
@@ -153,8 +156,8 @@ export function Composer() {
           className="max-h-[40vh] min-h-10 flex-1 resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)]"
         />
         <MentionPicker target={ref} />
-        <span className="inline-flex" title={uploading ? t('uploadWait') : undefined}>
-          <Button type="button" className="h-10" disabled={uploading} onClick={() => submit(false)}>
+        <span className="inline-flex" title={switching ? t('switching') : uploading ? t('uploadWait') : undefined}>
+          <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>
             {nPending ? t('sendN', nPending) : t('send')}
           </Button>
         </span>

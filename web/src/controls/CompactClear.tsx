@@ -4,15 +4,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useT } from '@/i18n/index.ts';
 import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ConfirmDialog } from './ConfirmDialog.tsx';
-import { runCommand } from './slice.ts';
+import { runCommand, selectSwitching } from './slice.ts';
 
 const ICON = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
 
-/** /compact (at once) and /clear (after a confirmation); both off while the agent works (R-M4-4). */
+/** /compact (at once) and /clear (after a confirmation); both off while the agent works (R-M4-4) or a switch runs. */
 export function CompactClear() {
   const t = useT();
   const dispatch = useAppDispatch();
-  const busy = useAppSelector(selectBusy);
+  // off mid-switch too: the server would refuse them as `busy`, and they belong to the session being left
+  const busy = useAppSelector((s) => selectBusy(s) || selectSwitching(s));
   const [asking, setAsking] = useState(false);
   return (
     <>

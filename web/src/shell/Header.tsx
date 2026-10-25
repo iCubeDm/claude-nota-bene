@@ -4,12 +4,15 @@ import { selectCommentsUi, selectPending, setPanelOpen } from '@/comments/slice.
 import { selectTree, setTreeOpen } from '@/tree/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { SessionPicker } from '@/controls/SessionPicker.tsx';
+import { selectSwitching } from '@/controls/slice.ts';
 
 export function Header() {
   const t = useT();
   const other = getLang() === 'ru' ? 'en' : 'ru';
   const conn = useAppSelector(selectConn);
   const session = useAppSelector(selectSession);
+  const switching = useAppSelector(selectSwitching);
   const d = useAppDispatch();
   const panelOpen = useAppSelector(selectCommentsUi).panelOpen;
   const treeOpen = useAppSelector(selectTree).open;
@@ -35,7 +38,8 @@ export function Header() {
         <Svg size={16}>{ICONS.dir}</Svg>
       </button>
       <span className="flex-1" />
-      <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : ''}</span>
+      <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : switching ? t('switching') : ''}</span>
+      <SessionPicker />
       <span id="session" className="font-mono text-[11px]">{session?.id?.slice(0, 8) ?? ''}</span>
       {/* moves into the tab strip in M2 */}
       <button

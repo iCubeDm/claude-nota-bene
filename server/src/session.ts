@@ -14,7 +14,11 @@ import { cwdOf, titleOf } from './sessions.ts';
 import { saveSession, stateDir } from './state.ts';
 import { StatsService } from './stats.ts';
 
-/** Why a switch was refused: `busy` (a turn, a permission or another switch is in progress) or a bad target. */
+/**
+ * A refused switch or restart. Reported as `where: 'switch'`, also when it was refused for being busy (a turn, a
+ * permission or another switch in progress): the client ends its "switching" state on exactly this, never on a `busy`
+ * error, which may answer some other socket's send or command (M4-10).
+ */
 export class SwitchError extends Error {
   readonly where: 'busy' | 'switch';
   constructor(where: 'busy' | 'switch', message: string) {
@@ -374,14 +378,14 @@ export async function createSessionManager(o: {
 
   // `restart` is the escape hatch for a stuck agent: it is not busy-gated (only another switch blocks it)
   async function switchTo(id: string | null, dir: string, restart: boolean): Promise<void> {
-    if (switching) throw new SwitchError('busy', 'a switch is already in progress');
-    if (!restart && (waiting.size > 0 || pending.size > 0)) throw new SwitchError('busy', 'the agent is busy');
+    if (switching) throw new SwitchError('switch', 'a switch is already in progress');
+    if (!restart && (waiting.size > 0 || pending.size > 0)) throw new SwitchError('switch', 'the agent is busy');
     switching = true;
     let tornDown = false;
     try {
       const real = await checkTarget(id, dir, restart);
       // sends are refused while switching, but the old agent may have asked for a permission during the checks
-      if (!restart && (waiting.size > 0 || pending.size > 0)) throw new SwitchError('busy', 'the agent is busy');
+      if (!restart && (waiting.size > 0 || pending.size > 0)) throw new SwitchError('switch', 'the agent is busy');
       // a busy restart stops the turn first (best effort, capped), so the transcript it resumes ends cleanly
       if (restart && agent && (waiting.size > 0 || pending.size > 0)) {
         const a = agent;

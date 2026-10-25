@@ -11,6 +11,8 @@ import { useT } from '@/i18n/index.ts';
  */
 export function ConfirmDialog(p: {
   title: string; body: string; confirm: string; cancel?: string; onConfirm: () => void; onCancel: () => void;
+  /** Where focus goes when it closes, instead of the opener (null: the opener), e.g. when the answer disables it. */
+  focusAfter?: () => HTMLElement | null;
 }) {
   const t = useT();
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -28,7 +30,8 @@ export function ConfirmDialog(p: {
         onOpenAutoFocus={(e) => { e.preventDefault(); confirmRef.current?.focus(); }}
         onCloseAutoFocus={(e) => {
           e.preventDefault();
-          if (opener.current instanceof HTMLElement && opener.current.isConnected) opener.current.focus();
+          const to = p.focusAfter?.() ?? opener.current;
+          if (to instanceof HTMLElement && to.isConnected) to.focus();
         }}
         onEscapeKeyDown={(e) => { e.preventDefault(); p.onCancel(); }}
       >

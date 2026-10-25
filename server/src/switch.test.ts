@@ -182,12 +182,12 @@ describe('switch', () => {
     await until(() => c.events.some((e) => e.kind === 'sdk'));
     c.ws.send(JSON.stringify({ type: 'switch', id: SB, dir: B }));
     await until(() => errors(c).length > 0);
-    expect(errors(c)[0]).toMatchObject({ where: 'busy' });
+    expect(errors(c)[0]).toMatchObject({ where: 'switch' });
     expect(await (await get(s.url, '/info')).json()).toMatchObject({ root: A });
     expect(s.backend.starts).toHaveLength(1);
   });
 
-  it('two switches at once: exactly one runs, the other is rejected as busy', async () => {
+  it('two switches at once: exactly one runs, the other is rejected (as a switch error)', async () => {
     const s = await boot({ resume: SA });
     const c = await connect(s.url);
     await until(() => lastOf(c, 'comments') !== undefined);
@@ -195,7 +195,7 @@ describe('switch', () => {
     c.ws.send(JSON.stringify({ type: 'switch', id: SA, dir: A }));
     await until(() => switched(c, SB) && errors(c).length > 0);
     expect(errors(c)).toHaveLength(1);
-    expect(errors(c)[0]).toMatchObject({ where: 'busy' });
+    expect(errors(c)[0]).toMatchObject({ where: 'switch' });
     expect(s.backend.starts.map((x) => x.resume)).toEqual([SA, SB]);
   });
 
@@ -273,7 +273,7 @@ describe('restart while busy', () => {
     await until(() => lastOf(c, 'session')?.id === 'fake-session');
     c.ws.send(JSON.stringify({ type: 'switch', id: SB, dir: B }));
     await until(() => errors(c).length > 0);
-    expect(errors(c)[0]).toMatchObject({ where: 'busy' });
+    expect(errors(c)[0]).toMatchObject({ where: 'switch' });
     const mark = c.events.length;
     c.ws.send(JSON.stringify({ type: 'restart' }));
     await until(() => s.backend.starts.length === 2);
@@ -359,7 +359,7 @@ describe('fix round 1', () => {
     expect(store.get(SB)).toEqual([comment('b1')]);
   });
 
-  it('a restart racing a switch: exactly one runs, the other is busy', async () => {
+  it('a restart racing a switch: exactly one runs, the other is refused as a switch error', async () => {
     const s = await boot({ resume: SA });
     const c = await connect(s.url);
     await until(() => lastOf(c, 'comments') !== undefined);
@@ -369,7 +369,7 @@ describe('fix round 1', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(s.backend.starts).toHaveLength(2);
     expect(s.backend.starts[1]).toMatchObject({ resume: SA, cwd: A });
-    expect(errors(c)).toEqual([expect.objectContaining({ where: 'busy' })]);
+    expect(errors(c)).toEqual([expect.objectContaining({ where: 'switch' })]);
   });
 });
 

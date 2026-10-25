@@ -11,7 +11,7 @@ import { activate, fileTabId, openFile, selectActiveTab, selectTabs } from '@/ta
 import { setPanelOpen } from '@/comments/slice.ts';
 import { sendBatch, whereOf } from '@/comments/send.ts';
 import { FileView } from './FileView.tsx';
-import { resetSources, setSources, sourceForAbs, useSources } from './sources.ts';
+import { getSources, loadSources, resetSources, setSources, sourceForAbs, useSources } from './sources.ts';
 
 function Probe({ onRender }: { onRender: () => void }) {
   useSources();
@@ -262,4 +262,19 @@ it('a comment without a ref never paints in the same path of a ref: pane', async
   await waitFor(() => expect(document.querySelectorAll('[data-pane="file:a.md"] [data-hl]').length).toBeGreaterThan(0));
   delete (Range.prototype as Partial<Range>).getClientRects;
   delete (Range.prototype as Partial<Range>).getBoundingClientRect;
+});
+
+it('loadSources(true) starts a fresh request and drops the answer still in flight (a switch to another root)', async () => {
+  const r1: Source[] = [{ id: 'here', kind: 'checkout', label: 'r1', ref: 'main' }, { id: 'ref:old-root', kind: 'branch', label: 'o', ref: 'o' }];
+  const r2: Source[] = [{ id: 'here', kind: 'checkout', label: 'r2', ref: 'main' }];
+  const answers: ((s: Source[]) => void)[] = [];
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((res) => answers.push((s) => res(new Response(JSON.stringify(s)))))));
+  const first = loadSources();
+  const second = loadSources(true);
+  expect(answers).toHaveLength(2);
+  answers[1](r2);
+  await second;
+  answers[0](r1);
+  await first;
+  expect(getSources()).toEqual(r2);
 });

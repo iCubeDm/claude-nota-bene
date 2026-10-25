@@ -1,5 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { AppThunk, RootState } from '../store/store.ts';
+import { enterRoot } from '../tabs/slice.ts';
 
 /**
  * `open`: the sheet. `src`: the source it shows ('here', 'ref:<branch>', 'dir:<hash>'; M3-16). `dirs`: expanded folders of
@@ -37,6 +38,19 @@ export const treeSlice = createSlice({
       s.reveal = null;
     },
   },
+  extraReducers: (b) =>
+    b.addCase(enterRoot, (s, a) => {
+      const saved = a.payload.dirs;
+      // the first root: folders expanded before it was known stay. Another root: its own folders, in this folder's source
+      // (another root's branches and worktrees are other sources); the sheet stays open or closed as it was.
+      if (a.payload.first) {
+        if (saved) s.dirs = [...new Set([...saved, ...s.dirs])];
+        return;
+      }
+      s.src = 'here';
+      s.dirs = saved ?? [];
+      s.reveal = null;
+    }),
 });
 
 export const revealInTree = treeSlice.actions.reveal;

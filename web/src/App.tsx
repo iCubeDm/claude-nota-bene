@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { sendBatch } from './comments/send.ts';
-import { useAppDispatch } from './store/store.ts';
+import { useAppDispatch, useAppSelector } from './store/store.ts';
+import { selectTabs } from './tabs/slice.ts';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { CommentCardPopover } from './comments/CommentCard.tsx';
 import { HighlightLayer } from './comments/HighlightLayer.tsx';
@@ -19,6 +20,8 @@ export function App() {
   const sendPanel = useCallback(() => void dispatch(sendBatch(false)), [dispatch]);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const close = useCallback(() => setPending(null), []);
+  // another root: the tree's loaded folders belong to the old one (its open/closed state is in the store and stays)
+  const rootGen = useAppSelector((s) => selectTabs(s).rootGen);
   return (
     <TooltipProvider>
       <Header />
@@ -37,7 +40,7 @@ export function App() {
             </>
           }
         />
-        <FileTree />
+        <FileTree key={rootGen} />
         <CommentsPanel onSend={sendPanel} />
       </div>
       <SelectionButton onComment={setPending} />
