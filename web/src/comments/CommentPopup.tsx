@@ -5,6 +5,7 @@ import { useT } from '@/i18n/index.ts';
 import { useAppDispatch } from '@/store/store.ts';
 import { instructionOf, labelText, QUICK_LABELS } from './labels.ts';
 import type { PendingSelection } from './SelectionButton.tsx';
+import { ShortcodePicker } from './ShortcodePicker.tsx';
 import { addComment, setPanelOpen } from './slice.ts';
 
 /** The popup next to a fresh selection: a note plus optional quick-label chips; a chip adds at once. */
@@ -64,6 +65,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   return (
     <div
       ref={root}
+      role="dialog"
       className="fixed z-10 w-[340px] rounded-[10px] border border-border bg-popover p-2 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
@@ -74,8 +76,10 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder={t('commentPh')}
+        aria-label={t('commentPh')}
         className="min-h-16 w-full resize-y rounded-md border border-border-soft bg-background px-2 py-1.5 text-[13px] leading-[1.45] text-foreground focus:border-primary focus:outline-none"
       />
+      <ShortcodePicker target={area} />
       <div className="mt-1.5 flex flex-wrap gap-1">
         {QUICK_LABELS.map((l) => (
           <button
