@@ -43,8 +43,7 @@ export type ClientMessage =
   /** full replacement of this session's comment set */
   | { type: 'comments'; sessionId: string | null; items: Comment[] }
   | { type: 'interrupt' }
-  /** `input`: the plan card passes the tool input back */
-  /** `input` is kept for compatibility and ignored by the server: an allow always runs the original input. */
+  /** `input` is ignored by the server (an allow always runs the original input); no client sends it. */
   | { type: 'permission'; id: string; allow: boolean; input?: Record<string, unknown> }
   | { type: 'mode'; mode: Mode }
   | { type: 'command'; name: 'compact' | 'clear' }

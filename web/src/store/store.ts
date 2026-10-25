@@ -193,8 +193,8 @@ export const interrupt = (): AppThunk => (_d, getState, { send }) => {
   if (selectBusy(getState())) send({ type: 'interrupt' });
 };
 
-export const answerPermission = (id: string, allow: boolean, input?: Record<string, unknown>): AppThunk => (_d, _g, { send }) => {
-  send({ type: 'permission', id, allow, ...(input ? { input } : {}) });
+export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _g, { send }) => {
+  send({ type: 'permission', id, allow });
 };
 
 /**

@@ -30,7 +30,7 @@ export function PlanCard({ item }: { item: Extract<FeedItem, { kind: 'permission
           <button
             className={`${btn} bg-primary text-primary-foreground hover:opacity-90`}
             onClick={() => {
-              dispatch(answerPermission(item.id, true, item.input));
+              dispatch(answerPermission(item.id, true));
               dispatch(planApproved());
             }}
           >

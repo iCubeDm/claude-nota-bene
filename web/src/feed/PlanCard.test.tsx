@@ -47,10 +47,10 @@ it('an ExitPlanMode permission renders a plan card, not a permission card', () =
   expect(screen.getByRole('button', { name: 'Approve · continue in “Accept edits”' })).toBeInTheDocument();
 });
 
-it('approve sends the input, remembers the mode to restore; the answered card stays', () => {
+it('approve remembers the mode to restore; the answered card stays', () => {
   const { sent, store } = setup();
   fireEvent.click(screen.getByRole('button', { name: /^Approve/ }));
-  expect(sent).toContainEqual({ type: 'permission', id: 'p1', allow: true, input });
+  expect(sent).toContainEqual({ type: 'permission', id: 'p1', allow: true });
   expect(store.getState().controls.restoreAfterPlan).toBe('acceptEdits');
   act(() => void store.dispatch(serverEvent({ kind: 'permission-done', id: 'p1', allow: true, ts: 2 })));
   expect(screen.queryByRole('button')).toBeNull();
