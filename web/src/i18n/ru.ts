@@ -44,6 +44,14 @@ export const ru = {
   'label_no-regression': 'Без регрессий',
   'label_out-of-scope': 'Вне задачи',
   'label_needs-tests': 'Нужны тесты',
+  // comment card (M1-14)
+  edit: 'Редактировать',
+  del: 'Удалить',
+  save: 'Сохранить',
+  cancel: 'Отменить',
+  editTip: '⌘/Ctrl+Enter или ✓ — сохранить\nEsc или ✕ — отменить\nклик мимо карточки — сохранить',
+  orphaned: 'фрагмент изменился',
+  sentTag: 'отправлено',
   // emoji menu (M1-12)
   'emojiTip': 'Эмодзи',
   'emojiSearchPh': 'Поиск эмодзи…',

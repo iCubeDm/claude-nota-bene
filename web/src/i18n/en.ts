@@ -47,6 +47,14 @@ export const en: Dict = {
   'label_no-regression': 'Ensure no regression',
   'label_out-of-scope': 'Out of scope',
   'label_needs-tests': 'Needs tests',
+  // comment card (M1-14)
+  edit: 'Edit',
+  del: 'Delete',
+  save: 'Save',
+  cancel: 'Cancel',
+  editTip: '⌘/Ctrl+Enter or ✓ — save\nEsc or ✕ — cancel\nclick outside the card — save',
+  orphaned: 'fragment changed',
+  sentTag: 'sent',
   // emoji menu (M1-12)
   'emojiTip': 'Emoji',
   'emojiSearchPh': 'Search emoji…',

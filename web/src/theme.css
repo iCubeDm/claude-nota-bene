@@ -83,3 +83,7 @@
   background-size: 24px 24px;
   background-attachment: local;
 }
+
+/* brief highlight on the source item after "jump to source" in a comment card */
+@keyframes nb-flash { from { background-color: oklch(0.88 0.18 95 / 0.35); } to { background-color: transparent; } }
+.nb-flash { animation: nb-flash 1.2s ease-out; }
