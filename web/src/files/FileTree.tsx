@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { TreeEntry } from '@nota-bene/shared';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
@@ -45,6 +45,12 @@ export function FileTree() {
   const requested = useRef(new Set<string>());
   const busy = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const sheet = useRef<HTMLElement>(null);
+  // a closing sheet becomes `hidden`: do not leave focus inside it, hand it to the header toggle (as the comments panel
+  // does). A layout effect: it runs before the browser drops the focus of a now-hidden element to <body>
+  useLayoutEffect(() => {
+    if (!open && sheet.current?.contains(document.activeElement)) document.getElementById('toggleTree')?.focus();
+  }, [open]);
   // the source the loaded entries belong to: a switch drops them, and an answer for the previous source is ignored
   const shown = useRef(src);
   if (shown.current !== src) {
@@ -168,6 +174,7 @@ export function FileTree() {
 
   return (
     <aside
+      ref={sheet}
       id="tree-sheet"
       hidden={!open}
       onKeyDown={(e) => {

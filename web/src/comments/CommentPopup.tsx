@@ -47,8 +47,13 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
     if (has) dispatch(setPanelOpen(true));
   };
 
+  // focus once positioned: a `visibility:hidden` textarea (before the layout effect sets pos) cannot take focus
+  const placed = pos !== null;
   useEffect(() => {
-    area.current?.focus();
+    if (placed) area.current?.focus({ preventScroll: true });
+  }, [placed]);
+
+  useEffect(() => {
     // capture + preventDefault: this Esc must not also interrupt the agent (Composer skips defaultPrevented)
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key !== 'Escape') return;

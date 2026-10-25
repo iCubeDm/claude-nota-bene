@@ -125,3 +125,18 @@ it('shows the pending-comment badge on a file row', async () => {
   });
   expect(screen.getByRole('button', { name: /^zed\.txt/ }).querySelector('[data-badge]')).toHaveTextContent(/^1$/);
 });
+
+it('Esc with focus inside hands focus to the header toggle, so it is not left in a hidden sheet', async () => {
+  const toggle = document.createElement('button');
+  toggle.id = 'toggleTree';
+  document.body.append(toggle);
+  try {
+    setup();
+    const r = await row('zed.txt');
+    r.focus();
+    act(() => { fireEvent.keyDown(r, { key: 'Escape' }); });
+    expect(document.activeElement).toBe(toggle);
+  } finally {
+    toggle.remove();
+  }
+});

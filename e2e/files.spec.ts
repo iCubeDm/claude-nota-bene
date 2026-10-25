@@ -298,3 +298,41 @@ test('the tree shows another worktree read-only: pick it, open a file only it ha
   await page.locator('#toggleTree').click();
   await tab.getByRole('button', { name: /^(Close|Закрыть)$/ }).click();
 });
+
+/** Selects the first `n` chars of the md file's last paragraph and fires the mouseup the selection button listens for. */
+async function selectEnd(page: Page, n = 5) {
+  const para = mdRoot(page).locator('p', { hasText: 'Конец отчёта.' });
+  await expect(para).toBeAttached();
+  await para.evaluate((el, len) => {
+    const r = document.createRange();
+    r.setStart(el.firstChild!, 0);
+    r.setEnd(el.firstChild!, len);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(r);
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  }, n);
+}
+
+test('the comment popup takes focus with the tree open and closed: typing lands in it @files', async ({ page }) => {
+  await start(page);
+  await openFromTree(page, MD);
+  for (const treeOpen of [true, false]) {
+    const sheet = page.locator('#tree-sheet');
+    if ((await sheet.isVisible()) !== treeOpen) await page.locator('#toggleTree').click();
+    if (treeOpen) await sheet.locator(`button[data-path="docs"]`).focus(); // focus inside the tree, as after a click on a row
+    await selectEnd(page);
+    await page.getByRole('button', { name: /^💬/ }).click();
+    const area = page.getByPlaceholder('Comment…');
+    await expect(area).toBeFocused();
+    await page.keyboard.type(`typed ${treeOpen}`);
+    await expect(area).toHaveValue(`typed ${treeOpen}`);
+    await page.keyboard.press('Escape');
+    await expect(area).toHaveCount(0);
+  }
+  // Esc in the tree closes it and leaves focus on the header toggle, not in the hidden sheet
+  await page.locator('#toggleTree').click();
+  await page.locator('#tree-sheet button[data-path="docs"]').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#tree-sheet')).toBeHidden();
+  await expect(page.locator('#toggleTree')).toBeFocused();
+});
