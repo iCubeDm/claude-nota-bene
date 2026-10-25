@@ -15,6 +15,11 @@ fs.mkdirSync(project);
 fs.cpSync(path.join(root, 'e2e/project'), project, { recursive: true });
 fs.mkdirSync(home);
 if (fixture === 'files') seedFiles(project);
+// the controls fixture's second session lives in a sibling folder of the project (removed with tmp)
+if (fixture === 'controls') {
+  fs.mkdirSync(path.join(tmp, 'other'));
+  fs.writeFileSync(path.join(tmp, 'other/other.md'), '# Other project\n\nonly in the other folder\n');
+}
 
 function hasFfmpeg() {
   if (process.env.NB_E2E_FFMPEG !== undefined) return process.env.NB_E2E_FFMPEG === '1';

@@ -11,7 +11,8 @@ export type FakeTurn = {
   delayMs?: number;
   /** `output` becomes the tool_result the CLI would stream back (default empty) */
   tools?: { name: string; input: Record<string, unknown>; output?: string; isError?: boolean }[];
-  ask?: { toolName: string; input: Record<string, unknown> };
+  /** `onAllow`: the `permissionMode` the CLI drops to once this is allowed (a `status` frame), e.g. 'default' after ExitPlanMode */
+  ask?: { toolName: string; input: Record<string, unknown>; onAllow?: Mode };
   crash?: boolean;
   /** the reply text then ends with `images: <n>`, the number of images this turn received */
   echoImages?: boolean;
@@ -27,6 +28,12 @@ export type FakeTurn = {
   model?: string;
   /** `compact_metadata.pre_tokens` of the boundary a `/compact` emits (read from the first turn that sets it; default 12000) */
   compactPreTokens?: number;
+  /** runs for a prompt containing this text, whatever turn the sequence is at, and does not use up the sequence */
+  match?: string;
+  /** raw SDK frames sent right after init (session_id is filled in); `{ sleepMs }` only waits (the turn stays busy) */
+  frames?: (Record<string, unknown> | { sleepMs: number })[];
+  /** a `prompt_suggestion` frame sent after the result, as the SDK does */
+  suggestion?: string;
 };
 
 /**
@@ -46,7 +53,7 @@ export type FakeSessionScript = {
 };
 
 /** A --fake script: the turns alone (the M0-M3 format), or the turns and a session list. */
-export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessionScript[] };
+export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number };
 
 /**
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
@@ -69,6 +76,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+const sleepFor = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 function whenAborted(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve();
@@ -78,11 +87,12 @@ function whenAborted(signal: AbortSignal): Promise<void> {
 
 class FakeSession implements AgentSession {
   readonly messages: AsyncIterable<SDKMessage>;
-  private pending: { uuid: string; images: number; command?: 'compact' | 'clear' }[] = []; // sends not yet started
+  private pending: { uuid: string; text: string; images: number; command?: 'compact' | 'clear' }[] = []; // sends not yet started
   private wake: (() => void) | null = null;
   private closed = false;
   private turnCtl: AbortController | null = null; // set only while a turn runs
   private turnNo = 0;
+  private lastTurn: FakeTurn | undefined; // the turn that ran last (its context and usage are what the stats read)
   private readonly turns: FakeTurn[];
   private readonly ask: PermissionAsk;
   private readonly modes: Mode[];
@@ -100,7 +110,7 @@ class FakeSession implements AgentSession {
     if (this.closed) return;
     // like the CLI, the plain string `/compact` or `/clear` is a command, not a prompt
     const command = m.text === '/compact' ? 'compact' : m.text === '/clear' ? 'clear' : undefined;
-    this.pending.push({ uuid: m.uuid, images: m.images?.length ?? 0, ...(command ? { command } : {}) });
+    this.pending.push({ uuid: m.uuid, text: m.text, images: m.images?.length ?? 0, ...(command ? { command } : {}) });
     this.wake?.();
   }
 
@@ -118,7 +128,15 @@ class FakeSession implements AgentSession {
 
   /** the scripted values of the turn that ran last (the first turn's before any ran) */
   private scripted(): FakeTurn | undefined {
-    return this.turns[Math.min(Math.max(this.turnNo - 1, 0), this.turns.length - 1)];
+    return this.lastTurn ?? this.turns.find((t) => !t.match);
+  }
+
+  /** a turn whose `match` is in the prompt, else the next of the sequence (the turns without `match`) */
+  private pick(text: string): FakeTurn {
+    const matched = this.turns.find((t) => t.match !== undefined && text.includes(t.match));
+    if (matched) return matched;
+    const seq = this.turns.filter((t) => t.match === undefined);
+    return seq[Math.min(this.turnNo, seq.length - 1)] ?? { text: '' };
   }
 
   async contextUsage(): Promise<{ used: number; max: number; pct: number }> {
@@ -142,12 +160,13 @@ class FakeSession implements AgentSession {
         this.wake = null;
       }
       if (this.closed) return;
-      const { uuid, images, command } = this.pending.shift()!;
+      const { uuid, text, images, command } = this.pending.shift()!;
       if (command) {
         yield* this.command(command, uuid);
         continue;
       }
-      const base = this.turns[Math.min(this.turnNo, this.turns.length - 1)] ?? { text: '' };
+      const base = this.pick(text);
+      this.lastTurn = base;
       yield* this.turn(base.echoImages ? { ...base, text: `${base.text}${base.text ? '\n' : ''}images: ${images}` } : base, uuid);
       if (this.closed) return;
     }
@@ -187,6 +206,11 @@ class FakeSession implements AgentSession {
         type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}`,
         ...(t.initMode ? { permissionMode: t.initMode } : {}), ...(t.model ? { model: t.model } : {}),
       });
+      let k = 0;
+      for (const f of t.frames ?? []) {
+        if ('sleepMs' in f) await sleep(f.sleepMs as number, ctl.signal);
+        else yield sdk({ session_id: this.sessionId, uuid: `fake-f-${n}-${k++}`, ...f });
+      }
       const size = Math.max(1, t.chunk ?? 8);
       yield sdk({
         type: 'stream_event', session_id: this.sessionId, uuid: `fake-s-${n}-0`, parent_tool_use_id: null,
@@ -227,7 +251,10 @@ class FakeSession implements AgentSession {
         }
         if (t.ask) {
           inTools = true;
-          await Promise.race([this.ask(t.ask.toolName, t.ask.input, ctl.signal), whenAborted(ctl.signal)]);
+          const allowed = await Promise.race([this.ask(t.ask.toolName, t.ask.input, ctl.signal), whenAborted(ctl.signal)]);
+          if (allowed === true && t.ask.onAllow) {
+            yield sdk({ type: 'system', subtype: 'status', status: null, permissionMode: t.ask.onAllow, session_id: this.sessionId, uuid: `fake-st-${n}` });
+          }
         }
       }
       if (this.closed) return;
@@ -248,6 +275,7 @@ class FakeSession implements AgentSession {
         user_message_uuid: sendUuid,
         user_message_uuids: [sendUuid],
       });
+      if (t.suggestion) yield sdk({ type: 'prompt_suggestion', suggestion: t.suggestion, session_id: this.sessionId, uuid: `fake-ps-${n}` });
     } finally {
       this.turnCtl = null;
     }
@@ -263,7 +291,7 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string };
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string } = {},
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number } = {},
 ): AgentBackend & { startModes: Mode[]; setModes: Mode[]; starts: Started[] } {
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
@@ -294,13 +322,18 @@ export function fakeBackend(
       const x = sessions.find((e) => e.id === id && cwdOf(e) !== undefined && real(cwdOf(e)!) === real(dir));
       return x ? { ...titles(x), cwd: cwdOf(x)! } : null;
     },
-    history: async (id) => (sessions.find((e) => e.id === id)?.history ?? []).map((h, i): ServerEvent => (h.role === 'user'
-      ? { kind: 'user', id: `fake-h-${i}`, text: h.text, historic: true, ts: 0 }
-      : { kind: 'sdk', m: sdk({ type: 'assistant', uuid: `fake-h-${i}`, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: h.text }] } }), ts: 0 })),
+    history: async (id) => {
+      await sleepFor(o.historyDelayMs ?? 0); // e2e: a switch that visibly takes time
+      return (sessions.find((e) => e.id === id)?.history ?? []).map((h, i): ServerEvent => (h.role === 'user'
+        ? { kind: 'user', id: `fake-h-${i}`, text: h.text, historic: true, ts: 0 }
+        : { kind: 'sdk', m: sdk({ type: 'assistant', uuid: `fake-h-${i}`, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: h.text }] } }), ts: 0 }));
+    },
   };
 }
 
 /** Reads a --fake script (either format). */
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
-  return Array.isArray(script) ? fakeBackend(script, { base }) : fakeBackend(script.turns, { sessions: script.sessions ?? [], base });
+  return Array.isArray(script)
+    ? fakeBackend(script, { base })
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}) });
 }
