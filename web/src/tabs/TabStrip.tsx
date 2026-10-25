@@ -1,0 +1,99 @@
+import type { ReactNode } from 'react';
+import { useT } from '@/i18n/index.ts';
+import { selectComments } from '@/comments/slice.ts';
+import { revealInTree } from '@/tree/slice.ts';
+import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
+import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
+
+// copied from the prototype
+const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
+const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
+const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+const Svg = ({ children, size = 14 }: { children: ReactNode; size?: number }) => (
+  <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width={size} height={size} className="flex-none">{children}</svg>
+);
+const ICONS = {
+  chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
+  file: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
+  media: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></>,
+  img: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-9 9" /></>,
+};
+const iconFor = (tab: Tab) =>
+  tab.kind === 'chat' ? ICONS.chat : VIDEO.test(tab.path) || AUDIO.test(tab.path) ? ICONS.media : IMAGE.test(tab.path) ? ICONS.img : ICONS.file;
+
+const basename = (p: string) => p.split('/').pop() || p;
+
+function TabItem({ tab, active, last }: { tab: Tab; active: boolean; last: boolean }) {
+  const t = useT();
+  const d = useAppDispatch();
+  const badge = useAppSelector((s) =>
+    tab.kind === 'file'
+      ? selectComments(s).filter((c) => c.status === 'pending' && c.anchor.source.kind === 'file' && c.anchor.source.path === tab.path).length
+      : 0,
+  );
+  const label = tab.kind === 'chat' ? t('chat') : basename(tab.path);
+  const isChat = tab.kind === 'chat';
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          role="tab"
+          tabIndex={active ? 0 : -1}
+          aria-selected={active}
+          data-tab={tab.id}
+          title={tab.kind === 'file' ? tab.path : undefined}
+          onClick={() => d(activate(tab.id))}
+          onAuxClick={(e) => {
+            if (e.button === 1 && !isChat) { e.preventDefault(); d(closeTab(tab.id)); }
+          }}
+          onKeyDown={(e) => {
+            if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); d(activate(tab.id)); }
+          }}
+          className={`group flex h-7 max-w-[260px] flex-none cursor-pointer items-center gap-1.5 rounded-lg pr-1.5 pl-2.5 text-[12.5px] font-medium whitespace-nowrap hover:bg-muted/50 hover:text-foreground ${active ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
+        >
+          <span className="hidden size-1.5 flex-none animate-pulse rounded-full bg-primary group-data-[playing=true]:inline-block" />
+          <Svg>{iconFor(tab)}</Svg>
+          <span className="truncate">{label}</span>
+          {badge > 0 && <span data-badge className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{badge}</span>}
+          {!isChat && (
+            <button
+              type="button"
+              aria-label={t('close')}
+              title={t('close')}
+              onClick={(e) => { e.stopPropagation(); d(closeTab(tab.id)); }}
+              className="grid size-[18px] place-items-center rounded-[5px] opacity-50 hover:bg-muted hover:opacity-100"
+            >
+              <Svg size={10}><path d="M18 6 6 18M6 6l12 12" /></Svg>
+            </button>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        {!isChat && <ContextMenuItem onSelect={() => d(closeTab(tab.id))}>{t('close')}</ContextMenuItem>}
+        <ContextMenuItem onSelect={() => d(closeOthers(tab.id))}>{t('closeOthers')}</ContextMenuItem>
+        {!isChat && !last && <ContextMenuItem onSelect={() => d(closeRight(tab.id))}>{t('closeRight')}</ContextMenuItem>}
+        <ContextMenuItem onSelect={() => d(closeAll())}>{t('closeAll')}</ContextMenuItem>
+        {tab.kind === 'file' && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(tab.path)}>{t('copyPath')}</ContextMenuItem>
+            <ContextMenuItem onSelect={() => d(revealInTree(tab.path))}>{t('revealInTree')}</ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+export function TabStrip() {
+  const { open, active } = useAppSelector(selectTabs);
+  return (
+    <div role="tablist" className="flex h-10 flex-none items-center gap-1 overflow-x-auto border-b border-border-soft bg-chrome px-2">
+      {open.map((tab, i) => (
+        <TabItem key={tab.id} tab={tab} active={tab.id === active} last={i === open.length - 1} />
+      ))}
+    </div>
+  );
+}
