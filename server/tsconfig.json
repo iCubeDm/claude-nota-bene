@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "composite": true, "types": ["node"], "noEmit": false, "emitDeclarationOnly": true, "outDir": "dist" },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../shared" }]
+}
