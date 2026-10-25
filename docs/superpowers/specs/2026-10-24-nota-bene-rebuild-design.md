@@ -159,6 +159,8 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Side panel stack: cards with edit (✓/✕, ⌘Enter/Esc, ? help) and delete; jump to source; count badges on tabs and tree rows.
 - [ ] Batch send: one message of fragments plus comments plus image references.
 - [ ] Anchors persist across reloads and resumes; orphaned comments are shown, not dropped.
+- [ ] **Quick labels** (as in Plannotator), one click adds the comment with no typing: 👍 Looks good · ❓ Clarify this · 🔍 Verify this · 🔬 Give me an example · 🗺️ Missing overview · 🧬 Match existing patterns · 🔄 Consider alternatives · 📉 Ensure no regression · 🚫 Out of scope · 🧪 Needs tests. Labels are translated (ru/en); each may carry a hidden instruction for the agent (e.g. Verify this → "This seems like an assumption. Verify…"), sent with the batch.
+- [ ] **Emoji** in comment text: an emoji menu button in the comment popup, and GitHub-style `:` shortcodes with autocomplete (`:+1` → 👍; ↑↓ Enter/Tab, Esc), the same keyboard behaviour as the `@` picker.
 
 **Agents & tasks (M2)** — new, beyond the prototype; see [Agents and background tasks](#agents-and-background-tasks)
 - [ ] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer.
