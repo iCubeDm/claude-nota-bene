@@ -21,11 +21,13 @@ Node >= 23.6 (the server runs `.ts` directly). From the repo root:
 
 Ports: 4777 real use, 4780 dev server, 5173 Vite, 4790 manual smoke, 4791-4795 e2e. Never use 4777-4781 for tests while live windows run.
 
-State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo: `sessions.json` (last session per project and port) `comments/<sessionId>.json` (pending and sent margin comments of one agent session) and `attachments/<sha256>.<ext>` (pasted images, content-addressed; only ids travel over the socket).
+State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo: `sessions.json` (last session per project and port) `comments/<sessionId>.json` (pending and sent margin comments of one agent session) `attachments/<sha256>.<ext>` (pasted images, content-addressed; only ids travel over the socket) and `prefs.json` (agent permission mode per project dir).
 
-Server routes besides the app: `/info`, `/ws`, `/tree`, `/file` (Range; sandboxed headers), `/complete` (`@` search), `/attach` (POST image, GET `/attach/<id>`), `/sources` (this checkout, other worktrees and branches; read-only, `src=` on `/tree` `/file` `/complete`).
+Server routes besides the app: `/info`, `/ws`, `/tree`, `/file` (Range; sandboxed headers), `/complete` (`@` search), `/attach` (POST image, GET `/attach/<id>`), `/sources` (this checkout, other worktrees and branches; read-only, `src=` on `/tree` `/file` `/complete`), `/sessions` (all Claude Code sessions with their cwd, for the picker).
 
-Manual smoke with the real agent: set `CLAUDE_JOURNAL_VAULT` to a temp dir as well as `NOTA_BENE_HOME`, or the agent in the temp project follows the global journal protocol and writes into the real vault.
+Session switch and ↻ are in-process: the server closes the SDK query and resumes (another) session, possibly re-rooting to another project folder; a new session may only start in the current root or in a folder that already has sessions. ↻ restarts the agent, not the server process; it stays available while the agent is busy (escape hatch).
+
+Manual smoke with the real agent: set `CLAUDE_JOURNAL_VAULT` to a temp dir as well as `NOTA_BENE_HOME`, or the agent in the temp project follows the global journal protocol and writes into the real vault. Afterwards move the temp projects' transcripts (`~/.claude/projects/-private-tmp-nb-*`) to the Trash, or they clutter the session picker.
 
 ## You may be running inside this tool
 
