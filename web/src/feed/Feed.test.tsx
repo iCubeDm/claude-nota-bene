@@ -68,3 +68,10 @@ it('permission buttons dispatch answerPermission and the card shows the answer',
   expect(screen.queryByRole('button')).toBeNull();
   expect(screen.getByText('✓ allowed')).toBeInTheDocument();
 });
+
+it('an empty chat shows a prompt to start, gone after the first message', () => {
+  const { store, view } = setup();
+  expect(view.container.querySelector('[data-kind="empty"]')).toHaveTextContent('Write to the agent to get started');
+  act(() => { store.dispatch(serverEvent({ kind: 'user', id: 'u1', text: 'hi', ts: 1 })); });
+  expect(view.container.querySelector('[data-kind="empty"]')).toBeNull();
+});

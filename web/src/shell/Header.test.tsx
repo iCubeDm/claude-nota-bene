@@ -55,3 +55,11 @@ it('path and short session id come from the session event', () => {
   ev({ kind: 'session', id: '5f0c2a9e-7d41-4c4b', root: '/Users/me/proj' });
   expect(document.getElementById('session')).toHaveTextContent(/^5f0c2a9e$/);
 });
+
+it('the project name, not the app name, titles the header and the browser tab', () => {
+  const { ev } = setup();
+  expect(document.getElementById('proj')).toHaveTextContent('Nota Bene');
+  ev({ kind: 'session', id: null, root: '/Users/me/my-project' });
+  expect(document.getElementById('proj')).toHaveTextContent(/^my-project$/);
+  expect(document.title).toBe('my-project · Nota Bene');
+});

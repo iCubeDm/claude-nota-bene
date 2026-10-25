@@ -18,7 +18,8 @@ export function Composer() {
     const el = ref.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
+    // empty: stay one line — a long placeholder would otherwise wrap and grow the field (prototype clips it)
+    if (text) el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
   // a send that failed while offline is forgotten once the socket is back, so a later drop shows no stale label
@@ -91,7 +92,7 @@ export function Composer() {
               disabled={!busy}
               aria-label={t('stopTip')}
               onClick={() => dispatch(interrupt())}
-              className="h-10 px-2.5 enabled:bg-destructive/15 enabled:text-destructive enabled:hover:bg-destructive/25 disabled:opacity-35"
+              className="h-10 bg-muted px-2.5 enabled:bg-destructive/15 enabled:text-destructive enabled:hover:bg-destructive/25 disabled:opacity-35"
             >
               <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>
                 <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />

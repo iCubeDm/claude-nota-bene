@@ -5,6 +5,7 @@ type Dict = { [K in keyof typeof ru]: (typeof ru)[K] };
 
 export const en: Dict = {
   langTip: 'Interface language: русский',
+  emptyChat: 'Write to the agent to get started',
   connecting: 'connecting…',
   offline: 'no connection to the server…',
   serverError: (w) => `Server error${w ? ' · ' + w : ''}`,

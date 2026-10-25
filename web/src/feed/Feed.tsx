@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import { useT } from '@/i18n/index.ts';
 import { selectFeed, useAppSelector } from '@/store/store.ts';
 import { Markdown } from './Markdown.tsx';
 import { DoneLine, NoticeLine } from './DoneLine.tsx';
@@ -9,6 +10,7 @@ import { UserMessage } from './UserMessage.tsx';
 /** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
 export function Feed() {
   const { items } = useAppSelector(selectFeed);
+  const t = useT();
   const root = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const lastLen = useRef(0);
@@ -37,6 +39,11 @@ export function Feed() {
 
   return (
     <div ref={root}>
+      {items.length === 0 && (
+        <div data-kind="empty" className="py-6 text-center text-sm text-muted-foreground">
+          {t('emptyChat')}
+        </div>
+      )}
       {items.map((it, i) => {
         switch (it.kind) {
           case 'user':
