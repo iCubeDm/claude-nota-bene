@@ -6,6 +6,14 @@ import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { t } from '@/i18n/index.ts';
 import './markdown.css';
 
+// external links in agent replies open in a new browser tab instead of replacing the app
+DOMPurify.addHook('afterSanitizeAttributes', (n) => {
+  if (n.tagName === 'A' && /^https?:/i.test(n.getAttribute('href') ?? '')) {
+    n.setAttribute('target', '_blank');
+    n.setAttribute('rel', 'noopener noreferrer');
+  }
+});
+
 const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
 const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
 

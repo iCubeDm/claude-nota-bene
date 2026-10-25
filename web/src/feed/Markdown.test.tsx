@@ -39,6 +39,14 @@ describe('Markdown', () => {
     expect(container.innerHTML).not.toContain('onerror');
   });
 
+  it('external links open in a new tab; project links stay in the app', () => {
+    const { container } = render(<Markdown text={'[ext](https://example.com) [rel](docs/a.md)'} final />);
+    const [ext, rel] = container.querySelectorAll('a');
+    expect(ext.getAttribute('target')).toBe('_blank');
+    expect(ext.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(rel.hasAttribute('target')).toBe(false);
+  });
+
   it('auto-detects untagged fences', () => {
     const { container } = render(<Markdown text={'```\nconst a = 1;\nfunction f() { return a; }\n```'} final />);
     expect(container.querySelector('pre code span[class^="hljs-"]')).not.toBeNull();
