@@ -177,6 +177,9 @@ export async function startServer(o: {
           case 'permission':
             manager.answer(msg.id, msg.allow);
             break;
+          case 'command':
+            manager.command(msg.name);
+            break;
           case 'switch':
             manager.switch({ id: msg.id, dir: msg.dir }).catch(switchFailed);
             break;

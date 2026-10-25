@@ -118,7 +118,7 @@ export class StatsService {
   /** Cheap: called for every sdk message, so it looks at `type` first and does nothing for the common ones. */
   onSdk(m: SDKMessage): void {
     const { type, subtype, rate_limit_info: info } = m as Msg;
-    if (type === 'result') {
+    if (type === 'result' || type === 'conversation_reset') { // the SDK's reset frame has a top-level type
       void this.refresh();
     } else if (type === 'system') {
       if (subtype === 'conversation_reset' || subtype === 'compact_boundary') void this.refresh();

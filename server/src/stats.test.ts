@@ -89,11 +89,11 @@ describe('StatsService', () => {
     svc.onSdk(msg({ type: 'system', subtype: 'init' }));
     await svc.refresh(); // settle
     expect(contextUsage).toHaveBeenCalledTimes(1);
-    for (const m of [{ type: 'result' }, { type: 'system', subtype: 'conversation_reset' }, { type: 'system', subtype: 'compact_boundary' }]) {
+    for (const m of [{ type: 'result' }, { type: 'system', subtype: 'conversation_reset' }, { type: 'conversation_reset' }, { type: 'system', subtype: 'compact_boundary' }]) {
       svc.onSdk(msg(m));
       await svc.refresh();
     }
-    expect(contextUsage.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(contextUsage.mock.calls.length).toBeGreaterThanOrEqual(5);
   });
 
   it('a throwing usage API keeps the context and reports once', async () => {

@@ -46,6 +46,11 @@ export type SessionManager = {
    * id yet. Allowed while busy (the stuck-agent escape hatch): it interrupts first (2 s cap); only a switch blocks it.
    */
   restart(): Promise<void>;
+  /**
+   * `/compact` or `/clear`: shown in the feed as a user event, then sent to the agent as the plain string. Refused
+   * (reported as `busy`) while the agent is busy or the session is switching (R-M4-4).
+   */
+  command(name: 'compact' | 'clear'): void;
   /** Called at the end of a switch, after the session, mode and stats events (the server sends the comments there). */
   onSwitch(cb: (id: string | null, o: { restart: boolean }) => void): void;
   /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
@@ -62,6 +67,8 @@ type Msg = {
   type?: string; subtype?: string; session_id?: string; permissionMode?: unknown; model?: unknown;
   is_error?: unknown; user_message_uuid?: unknown; user_message_uuids?: unknown; state?: unknown; command_uuid?: unknown;
 };
+
+const isReset = (f: Msg) => f.type === 'conversation_reset' || (f.type === 'system' && f.subtype === 'conversation_reset');
 
 const SESSION_ID = /^[0-9a-f-]{36}$/i;
 const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after close() must not hold the switch
@@ -142,6 +149,10 @@ export async function createSessionManager(o: {
         const f = m as Msg;
         if (f.type === 'result') settle(f);
         else if (f.type === 'command_lifecycle' && f.state === 'cancelled' && typeof f.command_uuid === 'string') waiting.delete(f.command_uuid);
+        if (isReset(f)) {
+          onReset(m, f);
+          continue;
+        }
         hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) });
         stats.onSdk(m);
         const { type, subtype, session_id, permissionMode } = f;
@@ -160,15 +171,35 @@ export async function createSessionManager(o: {
           if (session_id) heardId(session_id);
         }
         if (type === 'result') scheduleTitle();
-        if (type === 'system' && subtype === 'conversation_reset') {
-          title = null;
-          emitSession();
-        }
       }
       if (current()) died(a, new Error('agent session ended'));
     } catch (e) {
       if (current()) died(a, e);
     }
+  }
+
+  /**
+   * /clear (or the CLI leaving plan mode with a cleared context): a new conversation under a new id. The feed is
+   * emptied (a reload must not bring the old turns back), the new id becomes the current and the resume target, and
+   * the id listeners hear it with the old id as `prev`, so the server sends that id's own (empty) comments and
+   * never adopts the unsent set. The reset frame itself is live only: the web renders its line from it.
+   */
+  function onReset(m: SDKMessage, f: Msg & { new_conversation_id?: unknown }): void {
+    waiting.clear(); // the CLI answers a /clear with no result
+    hub.reset();
+    lastSession = '';
+    title = null;
+    titleAt = -Infinity;
+    const next = typeof f.new_conversation_id === 'string' && SESSION_ID.test(f.new_conversation_id) ? f.new_conversation_id : null;
+    if (next) {
+      sessionId = next;
+      saved = next;
+      try { saveSession(root, next); } catch (e) { reportError(hub, 'session', e); }
+    }
+    hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) }, { store: false });
+    emitSession();
+    stats.onSdk(m);
+    if (next) heardId(next);
   }
 
   /** Mirrors the web reducer: a result answers the sends it names; one naming none answers all if it is an error. */
@@ -447,6 +478,25 @@ export async function createSessionManager(o: {
           emitErrorResult(e, id); // the user event is already out: answer it or the feed waits forever
         }
       });
+    },
+    command(name) {
+      if (switching || waiting.size > 0 || pending.size > 0) {
+        reportError(hub, 'busy', new Error(switching ? 'the session is switching; the command was not sent' : 'the agent is busy; the command was not sent'));
+        return;
+      }
+      const id = randomUUID();
+      const text = `/${name}`;
+      const g = gen;
+      try {
+        const a = ensureAgent();
+        hub.emit({ kind: 'user', id, text }); // before the agent sees it, as in the prototype
+        waiting.add(id);
+        a.send({ uuid: id, text, priority: 'next' });
+      } catch (e) {
+        if (g !== gen) return;
+        reportError(hub, 'send', e);
+        emitErrorResult(e, id);
+      }
     },
     interrupt() {
       const g = gen;

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -24,6 +25,8 @@ export type FakeTurn = {
   usage?: { cost: number | null; limits: Stats['limits'] };
   /** the `model` this turn's init frame carries (default none) */
   model?: string;
+  /** `compact_metadata.pre_tokens` of the boundary a `/compact` emits (read from the first turn that sets it; default 12000) */
+  compactPreTokens?: number;
 };
 
 /**
@@ -75,7 +78,7 @@ function whenAborted(signal: AbortSignal): Promise<void> {
 
 class FakeSession implements AgentSession {
   readonly messages: AsyncIterable<SDKMessage>;
-  private pending: { uuid: string; images: number }[] = []; // sends not yet started
+  private pending: { uuid: string; images: number; command?: 'compact' | 'clear' }[] = []; // sends not yet started
   private wake: (() => void) | null = null;
   private closed = false;
   private turnCtl: AbortController | null = null; // set only while a turn runs
@@ -83,7 +86,7 @@ class FakeSession implements AgentSession {
   private readonly turns: FakeTurn[];
   private readonly ask: PermissionAsk;
   private readonly modes: Mode[];
-  private readonly sessionId: string;
+  private sessionId: string; // a /clear replaces it
 
   constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string) {
     this.turns = turns;
@@ -95,7 +98,9 @@ class FakeSession implements AgentSession {
 
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: unknown[] }): void {
     if (this.closed) return;
-    this.pending.push({ uuid: m.uuid, images: m.images?.length ?? 0 });
+    // like the CLI, the plain string `/compact` or `/clear` is a command, not a prompt
+    const command = m.text === '/compact' ? 'compact' : m.text === '/clear' ? 'clear' : undefined;
+    this.pending.push({ uuid: m.uuid, images: m.images?.length ?? 0, ...(command ? { command } : {}) });
     this.wake?.();
   }
 
@@ -137,11 +142,38 @@ class FakeSession implements AgentSession {
         this.wake = null;
       }
       if (this.closed) return;
-      const { uuid, images } = this.pending.shift()!;
+      const { uuid, images, command } = this.pending.shift()!;
+      if (command) {
+        yield* this.command(command, uuid);
+        continue;
+      }
       const base = this.turns[Math.min(this.turnNo, this.turns.length - 1)] ?? { text: '' };
       yield* this.turn(base.echoImages ? { ...base, text: `${base.text}${base.text ? '\n' : ''}images: ${images}` } : base, uuid);
       if (this.closed) return;
     }
+  }
+
+  /** Shaped like SDKCompactBoundaryMessage / SDKConversationResetMessage (the latter has a top-level type). */
+  private async *command(name: 'compact' | 'clear', sendUuid: string): AsyncGenerator<SDKMessage> {
+    const n = ++this.turnNo;
+    if (name === 'compact') {
+      yield sdk({
+        type: 'system', subtype: 'compact_boundary', session_id: this.sessionId, uuid: `fake-cb-${n}`,
+        compact_metadata: { trigger: 'manual', pre_tokens: this.turns.find((t) => t.compactPreTokens !== undefined)?.compactPreTokens ?? 12000 },
+      });
+      yield sdk({
+        type: 'result', subtype: 'success', session_id: this.sessionId, uuid: `fake-r-${n}`, duration_ms: 0, is_error: false,
+        result: '', terminal_reason: 'completed', queued_turn_count: 0, user_message_uuid: sendUuid, user_message_uuids: [sendUuid],
+      });
+      return;
+    }
+    // /clear: a new conversation, announced by its reset and an init; the CLI sends no result for it
+    this.sessionId = randomUUID();
+    yield sdk({
+      type: 'conversation_reset', new_conversation_id: this.sessionId, session_id: this.sessionId, uuid: `fake-cr-${n}`,
+      trigger: 'clear', user_message_uuid: sendUuid,
+    });
+    yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}` });
   }
 
   private async *turn(t: FakeTurn, sendUuid: string): AsyncGenerator<SDKMessage> {
