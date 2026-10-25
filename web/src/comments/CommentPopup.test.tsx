@@ -117,9 +117,9 @@ it('adding clears the DOM selection', () => {
   expect(onClose).toHaveBeenCalled();
 });
 
-it('has an empty emoji slot for M1-12', () => {
+it('has the emoji button in its slot', () => {
   setup();
-  expect(document.querySelector('[data-slot="emoji"]')).toBeEmptyDOMElement();
+  expect(document.querySelector('[data-slot="emoji"]')!.querySelector('button[aria-label="Emoji"]')).not.toBeNull();
 });
 
 it('⌘Enter in the popup does not reach the composer', async () => {

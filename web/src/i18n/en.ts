@@ -47,4 +47,18 @@ export const en: Dict = {
   'label_no-regression': 'Ensure no regression',
   'label_out-of-scope': 'Out of scope',
   'label_needs-tests': 'Needs tests',
+  // emoji menu (M1-12)
+  'emojiTip': 'Emoji',
+  'emojiSearchPh': 'Search emoji…',
+  'emojiRecent': 'Recent',
+  'emojiNone': 'Nothing found',
+  'emojiGroup_smileys-emotion': 'Smileys & emotion',
+  'emojiGroup_people-body': 'People & body',
+  'emojiGroup_animals-nature': 'Animals & nature',
+  'emojiGroup_food-drink': 'Food & drink',
+  'emojiGroup_travel-places': 'Travel & places',
+  'emojiGroup_activities': 'Activities',
+  'emojiGroup_objects': 'Objects',
+  'emojiGroup_symbols': 'Symbols',
+  'emojiGroup_flags': 'Flags',
 };

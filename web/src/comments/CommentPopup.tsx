@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch } from '@/store/store.ts';
 import { instructionOf, labelText, QUICK_LABELS } from './labels.ts';
+import { EmojiMenu } from './EmojiMenu.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
 import { ShortcodePicker } from './ShortcodePicker.tsx';
 import { addComment, setPanelOpen } from './slice.ts';
@@ -96,7 +97,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       <div className="mt-1.5 flex items-center justify-between gap-2 text-[10.5px] text-muted-foreground">
         <span>{t('popHint')}</span>
         <span className="flex items-center gap-1">
-          <span data-slot="emoji" /> {/* M1-12: emoji picker button goes here */}
+          <span data-slot="emoji"><EmojiMenu target={area} /></span>
           <Button size="xs" onClick={() => add()}>{t('add')}</Button>
         </span>
       </div>

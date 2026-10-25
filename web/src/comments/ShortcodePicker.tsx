@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { loadEmoji, searchShortcodes } from './emoji.ts';
+import { setValueAndCaret } from './insertText.ts';
 
 // `:` at a word start + >=2 chars, up to the caret; optionally already closed by a second colon
 const TOKEN = /(^|\s):([a-z0-9_+-]{2,})(:?)$/i;
@@ -25,10 +26,7 @@ export function ShortcodePicker({ target }: { target: RefObject<HTMLTextAreaElem
     // the caret may have moved since the list was built: never insert over a stale token
     if (!/^:[a-z0-9_+-]{2,}:?$/i.test(ta.value.slice(start, end)) || (start > 0 && !/\s/.test(ta.value[start - 1]))) return;
     const next = ta.value.slice(0, start) + emoji + ta.value.slice(end);
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(ta, next);
-    const caret = start + emoji.length;
-    ta.setSelectionRange(caret, caret);
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    setValueAndCaret(ta, next, start + emoji.length);
   };
 
   useEffect(() => {

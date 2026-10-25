@@ -44,4 +44,18 @@ export const ru = {
   'label_no-regression': 'Без регрессий',
   'label_out-of-scope': 'Вне задачи',
   'label_needs-tests': 'Нужны тесты',
+  // emoji menu (M1-12)
+  'emojiTip': 'Эмодзи',
+  'emojiSearchPh': 'Поиск эмодзи…',
+  'emojiRecent': 'Недавние',
+  'emojiNone': 'Ничего не найдено',
+  'emojiGroup_smileys-emotion': 'Смайлики и эмоции',
+  'emojiGroup_people-body': 'Люди и тело',
+  'emojiGroup_animals-nature': 'Животные и природа',
+  'emojiGroup_food-drink': 'Еда и напитки',
+  'emojiGroup_travel-places': 'Путешествия и места',
+  'emojiGroup_activities': 'Активности',
+  'emojiGroup_objects': 'Предметы',
+  'emojiGroup_symbols': 'Символы',
+  'emojiGroup_flags': 'Флаги',
 };
