@@ -94,6 +94,11 @@ export async function startServer(o: {
       } catch (e) {
         reportError(hub, 'mode', e);
       }
+      try {
+        ws.send(JSON.stringify({ kind: 'stats', stats: manager.stats() }));
+      } catch (e) {
+        reportError(hub, 'stats', e);
+      }
       ws.on('close', detach);
       ws.on('error', (e) => reportError(hub, 'ws', e));
       ws.on('message', guard(hub, 'ws', (data) => {
@@ -149,6 +154,7 @@ export async function startServer(o: {
     let closing: Promise<void> | null = null;
     const close = () => (closing ??= new Promise<void>((resolve) => {
       hubs.delete(hub);
+      manager.close();
       for (const c of wss.clients) c.terminate();
       wss.close(() => {
         server.close(() => resolve());

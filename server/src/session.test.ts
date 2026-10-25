@@ -51,7 +51,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
-        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -69,7 +69,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })(),
-        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -102,7 +102,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { calls.push({ priority: m.priority }); a.send(m); },
           interrupt: () => { interrupts++; return a.interrupt(); },
-          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
         };
       },
     };
@@ -186,7 +186,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { log.push(`send:${m.priority}`); a.send(m); },
           interrupt: () => { log.push('interrupt'); return a.interrupt(); },
-          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
         };
       },
     };
@@ -216,7 +216,7 @@ describe('session manager', () => {
           ...a,
           send: (m) => a.send(m),
           interrupt: () => a.interrupt(),
-          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
           messages: (async function* () {
             for await (const m of a.messages) {
               yield m;
@@ -250,7 +250,7 @@ describe('session manager', () => {
         })(),
         send: () => {},
         interrupt: async () => {},
-        setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => { closed++; },
+        setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => { closed++; },
       }),
     };
     const { events, make } = setup(backend);
@@ -271,7 +271,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { if (first) { first = false; throw new Error('send failed'); } a.send(m); },
           interrupt: () => a.interrupt(),
-          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close(),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
         };
       },
     };
@@ -300,7 +300,7 @@ describe('session manager', () => {
           })(),
           send: (m) => { delivered.push(`${mine}:${m.text}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => {},
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
         };
       },
     };
@@ -373,7 +373,7 @@ describe('busy cannot get stuck', () => {
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
-        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => a.close() };
+        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close() };
       },
     };
     const { hub, events, make } = setup(backend);
@@ -404,7 +404,7 @@ describe('busy cannot get stuck', () => {
         })(),
         send: () => { sent++; },
         interrupt: async () => {},
-        setPermissionMode: async () => {}, fileSuggestions: async () => [], close: () => {},
+        setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
       }),
     };
     const { hub, events, make } = setup(backend);
@@ -433,7 +433,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
         }),
       };
       const hub = new EventHub();
@@ -463,7 +463,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
         }),
       };
       const hub = new EventHub();
@@ -559,7 +559,7 @@ describe('permission mode', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield { type: 'system', subtype: 'status', permissionMode: 'acceptEdits' } as never; await new Promise(() => {}); })(),
-        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -593,7 +593,7 @@ describe('permission mode', () => {
               await new Promise<void>((r) => { wake = r; });
             }
           })(),
-          send() {}, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
+          send() {}, interrupt: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
           setPermissionMode: () => onSet(push),
         };
       },

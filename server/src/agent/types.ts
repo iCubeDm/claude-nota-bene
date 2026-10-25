@@ -1,5 +1,5 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ImageType, Mode, ServerEvent } from '@nota-bene/shared';
+import type { ImageType, Mode, ServerEvent, Stats } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
@@ -14,6 +14,10 @@ export interface AgentSession {
   fileSuggestions(query: string): Promise<string[]>;
   /** Changes the permission mode of the running CLI; rejects when the CLI refuses. */
   setPermissionMode(mode: Mode): Promise<void>;
+  /** Context window usage; rejects when the CLI cannot answer. */
+  contextUsage(): Promise<{ used: number; max: number; pct: number }>;
+  /** Session cost and plan limits; throws UsageUnavailableError when the SDK has no usage API. */
+  usage(): Promise<{ cost: number | null; limits: Stats['limits'] }>;
   close(): void;
 }
 

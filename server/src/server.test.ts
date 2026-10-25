@@ -71,6 +71,20 @@ describe('server', () => {
     expect(await r.json()).toMatchObject({ root: '/proj' });
   });
 
+  it('a new socket gets the current stats, and stats never enter the replay', async () => {
+    const hot = { used: 180000, max: 200000, pct: 90 };
+    const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello', context: hot }]), webDist: dist });
+    closers.push(s.close);
+    const a = await connect(s.url);
+    a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
+    await until(() => a.events.some((e) => e.kind === 'stats' && e.stats.context?.pct === 90));
+    const b = await connect(s.url);
+    await until(() => b.events.some((e) => e.kind === 'stats'));
+    expect(b.events.find((e) => e.kind === 'stats')).toMatchObject({ stats: { context: hot } });
+    const replay = b.events.find((e) => e.kind === 'replay') as Extract<ServerEvent, { kind: 'replay' }>;
+    expect(replay.events.some((e) => e.kind === 'stats')).toBe(false);
+  });
+
   it('a second client gets the replay', async () => {
     const s = await boot();
     const a = await connect(s.url);

@@ -3,6 +3,7 @@ import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { Mode } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './types.ts';
 import { transcriptToEvents } from './transcript.ts';
+import { UsageUnavailableError, mapContextUsage, mapUsage } from '../stats.ts';
 
 const APPEND = `
 You are running inside a browser-based chat window that renders GitHub-flavored markdown.
@@ -87,6 +88,21 @@ class SdkSession implements AgentSession {
     };
     const r = await q.request({ subtype: 'file_suggestions', query }, { signal: AbortSignal.timeout(1500) });
     return r.response.suggestions.map((x) => x.path);
+  }
+
+  async contextUsage(): Promise<{ used: number; max: number; pct: number }> {
+    return mapContextUsage(await this.q.getContextUsage({ detail: 'summary' }));
+  }
+
+  async usage(): Promise<Awaited<ReturnType<AgentSession['usage']>>> {
+    // EXPERIMENTAL in the SDK ("method name will change when stabilized"): feature-check it and reach it through a
+    // narrow cast, so a release that renames or drops it gives a recognisable error instead of a TypeError
+    const { q } = this as unknown as {
+      q: { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (o: { skipBehaviors: boolean }) => Promise<Parameters<typeof mapUsage>[0]> };
+    };
+    const fn = q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+    if (typeof fn !== 'function') throw new UsageUnavailableError();
+    return mapUsage(await fn.call(q, { skipBehaviors: true }));
   }
 
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: SendImage[] }): void {

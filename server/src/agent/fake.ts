@@ -1,5 +1,5 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Mode } from '@nota-bene/shared';
+import type { Mode, Stats } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
@@ -16,6 +16,10 @@ export type FakeTurn = {
   suggestions?: string[];
   /** the `permissionMode` this turn's init frame carries (the CLI changing the mode on its own); default none */
   initMode?: Mode;
+  /** what `contextUsage` returns once this turn has run (default: empty window); the e2e uses a high pct for the hot meter */
+  context?: { used: number; max: number; pct: number };
+  /** what `usage` returns once this turn has run (default: no cost, no plan limits) */
+  usage?: { cost: number | null; limits: Stats['limits'] };
 };
 
 /**
@@ -82,6 +86,19 @@ class FakeSession implements AgentSession {
 
   async fileSuggestions(): Promise<string[]> {
     return this.turns.find((t) => t.suggestions)?.suggestions ?? [];
+  }
+
+  /** the scripted values of the turn that ran last (the first turn's before any ran) */
+  private scripted(): FakeTurn | undefined {
+    return this.turns[Math.min(Math.max(this.turnNo - 1, 0), this.turns.length - 1)];
+  }
+
+  async contextUsage(): Promise<{ used: number; max: number; pct: number }> {
+    return this.scripted()?.context ?? { used: 0, max: 200000, pct: 0 };
+  }
+
+  async usage(): Promise<{ cost: number | null; limits: Stats['limits'] }> {
+    return this.scripted()?.usage ?? { cost: null, limits: null };
   }
 
   close(): void {

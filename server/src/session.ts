@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { MODES } from '@nota-bene/shared';
-import type { ImageRef, Mode } from '@nota-bene/shared';
+import type { ImageRef, Mode, Stats } from '@nota-bene/shared';
 import { AttachmentStore } from './attachments.ts';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './agent/types.ts';
@@ -10,6 +10,7 @@ import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { prefsKey, readPrefs, setModePref } from './prefs.ts';
 import { saveSession, stateDir } from './state.ts';
+import { StatsService } from './stats.ts';
 
 export type SessionManager = {
   send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): void;
@@ -21,6 +22,10 @@ export type SessionManager = {
   info(): { id: string | null; root: string };
   /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
   fileSuggestions(query: string): Promise<string[]>;
+  /** Context, plan limits and cost as last measured (what a new socket gets). */
+  stats(): Stats;
+  /** Stops the stats timers and closes the agent. Idempotent. */
+  close(): void;
   /** Called whenever the session id changes to a real id (first init, or a different id after resume/restart). */
   onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
@@ -37,6 +42,11 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
   let agent: AgentSession | null = null;
   let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
   const pending = new Map<string, (allow: boolean) => void>();
+  const stats = new StatsService({
+    session: () => agent,
+    emit: (s) => hub.emit({ kind: 'stats', stats: s }, { store: false }),
+    onError: (e) => reportError(hub, 'stats', e),
+  });
   const idListeners: ((id: string, prev: string | null) => void)[] = [];
 
   const ask: PermissionAsk = (toolName, input, signal) =>
@@ -60,6 +70,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
       for await (const m of a.messages) {
         if (agent !== a) return;
         hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) });
+        stats.onSdk(m);
         const { type, subtype, session_id, permissionMode } = m as Msg;
         // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
         if (type === 'system' && (subtype === 'init' || subtype === 'status') && (MODES as readonly unknown[]).includes(permissionMode)) {
@@ -138,6 +149,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
   }
   announce(sessionId); // header gets the root (and a resumed id) before the first turn's init
   ensureAgent();
+  stats.start();
 
   return {
     send({ id, text, force, images }) {
@@ -192,6 +204,14 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
     },
     info: () => ({ id: sessionId, root: cwd }),
     fileSuggestions: (query) => (agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
+    stats: () => stats.current(),
+    close() {
+      stats.stop();
+      const a = agent;
+      agent = null; // the pump then ends quietly instead of reporting a dead agent
+      for (const finish of [...pending.values()]) finish(false);
+      try { a?.close(); } catch (e) { reportError(hub, 'agent-close', e); }
+    },
     onSessionId(cb) {
       idListeners.push(cb);
     },
