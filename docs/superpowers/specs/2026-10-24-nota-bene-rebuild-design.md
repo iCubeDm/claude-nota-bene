@@ -190,7 +190,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Plan card for `ExitPlanMode` (rendered, commentable, "approve · continue in ‹previous mode›").
 - [ ] Mode pill and menu (default, acceptEdits, plan, auto), Shift+Tab cycle, follows the CLI's own mode changes, persisted.
 - [ ] Prompt suggestions as ghost placeholder, Tab accepts.
-- [ ] Favicon = NB circle coloured by state: idle, working (blink), waiting for you (amber), done while away (green).
+- [ ] Favicon = NB circle coloured by state: idle (purple), working (blinks orange/purple, orange = the working dot), waiting for you (red), done while away (green).
 - [ ] Server errors as toasts (dedup ×N).
 - [ ] `--chrome` (Claude in Chrome tools) enabled.
 
