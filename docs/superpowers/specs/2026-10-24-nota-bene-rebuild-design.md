@@ -241,3 +241,4 @@ Feature freeze on `prototype/` from M0's start, except for bug fixes.
   - PiP is used only when leaving a playing video for a **non-media** tab (chat, agent, shell, text file), and there is at most one PiP window.
   - PiP's "back to tab" never starts playback or PiP elsewhere: it only activates the video's own tab.
   - e2e: play A, open B, open C → exactly one video plays, no PiP, no repeated focus or selection events.
+- **Media rules confirmed by the user (2026-10-25, after M3):** all media are equal: opening any media tab pauses whatever else plays, background audio included. Media never autoplay on open (`preload=metadata`); playback starts only on the user's click.
