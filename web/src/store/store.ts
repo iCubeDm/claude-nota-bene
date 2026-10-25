@@ -2,6 +2,7 @@ import { configureStore, createAction, createSlice, type ThunkAction, type Unkno
 import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
+import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** The only way server data enters the store. */
@@ -41,14 +42,17 @@ export function makeStore(o: { url: string; connect?: typeof realConnect }) {
   let conn: ReturnType<typeof realConnect> | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }),
     devTools: devToolsEnabled(),
   });
   conn = connectFn(
     o.url,
     (ev) => store.dispatch(serverEvent(ev)),
-    (s) => store.dispatch(connState(s)),
+    (s) => {
+      store.dispatch(connState(s));
+      if (s === 'open') store.dispatch(resyncComments());
+    },
   );
   return store;
 }
@@ -67,11 +71,14 @@ export const selectConn = (s: RootState): ConnState => s.conn.state;
 export const selectSession = (s: RootState) => s.feed.session;
 
 export const sendMessage =
-  (text: string, force: boolean): AppThunk<boolean> =>
+  (text: string, force: boolean, commentIds?: string[]): AppThunk<boolean> =>
   (_d, getState, { send }) => {
     const st = getState();
     if (selectConn(st) !== 'open') return false;
-    return send({ type: 'send', id: crypto.randomUUID(), text, force: force && selectBusy(st) });
+    return send({
+      type: 'send', id: crypto.randomUUID(), text, force: force && selectBusy(st),
+      ...(commentIds?.length ? { commentIds } : {}),
+    });
   };
 
 export const interrupt = (): AppThunk => (_d, getState, { send }) => {

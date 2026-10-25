@@ -1,0 +1,76 @@
+import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import type { Comment } from '@nota-bene/shared';
+// store.ts imports this file for the reducer; every use of serverEvent below is lazy (inside callbacks), so the cycle is safe.
+import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
+
+export type CommentCard = { id: string; x: number; y: number };
+export type CommentsState = { items: Comment[]; /** a local change the server has not received */ unsynced: boolean; /** local set re-sent on reconnect; the server's initial (stale) push is still to come and must be ignored once */ resent: boolean; ui: { panelOpen: boolean; card: CommentCard | null } };
+
+const readPanelOpen = (): boolean => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('panel:comments') === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const commentsSlice = createSlice({
+  name: 'comments',
+  initialState: (): CommentsState => ({ items: [], unsynced: false, resent: false, ui: { panelOpen: readPanelOpen(), card: null } }),
+  reducers: {
+    setItems: (s, a: PayloadAction<Comment[]>) => void (s.items = a.payload),
+    setUnsynced: (s, a: PayloadAction<boolean>) => void (s.unsynced = a.payload),
+    markResent: (s) => void ((s.unsynced = false), (s.resent = true)),
+    setPanelOpen: (s, a: PayloadAction<boolean>) => void (s.ui.panelOpen = a.payload),
+    openCommentCard: (s, a: PayloadAction<CommentCard>) => void (s.ui.card = a.payload),
+    closeCommentCard: (s) => void (s.ui.card = null),
+  },
+  // only a `comments` event replaces items; `replay` must not clear them (the server sends replay first)
+  extraReducers: (b) =>
+    b.addCase(serverEvent, (s, a) => {
+      // while unsynced, local offline edits win; they are re-sent on reconnect (resyncComments)
+      if (a.payload.kind !== 'comments') return;
+      if (s.unsynced) return;
+      if (s.resent) { s.resent = false; return; } // the server's initial push predates our re-send: stale, skip it once
+      s.items = a.payload.items;
+    }),
+});
+
+export const { setPanelOpen, openCommentCard, closeCommentCard } = commentsSlice.actions;
+
+/** Update locally first, then send the FULL set; a closed socket keeps the local change for the next sync. */
+// Accepted race: two edits within one round trip can see the first echo overwrite the second locally until the second echo lands.
+const sync = (items: Comment[]): AppThunk => (d, _g, { send }) => {
+  d(commentsSlice.actions.setItems(items));
+  d(commentsSlice.actions.setUnsynced(!send({ type: 'comments', items })));
+};
+
+/** On socket open: re-send local changes made while offline (local wins; last-writer-wins between windows is accepted). */
+export const resyncComments = (): AppThunk => (d, getState, { send }) => {
+  const st = getState().comments;
+  if (st.unsynced && send({ type: 'comments', items: st.items })) d(commentsSlice.actions.markResent());
+};
+
+export const addComment = (c: Omit<Comment, 'id' | 'status' | 'createdAt'>): AppThunk => (d, getState) => {
+  const next: Comment = { ...c, id: crypto.randomUUID(), status: 'pending', createdAt: Date.now() };
+  d(sync([...selectComments(getState()), next]));
+};
+
+export const editComment = (id: string, text: string): AppThunk => (d, getState) => {
+  d(sync(selectComments(getState()).map((c) => (c.id === id ? { ...c, text } : c))));
+};
+
+export const removeComment = (id: string): AppThunk => (d, getState) => {
+  d(sync(selectComments(getState()).filter((c) => c.id !== id)));
+};
+
+export const selectComments = (s: RootState): Comment[] => s.comments.items;
+export const selectCommentsUi = (s: RootState) => s.comments.ui;
+const EMPTY: Comment[] = Object.freeze([]) as unknown as Comment[];
+export const selectPending = createSelector([selectComments], (items) => items.filter((c) => c.status === 'pending'));
+const selectSentByMessage = createSelector([selectComments], (items) => {
+  const m: Record<string, Comment[]> = {};
+  for (const c of items) if (c.status === 'sent' && c.sentIn !== undefined) (m[c.sentIn] ??= []).push(c);
+  return m;
+});
+export const selectSentFor = (s: RootState, messageId: string): Comment[] => selectSentByMessage(s)[messageId] ?? EMPTY;
