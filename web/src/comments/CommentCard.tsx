@@ -1,11 +1,11 @@
+import type { Comment } from '@nota-bene/shared';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { resolveAnchor } from '@/anchors/resolve.ts';
-import { textOf } from '@/anchors/text.ts';
+import { rangeForAnchor } from '@/anchors/text.ts';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
-import { selectFeed, selectReplyLabel, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { labelText, QUICK_LABELS } from './labels.ts';
-import { closeCommentCard, editComment, removeComment, selectComments } from './slice.ts';
+import { closeCommentCard, editComment, removeComment, selectComments, selectPending, selectSentFor } from './slice.ts';
 
 const BTN = 'inline-flex items-center px-0.5 text-muted-foreground opacity-60 hover:opacity-100 hover:text-foreground [&_svg]:size-[13px]';
 const svg = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'aria-hidden': true } as const;
@@ -13,12 +13,21 @@ const svg = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'aria-
 const itemRoot = (id: string): HTMLElement | null =>
   [...document.querySelectorAll<HTMLElement>('[data-item-id]')].find((e) => e.dataset.itemId === id) ?? null;
 
-function IconButton({ label, className = '', children, ...rest }: { label: string; className?: string; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+/** `noTitle`: the button already sits in a Radix Tooltip, so a native title would show a second one. */
+function IconButton({ label, className = '', noTitle = false, children, ...rest }: { label: string; className?: string; noTitle?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button type="button" title={label} aria-label={label} className={`${BTN} ${className}`} {...rest}>
+    <button type="button" title={noTitle ? undefined : label} aria-label={label} className={`${BTN} ${className}`} {...rest}>
       {children}
     </button>
   );
+}
+
+/** The source item as the card needs it: missing (null), still streaming, or its text. undefined = not a message source. */
+function sourceState(s: RootState, src: Comment['anchor']['source'] | undefined): null | 'streaming' | string | undefined {
+  if (src?.kind !== 'message') return undefined;
+  const it = s.feed.items.find((x) => (x.kind === 'assistant' || x.kind === 'user') && x.id === src.id);
+  if (!it || (it.kind !== 'assistant' && it.kind !== 'user')) return null;
+  return it.kind === 'assistant' && !it.final ? 'streaming' : it.text;
 }
 
 /**
@@ -29,7 +38,8 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   const t = useT();
   const dispatch = useAppDispatch();
   const c = useAppSelector(selectComments).find((x) => x.id === id);
-  const feed = useAppSelector(selectFeed);
+  // a string compared by value: the card re-renders when its source item's text changes, not on every feed delta
+  const srcState = useAppSelector((s) => sourceState(s, c?.anchor.source));
   const where = useAppSelector((s) => {
     const src = c?.anchor.source;
     return src?.kind === 'message' ? selectReplyLabel(s, src.id) : (src?.path ?? null);
@@ -39,13 +49,15 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   const body = useRef<HTMLDivElement>(null);
   const live = useRef(false); // true while an edit is open; guards double finish (✓ then blur)
 
-  // the DOM is the truth for orphans: only a rendered, final item whose text no longer matches counts
+  // a source missing from the feed is an orphan (also an interrupted `stream:N` reply after a restart); for a
+  // settled item the DOM is the truth: only a rendered item whose text no longer matches counts
   useEffect(() => {
     const src = c?.anchor.source;
-    const root = src?.kind === 'message' ? itemRoot(src.id) : null;
-    const settled = root && (root.dataset.kind !== 'assistant' || root.dataset.final === 'true');
-    setOrphan(!!(c && settled && !resolveAnchor(c.anchor, textOf(root))));
-  }, [c, feed]);
+    if (!c || src?.kind !== 'message' || srcState === undefined || srcState === 'streaming') return setOrphan(false);
+    if (srcState === null) return setOrphan(true);
+    const root = itemRoot(src.id);
+    setOrphan(!!root && !rangeForAnchor(root, c.anchor));
+  }, [c, srcState]);
 
   useEffect(() => {
     if (!editing || !body.current) return;
@@ -87,7 +99,8 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
     const src = c.anchor.source;
     const root = src.kind === 'message' ? itemRoot(src.id) : null;
     if (!root) return;
-    root.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const target = rangeForAnchor(root, c.anchor)?.startContainer.parentElement ?? root; // the fragment, not the whole message
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     root.classList.remove('nb-flash');
     void root.offsetWidth; // restart the animation
     root.classList.add('nb-flash');
@@ -98,7 +111,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
     <div
       data-comment-id={c.id}
       data-editing={editing || undefined}
-      className={`rounded-[10px] border bg-card/50 px-3 py-2.5 text-[13px] ${popover ? 'bg-popover' : ''} ${editing ? 'border-primary' : 'border-border-soft hover:border-border'}`}
+      className={`rounded-[10px] border px-3 py-2.5 text-[13px] ${popover ? 'bg-popover' : 'bg-card/50'} ${editing ? 'border-primary' : 'border-border-soft hover:border-border'}`}
     >
       <div className="mb-1 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
         <span>
@@ -110,7 +123,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
               <>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <IconButton label={t('editTip')} {...noFocusSteal}>
+                    <IconButton label={t('editTip')} noTitle {...noFocusSteal}>
                       <svg {...svg} strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6" /><path d="M12 17h.01" /></svg>
                     </IconButton>
                   </TooltipTrigger>
@@ -170,8 +183,16 @@ export function CommentCardPopover() {
   const items = useAppSelector(selectComments);
   const root = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const index = card ? items.findIndex((c) => c.id === card.id) : -1;
-  const gone = !!card && index < 0;
+  // `gone` is over all items: an in-flight id is not in selectPending but must not close the popover
+  const c = card ? items.find((x) => x.id === card.id) : undefined;
+  const gone = !!card && !c;
+  // the number the comment has where it is listed: the panel (pending) or its batch in the sent bubble
+  const index = useAppSelector((s) => {
+    if (!c) return -1;
+    if (c.status === 'sent') return c.sentIn === undefined ? -1 : selectSentFor(s, c.sentIn).findIndex((x) => x.id === c.id);
+    const i = selectPending(s).findIndex((x) => x.id === c.id);
+    return i >= 0 ? i : items.filter((x) => x.status === 'pending').findIndex((x) => x.id === c.id); // in flight
+  });
 
   useEffect(() => {
     if (gone) dispatch(closeCommentCard());
@@ -210,7 +231,7 @@ export function CommentCardPopover() {
     });
   }, [card, items]);
 
-  if (!card || index < 0) return null;
+  if (!card || !c) return null;
   return (
     <div
       ref={root}
@@ -218,7 +239,7 @@ export function CommentCardPopover() {
       className="fixed z-10 w-[340px] shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
-      <CommentCard id={card.id} index={index} popover />
+      <CommentCard id={card.id} index={Math.max(0, index)} popover />
     </div>
   );
 }
