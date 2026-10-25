@@ -29,7 +29,10 @@ export const commentsSlice = createSlice({
   // only a `comments` event replaces items; `replay` must not clear them (the server sends replay first)
   extraReducers: (b) =>
     b.addCase(connState, (s, a) => {
-      if (a.payload !== 'open') s.sendingIds = []; // the in-flight send may be lost with the socket
+      if (a.payload === 'open') return;
+      s.sendingIds = []; // the in-flight send may be lost with the socket
+      // the re-send was never confirmed (its stale initial push did not arrive): it may be lost too, so send it again next open
+      if (s.resent) { s.resent = false; s.unsynced = true; }
     }).addCase(serverEvent, (s, a) => {
       if (a.payload.kind === 'comments') {
         // drop an id once the echo shows it sent or gone; a foreign echo that still lists it as pending keeps it in flight

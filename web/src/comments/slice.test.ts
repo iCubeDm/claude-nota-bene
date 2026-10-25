@@ -137,6 +137,7 @@ it('offline edit survives a server push and is re-sent on open', () => {
   f.state('open');
   expect(f.sent).toHaveLength(1);
   f.ev({ kind: 'comments', items: [mk('a')] }); // stale initial push, skipped
+  expect(selectComments(store.getState())[0]!.text).toBe('offline');
   f.ev({ kind: 'comments', items: [mk('a', { text: 'srv' })] });
   expect(selectComments(store.getState())[0]!.text).toBe('srv');
 });
@@ -155,4 +156,23 @@ it('stale server push after the re-send is skipped once; a following edit keeps 
   expect(last.items.map((c) => c.text)).toEqual(['offline', 'later']);
   f.ev({ kind: 'comments', items: [mk('z')] });
   expect(selectComments(store.getState()).map((c) => c.id)).toEqual(['z']);
+});
+
+it('a socket that closes before the stale push arrives keeps the change unsynced and re-sends it on the next open', () => {
+  const f = fake(false);
+  const store = makeStore({ url: 'u', connect: f.connect });
+  f.ev({ kind: 'comments', items: [mk('a')] });
+  store.dispatch(editComment('a', 'offline'));
+  f.setOpen(true);
+  f.state('open');
+  expect(f.sent).toHaveLength(1);
+  f.setOpen(false);
+  f.state('closed'); // the re-send may never have arrived
+  expect(store.getState().comments).toMatchObject({ resent: false, unsynced: true });
+  f.ev({ kind: 'comments', items: [mk('a')] }); // a push while unsynced does not win
+  expect(selectComments(store.getState())[0]!.text).toBe('offline');
+  f.setOpen(true);
+  f.state('open');
+  expect(f.sent).toHaveLength(2);
+  expect((f.sent[1] as { items: Comment[] }).items[0]!.text).toBe('offline');
 });
