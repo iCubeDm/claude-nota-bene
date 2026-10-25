@@ -147,6 +147,7 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] Streaming markdown replies; code highlighting; mermaid and svg blocks rendered — verify: fake agent's markdown fixture renders headings, code and a mermaid diagram.
 - [ ] Messages sent while the agent works are injected mid-turn (`priority: 'next'`); ⌘Enter interrupts and sends (`'now'`); Stop button and Esc interrupt.
 - [ ] Tool lines (`▸ Tool · arg`), subagent tool lines indented, errored tool lines red.
+- [ ] **Expandable tool lines** (added 2026-10-25, as in Claude Code): click a tool line → the full input (the whole command, file path, or pretty JSON) and the tool's output (`tool_result` text; errors red), scrollable, collapsed again on a second click. Also after a reload and on resume (the transcript's tool results are replayed). — delivered in M1 (task M1-19).
 - [ ] Done line with duration and time; interrupted turns marked.
 - [ ] Permission cards (allow / deny) — moved into M0 from M4: without them the real agent stalls on its first prompt.
 - [ ] Transcript replay on reconnect and on resume (`getSessionMessages`); user images in replay come with attachments in M3.
