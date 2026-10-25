@@ -6,6 +6,7 @@ import { composeBatch } from './compose.ts';
 import { instructionOf, labelOf } from './labels.ts';
 import { clearImages, selectDraft, selectImages, selectUploading, setDraft } from '../composer/slice.ts';
 import { markSending, selectPending } from './slice.ts';
+import { activate } from '../tabs/slice.ts';
 
 export type SendResult = 'empty' | 'sent' | 'offline';
 
@@ -24,7 +25,7 @@ export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0])
  * the server echo; until then the ids sit in `sendingIds` so a second send cannot repeat them. On success the draft
  * and the composer images are cleared (comment images stay on their comments); when offline, everything is kept.
  * Images are numbered across the whole message: the composer's first, then each comment's in order. An upload still in
- * flight blocks the send ('empty': nothing happens, the button is disabled meanwhile).
+ * flight blocks the send ('empty': nothing happens, the button is disabled meanwhile). A send switches to the chat tab.
  */
 export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState) => {
   const st = getState();
@@ -48,5 +49,6 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
   d(markSending(ids));
   d(setDraft(''));
   d(clearImages());
+  d(activate('chat')); // sent from a file tab: the reply arrives in the chat (prototype parity)
   return 'sent';
 };

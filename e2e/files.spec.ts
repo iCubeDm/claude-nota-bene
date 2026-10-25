@@ -265,7 +265,10 @@ test('a comment on an md file goes out with its path and its mark survives a rel
   await page.getByRole('button', { name: /^(Add|Добавить)$/ }).click();
   await expect(cards(page)).toHaveCount(1);
   await expect(page.locator(`[data-pane="file:${MD}"] [data-hl="pending"]`)).toHaveCount(1);
+  await expect(tabOf(page, MD)).toHaveAttribute('aria-selected', 'true');
   await page.locator('#cSend').click();
+  // sent from the file tab: the chat comes forward, where the reply shows
+  await expect(chatTab(page)).toHaveAttribute('aria-selected', 'true');
   await expect.poll(() => frames.some((f) => f.includes(`[${MD}]`) && f.includes('уточнить конец'))).toBe(true);
   await expect(page.getByText(/agent is working|агент работает/)).toBeHidden();
 

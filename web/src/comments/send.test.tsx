@@ -9,6 +9,7 @@ import { Feed } from '@/feed/Feed.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent, useAppDispatch } from '@/store/store.ts';
 import { addImage, uploadFinished, uploadStarted } from '@/composer/slice.ts';
+import { openFile } from '@/tabs/slice.ts';
 import { sendBatch } from './send.ts';
 import { CommentsPanel } from './CommentsPanel.tsx';
 
@@ -239,4 +240,21 @@ it('labels follow the language at send time, not at add time', async () => {
   setLang('en');
   await userEvent.type(box, 'x{Enter}');
   expect(sentOf(sent[0]!).images?.[0]?.label).toBe('[image 1]');
+});
+
+it('a send from a file tab switches to the chat, where the reply shows; offline stays on the file', () => {
+  const { store } = setup([cm('c1')]);
+  act(() => { store.dispatch(openFile('notes.md')); });
+  expect(store.getState().tabs.active).toBe('file:notes.md');
+  let r: unknown;
+  act(() => { r = store.dispatch(sendBatch(false)); });
+  expect(r).toBe('sent');
+  expect(store.getState().tabs.active).toBe('chat');
+  cleanup();
+
+  const off = setup([cm('c2')], false).store;
+  act(() => { off.dispatch(openFile('notes.md')); });
+  act(() => { r = off.dispatch(sendBatch(false)); });
+  expect(r).toBe('offline');
+  expect(off.getState().tabs.active).toBe('file:notes.md');
 });
