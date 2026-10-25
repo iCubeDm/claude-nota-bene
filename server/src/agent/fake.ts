@@ -9,6 +9,8 @@ export type FakeTurn = {
   tools?: { name: string; input: Record<string, unknown>; output?: string; isError?: boolean }[];
   ask?: { toolName: string; input: Record<string, unknown> };
   crash?: boolean;
+  /** the reply text then ends with `images: <n>`, the number of images this turn received */
+  echoImages?: boolean;
 };
 
 /**
@@ -41,7 +43,7 @@ function whenAborted(signal: AbortSignal): Promise<void> {
 
 class FakeSession implements AgentSession {
   readonly messages: AsyncIterable<SDKMessage>;
-  private pending: string[] = []; // uuids of sends not yet started
+  private pending: { uuid: string; images: number }[] = []; // sends not yet started
   private wake: (() => void) | null = null;
   private closed = false;
   private turnCtl: AbortController | null = null; // set only while a turn runs
@@ -57,9 +59,9 @@ class FakeSession implements AgentSession {
     this.messages = { [Symbol.asyncIterator]: () => this.run() };
   }
 
-  send(m: { uuid: string; text: string; priority: 'next' | 'now' }): void {
+  send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: unknown[] }): void {
     if (this.closed) return;
-    this.pending.push(m.uuid);
+    this.pending.push({ uuid: m.uuid, images: m.images?.length ?? 0 });
     this.wake?.();
   }
 
@@ -80,8 +82,9 @@ class FakeSession implements AgentSession {
         this.wake = null;
       }
       if (this.closed) return;
-      const uuid = this.pending.shift()!;
-      yield* this.turn(this.turns[Math.min(this.turnNo, this.turns.length - 1)] ?? { text: '' }, uuid);
+      const { uuid, images } = this.pending.shift()!;
+      const base = this.turns[Math.min(this.turnNo, this.turns.length - 1)] ?? { text: '' };
+      yield* this.turn(base.echoImages ? { ...base, text: `${base.text}${base.text ? '\n' : ''}images: ${images}` } : base, uuid);
       if (this.closed) return;
     }
   }

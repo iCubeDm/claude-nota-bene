@@ -9,6 +9,7 @@ import type { AgentBackend } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager } from './session.ts';
 import { lastSession } from './state.ts';
+import { AttachmentStore } from './attachments.ts';
 
 let home: string;
 const prevHome = process.env.NOTA_BENE_HOME;
@@ -403,5 +404,73 @@ describe('busy cannot get stuck', () => {
     const f = await feedOf(attached);
     expect(f.waiting).toEqual([]);
     expect(f.busy).toBe(false);
+  });
+
+  describe('image attachments', () => {
+    const png = (n: string) => Buffer.from(`png-${n}`);
+
+    it('a send with two refs reaches the agent as images and the hub event carries refs only', async () => {
+      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
+      const refs = ['a', 'b'].map((n, i) => ({ id: attachments.put(png(n), 'image/png'), mediaType: 'image/png' as const, label: `Comment ${i + 1}` }));
+      const got: unknown[] = [];
+      const backend: AgentBackend = {
+        history: async () => [],
+        start: () => ({
+          messages: (async function* () { await new Promise(() => {}); })(),
+          send: (m) => { got.push(m); }, interrupt: async () => {}, close() {},
+        }),
+      };
+      const hub = new EventHub();
+      const events: ServerEvent[] = [];
+      hub.attach({ send: (d) => events.push(JSON.parse(d) as ServerEvent) });
+      const s = await createSessionManager({ hub, backend, cwd: '/proj', attachments });
+      s.send({ id: 'u1', text: 'see', images: refs });
+      await until(() => got.length === 1);
+      expect(got[0]).toMatchObject({
+        text: 'see',
+        images: [
+          { mediaType: 'image/png', data: png('a').toString('base64'), label: 'Comment 1' },
+          { mediaType: 'image/png', data: png('b').toString('base64'), label: 'Comment 2' },
+        ],
+      });
+      const user = events.find((e) => e.kind === 'user');
+      expect(user).toMatchObject({ images: refs });
+      expect(JSON.stringify(events)).not.toContain(png('a').toString('base64'));
+    });
+
+    it('an unknown ref id is reported as attach; the text and the other images still go out', async () => {
+      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
+      const ok = { id: attachments.put(png('a'), 'image/png'), mediaType: 'image/png' as const, label: 'ok' };
+      const bad = { id: 'f'.repeat(64), mediaType: 'image/png' as const, label: 'bad' };
+      const got: { text: string; images?: unknown[] }[] = [];
+      const backend: AgentBackend = {
+        history: async () => [],
+        start: () => ({
+          messages: (async function* () { await new Promise(() => {}); })(),
+          send: (m) => { got.push(m); }, interrupt: async () => {}, close() {},
+        }),
+      };
+      const hub = new EventHub();
+      const events: ServerEvent[] = [];
+      hub.attach({ send: (d) => events.push(JSON.parse(d) as ServerEvent) });
+      const s = await createSessionManager({ hub, backend, cwd: '/proj', attachments });
+      s.send({ id: 'u1', text: 'hello', images: [bad, ok] });
+      await until(() => got.length === 1);
+      expect(events).toContainEqual(expect.objectContaining({ kind: 'server-error', where: 'attach' }));
+      expect(got[0]!.text).toBe('hello');
+      expect(got[0]!.images).toHaveLength(1);
+    });
+
+    it('fake echoImages reports how many images the turn received', async () => {
+      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
+      const ref = { id: attachments.put(png('a'), 'image/png'), mediaType: 'image/png' as const, label: 'x' };
+      const hub = new EventHub();
+      const events: ServerEvent[] = [];
+      hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind !== 'replay') events.push(e); } });
+      const s = await createSessionManager({ hub, backend: fakeBackend([{ text: 'ok', echoImages: true }]), cwd: '/proj', attachments });
+      s.send({ id: 'u1', text: 'hi', images: [ref, ref] });
+      await until(() => sdkOf(events, 'result').length === 1);
+      expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('ok\\nimages: 2');
+    });
   });
 });

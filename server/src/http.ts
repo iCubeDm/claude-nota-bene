@@ -73,7 +73,8 @@ export function httpHandler(o: {
       const qi = raw.indexOf('?');
       const rawPath = qi === -1 ? raw : raw.slice(0, qi);
 
-      const route = o.extra?.[rawPath];
+      // /attach/<id> is dynamic: matched by prefix
+      const route = o.extra?.[rawPath.startsWith('/attach/') ? '/attach/' : rawPath];
       if (route) {
         route(req, res);
         return;

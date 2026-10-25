@@ -6,6 +6,7 @@ import { parseClientMessage } from '@nota-bene/shared';
 import type { Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
+import { AttachmentStore, attachmentRoutes } from './attachments.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
 import { completeFiles } from './files.ts';
@@ -41,8 +42,10 @@ export async function startServer(o: {
   installProcessHandlers();
   hubs.add(hub);
   try {
+    const attachments = new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
     const manager = await createSessionManager({
       hub,
+      attachments,
       backend: o.backend,
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
@@ -62,7 +65,7 @@ export async function startServer(o: {
       hub,
       allowedHosts,
       allowedOrigins,
-      extra: fileRoutes({ root, hub, complete: (q) => completeFiles(root, q) }),
+      extra: { ...fileRoutes({ root, hub, complete: (q) => completeFiles(root, q) }), ...attachmentRoutes(attachments, hub) },
       webDist: o.webDist,
       info: () => {
         const { id, root } = manager.info();
@@ -105,7 +108,7 @@ export async function startServer(o: {
                 reportError(hub, 'comments', e); // the message itself must still go out
               }
             }
-            manager.send({ id: msg.id, text: msg.text, ...(msg.force ? { force: true } : {}) });
+            manager.send({ id: msg.id, text: msg.text, ...(msg.force ? { force: true } : {}), ...(msg.images?.length ? { images: msg.images } : {}) });
             break;
           case 'comments':
             try {
