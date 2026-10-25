@@ -14,7 +14,15 @@ import { browserPip, MediaController, type PipApi } from '../media/mediaControll
 import { filesSlice } from '../files/slice.ts';
 import { readSavedDirs, treeKey, treeSlice } from '../tree/slice.ts';
 import { statsSlice } from '../stats/slice.ts';
+import { toast } from '../shell/toast.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
+
+/** A server error is a toast (R-M4-5), never a feed item. A middleware, not a reducer: reducers have no side effects. */
+const toastMiddleware: Middleware = () => (next) => (action) => {
+  // not `busy`: the server broadcasts those refusals to every window, and a race outcome is not a server error (the asking control shows it inline)
+  if (serverEvent.match(action) && action.payload.kind === 'server-error' && action.payload.where !== 'busy') toast(t('serverError', action.payload.where), action.payload.message);
+  return next(action);
+};
 
 /** The only way server data enters the store. */
 export const serverEvent = createAction<ServerEvent>('server/event');
@@ -91,7 +99,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   });
   const store = configureStore({
     reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(mediaMiddleware(media)),
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
   mediaByStore.set(store, media);

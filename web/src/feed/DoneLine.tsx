@@ -19,13 +19,6 @@ export function DoneLine({ item }: { item: Extract<FeedItem, { kind: 'done' }> }
 
 export function NoticeLine({ item }: { item: Extract<FeedItem, { kind: 'notice' }> }) {
   const t = useT();
-  if (item.tone === 'error') {
-    return (
-      <div data-kind="notice" role="alert" className={`${BASE} whitespace-pre-wrap text-destructive`}>
-        {t('serverError', item.where)}: {item.text}
-      </div>
-    );
-  }
   return (
     <div data-kind="notice" className={LINE}>
       {t('resumed', item.text)}

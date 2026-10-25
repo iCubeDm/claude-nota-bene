@@ -14,6 +14,7 @@ import { Footer } from './shell/Footer.tsx';
 import { Panes } from './tabs/Panes.tsx';
 import { TabStrip } from './tabs/TabStrip.tsx';
 import { Header } from './shell/Header.tsx';
+import { Toasts } from './shell/Toasts.tsx';
 import { useFavicon } from './shell/Favicon.ts';
 
 export function App() {
@@ -49,6 +50,7 @@ export function App() {
       {pending && <CommentPopup pending={pending} onClose={close} />}
       <CommentCardPopover />
       <Footer />
+      <Toasts />
     </TooltipProvider>
   );
 }

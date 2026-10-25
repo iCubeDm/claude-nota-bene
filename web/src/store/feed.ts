@@ -14,8 +14,8 @@ export type FeedItem =
   | { kind: 'marker'; what: 'compacted' | 'cleared'; pre?: number; ts: number }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
-  /** `text`: the resumed session id, or for tone 'error' the server's message (`where` = the failing part); translated at render */
-  | { kind: 'notice'; text: string; tone?: 'error'; where?: string };
+  /** `text`: the resumed session id; translated at render. (Server errors are toasts, not feed items: R-M4-5.) */
+  | { kind: 'notice'; text: string };
 
 export type FeedState = {
   items: FeedItem[];
@@ -226,11 +226,10 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       return { ...s, session: { id: ev.id, root: ev.root, title: ev.title, model: ev.model } };
     case 'resumed':
       return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
-    case 'server-error': // shown to the user, never swallowed (M0 error policy); live only, not stored in the replay
-      return { ...s, items: [...s.items, { kind: 'notice', text: ev.message, tone: 'error', where: ev.where }] };
     case 'comments': // handled by the comments store, not the feed
     case 'stats': // handled by the stats store (M4)
     case 'mode':
+    case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
     default: {
       const never: never = ev;

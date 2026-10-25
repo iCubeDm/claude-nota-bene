@@ -1,4 +1,4 @@
-import { createAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
+import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
 import { MODES, type Mode } from '@nota-bene/shared';
 import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
 
@@ -8,6 +8,8 @@ import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
  */
 export type SwitchPhase = 'asked' | 'committed';
 export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; restoreAfterPlan: Mode | null; switching: SwitchPhase | null;
+  /** the running "switch" is a ↻ restart (same phases and end; only the header label differs) */
+  restarting: boolean;
   /** the SDK's predicted next prompt; ghost text in an empty, idle composer. Cleared by anything that moves the conversation on. */
   suggestion: string;
   /** the session last announced, to tell a real change from the server's title refresh (same id, new title) */
@@ -15,7 +17,7 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, suggestion: '', seen: null };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, restarting: false, suggestion: '', seen: null };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -33,7 +35,7 @@ export const controlsSlice = createSlice({
     /** M4-07 calls this when the plan card is approved: the CLI then drops to `default`, and we go back to where we were. */
     planApproved: (s) => void (s.restoreAfterPlan = s.modeBeforePlan),
     restoreCleared: (s) => void (s.restoreAfterPlan = null),
-    switchStarted: (s) => void (s.switching = 'asked'),
+    switchStarted: (s, a: PayloadAction<boolean | undefined>) => void ((s.switching = 'asked'), (s.restarting = a.payload === true)),
   },
   extraReducers: (b) => {
     b.addCase(modeSet, (s, a) => setMode(s, a.payload));
@@ -59,6 +61,7 @@ export const controlsSlice = createSlice({
       if (ev.kind === 'replay' && s.switching === 'asked') s.switching = 'committed';
       else if (ev.kind === 'session' && s.switching === 'committed') s.switching = null;
       else if (ev.kind === 'server-error' && ev.where === 'switch') s.switching = null;
+      if (!s.switching) s.restarting = false;
     });
   },
 });
@@ -69,6 +72,7 @@ const { restoreCleared, switchStarted } = controlsSlice.actions;
 export const selectMode = (s: RootState): Mode | null => s.controls.mode;
 export const selectSuggestion = (s: RootState): string => s.controls.suggestion;
 export const selectSwitching = (s: RootState): boolean => s.controls.switching !== null;
+export const selectRestarting = (s: RootState): boolean => s.controls.restarting;
 
 /** Optimistic: set locally, then send. The server echo sets the same value again and never sends (reducers cannot). */
 export const pickMode = (mode: Mode): AppThunk => (dispatch, getState, { send }) => {
@@ -118,6 +122,18 @@ export const switchSession = (id: string | null, dir: string): AppThunk<SwitchRe
   if (st.controls.switching) return 'switching';
   if (st.feed.busy) return 'busy';
   if (st.conn.state !== 'open' || !send({ type: 'switch', id, dir })) return 'offline';
-  dispatch(switchStarted());
+  dispatch(switchStarted(false));
   return 'sent';
+};
+
+/**
+ * ↻: restart the agent and continue the same session (R-M4-1). Unlike a switch it is allowed while busy (R-M4-4, the
+ * escape hatch for a stuck agent; the server interrupts first). It rides the switch phases: the server answers with an
+ * empty `replay` and the same session again, and refuses with a `switch` server-error.
+ */
+export const restartAgent = (): AppThunk<boolean> => (dispatch, getState, { send }) => {
+  const st = getState();
+  if (st.controls.switching || st.conn.state !== 'open' || !send({ type: 'restart' })) return false;
+  dispatch(switchStarted(true));
+  return true;
 };
