@@ -7,9 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventHub } from './hub.ts';
 import { httpHandler } from './http.ts';
-import { fileRoutes } from './fileRoutes.ts';
+import { complete, fileRoutes } from './fileRoutes.ts';
 
 let dir: string;
+let root: string;
 let server: http.Server;
 let port: number;
 const hub = new EventHub();
@@ -18,7 +19,7 @@ const allowedOrigins: string[] = [];
 
 beforeAll(async () => {
   dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-routes-')));
-  const root = path.join(dir, 'proj');
+  root = path.join(dir, 'proj');
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   fs.mkdirSync(path.join(root, 'sub'));
   fs.writeFileSync(path.join(root, '2.md'), '2');
@@ -32,6 +33,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(dir, 'outside'));
   fs.writeFileSync(path.join(dir, 'outside', 'secret.txt'), 'secret');
   fs.symlinkSync(path.join(dir, 'outside'), path.join(root, 'escape'));
+  fs.symlinkSync(path.join(dir, 'nowhere'), path.join(root, 'dangling'));
   server = http.createServer(
     httpHandler({
       hub,
@@ -75,8 +77,10 @@ describe('/tree', () => {
     const r = await req('GET', '/tree');
     expect(r.status).toBe(200);
     const names = JSON.parse(r.body).map((e: { name: string }) => e.name);
-    expect(names.filter((n: string) => n !== 'escape').slice(0, 3)).toEqual(['sub', '2.md', '10.md']);
+    expect(names.slice(0, 3)).toEqual(['sub', '2.md', '10.md']);
     expect(names).not.toContain('.git');
+    expect(names).not.toContain('dangling');
+    expect(names).not.toContain('escape'); // a symlink out of the root is hidden, /file refuses it too
   });
   it('missing folder is 404 with [] as json; outside is 403', async () => {
     const r = await req('GET', '/tree?path=nope');
@@ -125,6 +129,57 @@ describe('/file', () => {
   });
   it('a directory is 404', async () => {
     expect((await req('GET', '/file?path=sub')).status).toBe(404);
+  });
+});
+
+describe('complete()', () => {
+  const sess = (f: (q: string) => Promise<string[]>) => ({ fileSuggestions: f });
+  const many = Array.from({ length: 50 }, (_, i) => `f${i}.md`);
+  it('uses the CLI hits when there are any, minus the query itself, in the CLI order', async () => {
+    expect(await complete({ session: sess(async () => ['zz.md', 'a.md', 'ab']), root }, 'ab')).toEqual(['zz.md', 'a.md']);
+  });
+  it('falls back to the walk when the CLI throws or returns []', async () => {
+    expect((await complete({ session: sess(async () => { throw new Error('x'); }), root }, 'hello'))[0]).toBe('hello.md');
+    expect((await complete({ session: sess(async () => []), root }, 'hello'))[0]).toBe('hello.md');
+  });
+  it('an empty query gives the CLI relative hits, or []', async () => {
+    expect(await complete({ session: sess(async () => []), root }, '')).toEqual([]);
+    expect(await complete({ session: sess(async () => ['a.md', '/abs/out.md']), root }, '')).toEqual(['a.md']);
+  });
+  it('a CLI that returns only absolute outside paths still gives project files', async () => {
+    const out = ['/Users/x/.claude/skills/hello/SKILL.md', '/Users/x/.claude/skills/b.md'];
+    expect(await complete({ session: sess(async () => out), root }, 'hello')).toEqual(['hello.md']);
+  });
+  it('an absolute path inside the root becomes relative', async () => {
+    const hits = await complete({ session: sess(async () => [path.join(root, 'sub', 'x.md'), path.join(root, 'sub') + '/']), root }, 'zzzq');
+    expect(hits).toEqual(['sub/x.md', 'sub/']);
+  });
+  it('a new file the CLI does not know comes first, even when the CLI fills the page', async () => {
+    const d = path.join(dir, 'fresh');
+    fs.mkdirSync(d);
+    fs.writeFileSync(path.join(d, 'report.md'), '');
+    const cliHits = Array.from({ length: 30 }, (_, i) => `docs/r-e-p${i}.md`);
+    const hits = await complete({ session: sess(async () => cliHits), root: d }, 'rep');
+    expect(hits[0]).toBe('report.md');
+    expect(hits).toHaveLength(30);
+  });
+  it('dedupes a folder returned with and without the trailing slash', async () => {
+    const hits = await complete({ session: sess(async () => ['sub']), root }, 'sub');
+    expect(hits.filter((p) => p.replace(/\/$/, '') === 'sub')).toEqual([]); // that is the query itself
+    expect(new Set(hits).size).toBe(hits.length);
+  });
+  it('a CLI that never answers still gives our hits after the timeout', async () => {
+    const t = Date.now();
+    const hits = await complete({ session: sess(() => new Promise(() => {})), root, timeoutMs: 50 }, 'hello');
+    expect(hits[0]).toBe('hello.md');
+    expect(Date.now() - t).toBeLessThan(1000);
+  });
+  it('never returns more than 30', async () => {
+    expect(await complete({ session: sess(async () => many), root }, 'f')).toHaveLength(30);
+    const d = path.join(dir, 'many'); // fresh root: listFiles caches per root
+    fs.mkdirSync(d);
+    for (let i = 0; i < 40; i++) fs.writeFileSync(path.join(d, `zz${i}.txt`), '');
+    expect((await complete({ session: sess(async () => []), root: d }, 'zz')).length).toBe(30);
   });
 });
 

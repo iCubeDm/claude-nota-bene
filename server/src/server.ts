@@ -9,8 +9,7 @@ import { guard, reportError } from './errors.ts';
 import { AttachmentStore, attachmentRoutes } from './attachments.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
-import { completeFiles } from './files.ts';
-import { fileRoutes } from './fileRoutes.ts';
+import { complete, fileRoutes } from './fileRoutes.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
 import { createSessionManager } from './session.ts';
 import { stateDir } from './state.ts';
@@ -65,7 +64,7 @@ export async function startServer(o: {
       hub,
       allowedHosts,
       allowedOrigins,
-      extra: { ...fileRoutes({ root, hub, complete: (q) => completeFiles(root, q) }), ...attachmentRoutes(attachments, hub) },
+      extra: { ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root }, q) }), ...attachmentRoutes(attachments, hub) },
       webDist: o.webDist,
       info: () => {
         const { id, root } = manager.info();

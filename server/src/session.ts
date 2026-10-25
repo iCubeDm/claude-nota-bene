@@ -14,6 +14,8 @@ export type SessionManager = {
   interrupt(): void;
   answer(permissionId: string, allow: boolean): void;
   info(): { id: string | null; root: string };
+  /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
+  fileSuggestions(query: string): Promise<string[]>;
   /** Called whenever the session id changes to a real id (first init, or a different id after resume/restart). */
   onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
@@ -155,6 +157,7 @@ export async function createSessionManager(o: { hub: EventHub; backend: AgentBac
       pending.get(permissionId)?.(allow);
     },
     info: () => ({ id: sessionId, root: cwd }),
+    fileSuggestions: (query) => (agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
     onSessionId(cb) {
       idListeners.push(cb);
     },

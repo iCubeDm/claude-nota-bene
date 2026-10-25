@@ -10,6 +10,8 @@ export interface AgentSession {
   readonly messages: AsyncIterable<SDKMessage>; // ends after close()
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: SendImage[] }): void;
   interrupt(): Promise<void>; // no-op when idle
+  /** The CLI's own @ search: project-relative paths, best first. May reject; [] while the CLI is still indexing. */
+  fileSuggestions(query: string): Promise<string[]>;
   close(): void;
 }
 

@@ -53,6 +53,7 @@ class SdkSession implements AgentSession {
   readonly messages: AsyncIterable<SDKMessage>;
   private readonly input = new InputQueue();
   private readonly q: ReturnType<typeof query>;
+  private readonly warmup: NodeJS.Timeout;
 
   constructor(o: { cwd: string; resume?: string; ask: PermissionAsk }) {
     this.q = query({
@@ -72,6 +73,19 @@ class SdkSession implements AgentSession {
       },
     });
     this.messages = this.q;
+    // warm the CLI's file index (it answers [] for a few seconds after start); the failure does not matter
+    this.warmup = setTimeout(() => void this.fileSuggestions('').catch(() => {}), 2000);
+    this.warmup.unref();
+  }
+
+  async fileSuggestions(query: string): Promise<string[]> {
+    // `request` is the SDK's internal control channel, not public API (the prototype does the same), so it is
+    // reached through a narrow cast; any throw or odd shape is the caller's cue to fall back
+    const { q } = this as unknown as {
+      q: { request(r: { subtype: 'file_suggestions'; query: string }, o?: { signal?: AbortSignal }): Promise<{ response: { suggestions: { path: string }[] } }> };
+    };
+    const r = await q.request({ subtype: 'file_suggestions', query }, { signal: AbortSignal.timeout(1500) });
+    return r.response.suggestions.map((x) => x.path);
   }
 
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: SendImage[] }): void {
@@ -89,6 +103,7 @@ class SdkSession implements AgentSession {
   }
 
   close(): void {
+    clearTimeout(this.warmup);
     this.input.end();
     try {
       this.q.close();

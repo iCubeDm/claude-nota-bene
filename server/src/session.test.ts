@@ -50,7 +50,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
-        send() {}, interrupt: async () => {}, close() {},
+        send() {}, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -61,6 +61,21 @@ describe('session manager', () => {
     });
     expect(JSON.stringify(sdkOf(events, 'user'))).not.toContain('AAAA');
     expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('AAAA'); // only tool_result images are stripped
+  });
+
+  it('fileSuggestions delegates to the agent and rejects once it has died', async () => {
+    const backend: AgentBackend = {
+      history: async () => [],
+      start: () => ({
+        messages: (async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })(),
+        send() {}, interrupt: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], close() {},
+      }),
+    };
+    const { events, make } = setup(backend);
+    const s = await make();
+    expect(await s.fileSuggestions('a')).toEqual(['hit-a']);
+    await until(() => sdkOf(events, 'result').length === 1); // the crash became an error result; the agent is gone
+    await expect(s.fileSuggestions('a')).rejects.toThrow('no agent');
   });
 
   it('send emits user then the agent reply', async () => {
@@ -86,7 +101,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { calls.push({ priority: m.priority }); a.send(m); },
           interrupt: () => { interrupts++; return a.interrupt(); },
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -170,7 +185,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { log.push(`send:${m.priority}`); a.send(m); },
           interrupt: () => { log.push('interrupt'); return a.interrupt(); },
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -200,7 +215,7 @@ describe('session manager', () => {
           ...a,
           send: (m) => a.send(m),
           interrupt: () => a.interrupt(),
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
           messages: (async function* () {
             for await (const m of a.messages) {
               yield m;
@@ -234,7 +249,7 @@ describe('session manager', () => {
         })(),
         send: () => {},
         interrupt: async () => {},
-        close: () => { closed++; },
+        fileSuggestions: async () => [], close: () => { closed++; },
       }),
     };
     const { events, make } = setup(backend);
@@ -255,7 +270,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { if (first) { first = false; throw new Error('send failed'); } a.send(m); },
           interrupt: () => a.interrupt(),
-          close: () => a.close(),
+          fileSuggestions: async () => [], close: () => a.close(),
         };
       },
     };
@@ -284,7 +299,7 @@ describe('session manager', () => {
           })(),
           send: (m) => { delivered.push(`${mine}:${m.text}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          close: () => {},
+          fileSuggestions: async () => [], close: () => {},
         };
       },
     };
@@ -357,7 +372,7 @@ describe('busy cannot get stuck', () => {
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
-        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), close: () => a.close() };
+        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), fileSuggestions: async () => [], close: () => a.close() };
       },
     };
     const { hub, events, make } = setup(backend);
@@ -388,7 +403,7 @@ describe('busy cannot get stuck', () => {
         })(),
         send: () => { sent++; },
         interrupt: async () => {},
-        close: () => {},
+        fileSuggestions: async () => [], close: () => {},
       }),
     };
     const { hub, events, make } = setup(backend);
@@ -417,7 +432,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
         }),
       };
       const hub = new EventHub();
@@ -447,7 +462,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: (async function* () { await new Promise(() => {}); })(),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, fileSuggestions: async () => [], close() {},
         }),
       };
       const hub = new EventHub();

@@ -11,6 +11,8 @@ export type FakeTurn = {
   crash?: boolean;
   /** the reply text then ends with `images: <n>`, the number of images this turn received */
   echoImages?: boolean;
+  /** what `fileSuggestions` returns (default none) */
+  suggestions?: string[];
 };
 
 /**
@@ -67,6 +69,10 @@ class FakeSession implements AgentSession {
 
   async interrupt(): Promise<void> {
     this.turnCtl?.abort();
+  }
+
+  async fileSuggestions(): Promise<string[]> {
+    return this.turns.find((t) => t.suggestions)?.suggestions ?? [];
   }
 
   close(): void {

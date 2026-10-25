@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -65,7 +66,7 @@ describe('listDir / listFiles', () => {
     fs.writeFileSync(path.join(d, '10.md'), '');
     fs.writeFileSync(path.join(d, '2.md'), '');
     fs.writeFileSync(path.join(d, '.DS_Store'), '');
-    expect(await listDir(d)).toEqual([
+    expect(await listDir(d, d)).toEqual([
       { name: 'z', dir: true },
       { name: '2.md', dir: false },
       { name: '10.md', dir: false },
@@ -78,7 +79,7 @@ describe('listDir / listFiles', () => {
     fs.writeFileSync(path.join(d, 'node_modules/x.js'), '');
     fs.writeFileSync(path.join(d, 'src/deep/a.ts'), '');
     fs.writeFileSync(path.join(d, 'top.md'), '');
-    expect((await listFiles(d)).sort()).toEqual(['src/deep/a.ts', 'top.md']);
+    expect((await listFiles(d)).sort()).toEqual(['src/', 'src/deep/', 'src/deep/a.ts', 'top.md']);
   });
   it('listFiles skips symlinks to directories and ones leaving the root', async () => {
     const d = path.join(base, 'lf2');
@@ -87,6 +88,59 @@ describe('listDir / listFiles', () => {
     fs.symlinkSync(path.join(d, 'real'), path.join(d, 'dirlink'));
     fs.symlinkSync(path.join(outside, 'file'), path.join(d, 'out.md'));
     fs.symlinkSync(path.join(d, 'real/in.md'), path.join(d, 'ok.md'));
-    expect((await listFiles(d)).sort()).toEqual(['ok.md', 'real/in.md']);
+    expect((await listFiles(d)).sort()).toEqual(['ok.md', 'real/', 'real/in.md']);
+  });
+  it('listFiles skips build output and caches', async () => {
+    const d = path.join(base, 'lf3');
+    for (const n of ['dist', 'build', '.next', '__pycache__', '.venv', 'venv', '.cache', 'keep']) {
+      fs.mkdirSync(path.join(d, n), { recursive: true });
+      fs.writeFileSync(path.join(d, n, 'f.txt'), '');
+    }
+    expect((await listFiles(d)).sort()).toEqual(['keep/', 'keep/f.txt']);
+  });
+  it('listFiles uses git ls-files in a repo: untracked yes, ignored and deleted no', async () => {
+    const d = path.join(base, 'lf4');
+    fs.mkdirSync(path.join(d, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.gitignore'), 'ignored.md\ndist\n');
+    fs.writeFileSync(path.join(d, 'src/a.ts'), '');
+    fs.writeFileSync(path.join(d, 'gone.md'), '');
+    fs.writeFileSync(path.join(d, 'ignored.md'), '');
+    fs.writeFileSync(path.join(d, 'Отчёт.md'), '');
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: d, stdio: 'ignore' });
+    git('init');
+    git('add', 'gone.md', 'src/a.ts');
+    fs.rmSync(path.join(d, 'gone.md'));
+    fs.writeFileSync(path.join(d, 'new.md'), '');
+    expect((await listFiles(d)).sort()).toEqual(['.gitignore', 'src/', 'src/a.ts', 'new.md', 'Отчёт.md'].sort());
+  });
+  it('git output: build dirs are dropped even without a .gitignore', async () => {
+    const d = path.join(base, 'lf5');
+    for (const n of ['node_modules/p', 'src/.venv', 'dist', 'src']) fs.mkdirSync(path.join(d, n), { recursive: true });
+    for (const f of ['node_modules/p/i.js', 'src/.venv/x.py', 'dist/o.js', 'src/a.ts', 'top.md']) fs.writeFileSync(path.join(d, f), '');
+    execFileSync('git', ['init'], { cwd: d, stdio: 'ignore' });
+    expect((await listFiles(d)).sort()).toEqual(['src/', 'src/a.ts', 'top.md']);
+  });
+  it('a repo where git lists nothing falls back to the walk', async () => {
+    const d = path.join(base, 'lf6');
+    fs.mkdirSync(path.join(d, 'a'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.gitignore'), '*\n'); // ignores everything, itself included: ls-files prints nothing
+    fs.writeFileSync(path.join(d, 'a/f.md'), '');
+    execFileSync('git', ['init'], { cwd: d, stdio: 'ignore' });
+    expect((await listFiles(d)).sort()).toEqual(['.gitignore', 'a/', 'a/f.md']);
+  });
+  it('serves the stale list after the TTL and refreshes in the background', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const d = path.join(base, 'lf7');
+      fs.mkdirSync(d);
+      fs.writeFileSync(path.join(d, 'one.md'), '');
+      expect(await listFiles(d)).toEqual(['one.md']);
+      fs.writeFileSync(path.join(d, 'two.md'), '');
+      vi.setSystemTime(Date.now() + 11_000);
+      expect(await listFiles(d)).toEqual(['one.md']); // stale, instantly
+      await vi.waitFor(async () => expect((await listFiles(d)).sort()).toEqual(['one.md', 'two.md']));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
