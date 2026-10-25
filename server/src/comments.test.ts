@@ -52,6 +52,25 @@ describe('CommentStore', () => {
     s.adopt('sess');
     expect(s.get('sess').map((x) => [x.id, x.text])).toEqual([['a', 'stored'], ['b', 't-b']]);
   });
+  it('adopt prefers the sent copy over a stored pending one', () => {
+    const s = new CommentStore({ dir });
+    s.set('sess', [c('a'), { ...c('b'), status: 'sent', sentIn: 'u0' }]);
+    s.set(null, [{ ...c('a'), status: 'sent', sentIn: 'u1' }, c('b')]);
+    s.adopt('sess');
+    expect(s.get('sess').map((x) => [x.id, x.status, x.sentIn])).toEqual([['a', 'sent', 'u1'], ['b', 'sent', 'u0']]);
+  });
+  it('merge keeps stored sent comments: a pending copy stays sent, a missing one is re-appended', () => {
+    const s = new CommentStore({ dir });
+    const sent = (id: string): Comment => ({ ...c(id), status: 'sent', sentIn: 'u1' });
+    s.set('m', [sent('a'), sent('b'), c('p')]);
+    const out = s.merge('m', [{ ...c('a'), text: 'stale' }, c('p'), c('n')]);
+    expect(out.map((x) => [x.id, x.status])).toEqual([['a', 'sent'], ['p', 'pending'], ['n', 'pending'], ['b', 'sent']]);
+    expect(out[0]).toEqual(sent('a'));
+    expect(s.get('m')).toEqual(out);
+    // the in-memory (pre-init) set follows the same rule
+    s.set(null, [sent('x')]);
+    expect(s.merge(null, [c('x')])).toEqual([sent('x')]);
+  });
   it('a non-ENOENT read error is rethrown, not read as []', () => {
     fs.mkdirSync(path.join(dir, 'dirasfile.json'));
     expect(() => new CommentStore({ dir }).get('dirasfile')).toThrow();

@@ -172,3 +172,18 @@ it('a foreign comments event that still lists our ids as pending does not re-ena
   expect(store.getState().comments.sendingIds).toEqual([]);
   expect(sent).toHaveLength(1);
 });
+
+it('with sent comments server-owned, the echo of a racing stale set reports them sent: in-flight ids clear, no second send', async () => {
+  const { sent, store, box } = setup([cm('c1')]);
+  await userEvent.type(box, 'go{Enter}');
+  // another window's stale full set reached the server first: its echo still lists c1 pending
+  act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [cm('c1')] })));
+  expect(store.getState().comments.sendingIds).toEqual(['c1']);
+  // the server's markSent echo, and the echo of any later stale set (the server keeps its sent copy)
+  act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [cm('c1', { status: 'sent', sentIn: 'm' })] })));
+  act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [cm('c1', { status: 'sent', sentIn: 'm' })] })));
+  expect(store.getState().comments.sendingIds).toEqual([]);
+  await userEvent.type(box, 'again{Enter}');
+  expect(sent).toHaveLength(2);
+  expect(sentOf(sent[1]!).commentIds).toBeUndefined();
+});

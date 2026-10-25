@@ -103,8 +103,11 @@ export async function startServer(o: {
             manager.send({ id: msg.id, text: msg.text, ...(msg.force ? { force: true } : {}) });
             break;
           case 'comments':
-            store.set(manager.info().id, msg.items);
-            broadcastComments(msg.items);
+            try {
+              broadcastComments(store.merge(manager.info().id, msg.items));
+            } catch (e) {
+              reportError(hub, 'comments', e); // nothing stored, nothing broadcast; the socket stays up
+            }
             break;
           case 'interrupt':
             manager.interrupt();

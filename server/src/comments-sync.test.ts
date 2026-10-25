@@ -150,4 +150,49 @@ describe('comment sync', () => {
     a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
     await until(() => lastComments(a)?.some((x) => x.id === 'o') === true);
   });
+  it('a racing client cannot turn a sent comment back to pending or drop it', async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a'), c('b')] }));
+    await until(() => lastComments(a)?.length === 2);
+    a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi', commentIds: ['a'] }));
+    await until(() => lastComments(a)?.find((x) => x.id === 'a')?.status === 'sent');
+    // a stale full set from another window: 'a' still pending
+    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a', { text: 'stale' }), c('b')] }));
+    await until(() => lastComments(a)?.find((x) => x.id === 'a')?.text === 't-a' && a.events.filter((e) => e.kind === 'comments').length >= 4);
+    expect(lastComments(a)!.find((x) => x.id === 'a')).toMatchObject({ status: 'sent', sentIn: 'u1', text: 't-a' });
+    // a set that lacks the sent comment keeps it
+    a.ws.send(JSON.stringify({ type: 'comments', items: [c('b')] }));
+    await until(() => a.events.filter((e) => e.kind === 'comments').length >= 5);
+    expect(lastComments(a)!.map((x) => [x.id, x.status])).toEqual([['b', 'pending'], ['a', 'sent']]);
+  });
+
+  it('a failing comments write is reported to the client and the server keeps serving', async () => {
+    store().set('sess-ro', [c('a')]);
+    const s = await boot({ resume: 'sess-ro' });
+    const a = await connect(s.url);
+    await until(() => lastComments(a) !== undefined);
+    const dir = path.join(home, 'comments');
+    fs.chmodSync(dir, 0o555);
+    closers.push(async () => { fs.chmodSync(dir, 0o755); });
+    a.ws.send(JSON.stringify({ type: 'comments', items: [c('a'), c('b')] }));
+    await until(() => a.events.some((e) => e.kind === 'server-error'));
+    expect(a.events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'comments' });
+    expect(store().get('sess-ro')).toEqual([c('a')]);
+    a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
+    await until(() => a.events.some(isResult));
+  });
+
+  it('a failing markSent still delivers the send', async () => {
+    store().set('sess-ro2', [c('a')]);
+    const s = await boot({ resume: 'sess-ro2' });
+    const a = await connect(s.url);
+    await until(() => lastComments(a) !== undefined);
+    const dir = path.join(home, 'comments');
+    fs.chmodSync(dir, 0o555);
+    closers.push(async () => { fs.chmodSync(dir, 0o755); });
+    a.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi', commentIds: ['a'] }));
+    await until(() => a.events.some(isResult));
+    expect(a.events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'comments' });
+  });
 });
