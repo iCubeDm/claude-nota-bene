@@ -70,6 +70,7 @@ export const ru = {
   cancel: 'Отменить',
   editTip: '⌘/Ctrl+Enter или ✓ — сохранить\nEsc или ✕ — отменить\nклик мимо карточки — сохранить',
   orphaned: 'фрагмент изменился',
+  fileChanged: 'файл изменился с тех пор',
   sentTag: 'отправлено',
   // emoji menu (M1-12)
   'emojiTip': 'Эмодзи',

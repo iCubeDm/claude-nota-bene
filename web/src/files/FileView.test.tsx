@@ -1,13 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ServerEvent } from '@nota-bene/shared';
+import type { Comment, ServerEvent } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { addShape, selectDraft } from '@/media/markup/slice.ts';
 import { dismissToast, getToasts } from '@/shell/toast.ts';
 import { FileView } from './FileView.tsx';
+import { jumpToFileComment, selectFileVersion } from './slice.ts';
 
 // like the real one: awaits the version request it was handed and returns it in the anchor patch
 const prepareMediaComment = vi.fn(async (_id: string, _el: unknown, _a: unknown, o?: { version?: Promise<string | undefined> }) => {
@@ -349,4 +350,57 @@ it('Comment on media with no natural size (an SVG, or still loading) says why in
   expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
   expect(getToasts().map((t) => t.title)).toContainEqual(expect.stringMatching(/^Cannot mark up this file/));
   expect(selectDraft(store.getState(), 'file:p.svg').shapes).toEqual([SHAPE]); // the drawing stays
+});
+
+const mediaOn = (path: string, o: Record<string, unknown> = {}): Comment => ({
+  id: 'm1', text: 'here', status: 'pending', createdAt: 1, images: ['1'.repeat(64), '2'.repeat(64)],
+  anchor: { kind: 'media', source: { kind: 'file', path }, width: 640, height: 360, shapes: [SHAPE], ...o } as Comment['anchor'],
+});
+
+it('jump seeks and pauses the video, once its metadata is loaded', () => {
+  const { r, store } = setup('v.mp4');
+  act(() => { store.dispatch(serverEvent({ kind: 'comments', items: [mediaOn('v.mp4', { time: 4.24 })] })); });
+  const v = r.container.querySelector('video')!;
+  let ready = 0;
+  Object.defineProperty(v, 'readyState', { get: () => ready });
+  const pause = vi.spyOn(v, 'pause').mockImplementation(() => {});
+  act(() => { store.dispatch(jumpToFileComment('v.mp4', 'm1')); });
+  expect(pause).toHaveBeenCalled();
+  expect(store.getState().files.jump).toBeNull(); // consumed
+  expect(v.currentTime).toBe(0); // no metadata yet: a seek now would be lost
+  ready = 1;
+  fireEvent(v, new Event('loadedmetadata'));
+  expect(v.currentTime).toBe(4.24);
+});
+
+it('jump on a video with metadata seeks at once; on an image it only opens the tab', () => {
+  const { r, store } = setup('v.mp4');
+  act(() => { store.dispatch(serverEvent({ kind: 'comments', items: [mediaOn('v.mp4', { time: 2.5 })] })); });
+  const v = r.container.querySelector('video')!;
+  Object.defineProperty(v, 'readyState', { get: () => 4 });
+  vi.spyOn(v, 'pause').mockImplementation(() => {});
+  act(() => { store.dispatch(jumpToFileComment('v.mp4', 'm1')); });
+  expect(v.currentTime).toBe(2.5);
+  cleanup();
+  const img = setup('p.png');
+  act(() => { img.store.dispatch(serverEvent({ kind: 'comments', items: [mediaOn('p.png')] })); });
+  act(() => { img.store.dispatch(jumpToFileComment('p.png', 'm1')); });
+  expect(img.store.getState().files.jump).toBeNull();
+  expect(img.store.getState().tabs.active).toBe('file:p.png');
+});
+
+it('a media tab with a versioned comment publishes the file’s current ETag; one without asks for nothing', async () => {
+  spec = { body: 'x', etag: 'W/"7-7"' };
+  const { store, r } = setup('p.png');
+  await new Promise((res) => setTimeout(res, 10));
+  expect(calls).toEqual([]);
+  act(() => { store.dispatch(serverEvent({ kind: 'comments', items: [mediaOn('p.png', { version: 'W/"1-1"' })] })); });
+  await waitFor(() => expect(selectFileVersion(store.getState(), 'p.png')).toBe('W/"7-7"'));
+  expect(calls).toEqual([{ method: 'HEAD', url: '/file?path=p.png', range: undefined }]);
+  // the media reloads: asked again
+  spec.etag = 'W/"8-8"';
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(selectFileVersion(store.getState(), 'p.png')).toBe('W/"8-8"'));
+  r.unmount();
+  expect(selectFileVersion(store.getState(), 'p.png')).toBeUndefined(); // the tab closed: unknown again
 });

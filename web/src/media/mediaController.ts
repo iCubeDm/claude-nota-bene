@@ -112,3 +112,11 @@ export class MediaController {
     }, BACK_TO_TAB_DELAY);
   }
 }
+
+/** Pauses `el` and seeks it to `t` s; before its metadata is loaded a seek would be lost, so it waits for that. */
+export function seekAndPause(el: HTMLMediaElement, t: number): void {
+  el.pause();
+  const go = () => void (el.currentTime = t);
+  if (el.readyState >= HTMLMediaElement.HAVE_METADATA) go();
+  else el.addEventListener('loadedmetadata', go, { once: true });
+}

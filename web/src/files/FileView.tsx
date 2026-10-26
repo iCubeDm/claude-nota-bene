@@ -1,17 +1,19 @@
 import hljs from 'highlight.js';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { MediaAnchor, MediaShape } from '@nota-bene/shared';
+import { isMediaAnchor, type MediaAnchor, type MediaShape } from '@nota-bene/shared';
 import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
 import { CommentPopup, type PendingComment } from '@/comments/CommentPopup.tsx';
 import { flashRange, HighlightLayer } from '@/comments/HighlightLayer.tsx';
-import { selectComments } from '@/comments/slice.ts';
+import { selectComments, selectMediaComments } from '@/comments/slice.ts';
 import { Markdown } from '@/feed/Markdown.tsx';
 import { refClick } from '@/refs/refs.ts';
 import { useT } from '@/i18n/index.ts';
 import { toast } from '@/shell/toast.ts';
 import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
+import { MediaMarks } from '@/media/markup/MediaMarks.tsx';
+import { seekAndPause } from '@/media/mediaController.ts';
 import { prepareMediaComment } from '@/media/markup/createMediaComment.ts';
 import { clear, selectDraft } from '@/media/markup/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
@@ -19,7 +21,7 @@ import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
 import { isFixed, sourcesKnown, useSources } from './sources.ts';
 import { SourceChip } from './SourcePicker.tsx';
-import { clearJump, dropFileLoad, selectJump, setFileLoad } from './slice.ts';
+import { clearJump, dropFileLoad, selectJump, setFileLoad, setFileVersion } from './slice.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const PROBE = 8192;
@@ -50,6 +52,12 @@ async function load(url: string, signal: AbortSignal, other: boolean): Promise<L
   if (!res.ok) return { s: 'error', message: `${res.status} ${res.statusText}`.trim() };
   return { s: 'text', text: await res.text() };
 }
+
+/** The media's ETag (its version for media comments); undefined without one (a branch source) or on any failure. */
+const headVersion = (url: string, signal: AbortSignal): Promise<string | undefined> => fetch(url, { method: 'HEAD', signal }).then(
+  (r) => (r.ok ? r.headers.get('etag') ?? undefined : undefined),
+  () => undefined, // no version: the mark simply cannot tell "the file changed"
+);
 
 const extOf = (p: string) => /\.([a-z0-9]+)$/i.exec(p)?.[1]?.toLowerCase();
 
@@ -82,6 +90,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const dispatch = useAppDispatch();
   const kind = kindOf(path);
   const media = kind !== 'md' && kind !== 'text';
+  const markableKind = kind === 'image' || kind === 'video';
   const tabId = fileTabId(path, src);
   const url = fileUrl(path, undefined, src);
   const ref = src === 'here' ? undefined : refName;
@@ -123,12 +132,19 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     version.current = undefined;
     if (!marking) return;
     const ac = new AbortController();
-    version.current = fetch(mediaUrl, { method: 'HEAD', signal: ac.signal }).then(
-      (r) => (r.ok ? r.headers.get('etag') ?? undefined : undefined),
-      () => undefined, // no version: the mark simply cannot tell "the file changed"
-    );
+    version.current = headVersion(mediaUrl, ac.signal);
     return () => ac.abort();
   }, [marking, mediaUrl]);
+  // the file's current version, for its media comments' "the file has changed since": read when the media (re)loads,
+  // only while the file has a media comment that knows its own version (no request for a file without one)
+  const versioned = useAppSelector((s) => markableKind && selectMediaComments(s, path, ref).some((c) => c.anchor.version !== undefined));
+  useEffect(() => {
+    if (!versioned) return;
+    const ac = new AbortController();
+    void headVersion(mediaUrl, ac.signal).then((v) => ac.signal.aborted || dispatch(setFileVersion({ path, ref, version: v })));
+    return () => ac.abort();
+  }, [versioned, mediaUrl, path, ref, dispatch]);
+  useEffect(() => () => void dispatch(setFileVersion({ path, ref })), [path, ref, dispatch]); // the tab closed: unknown
   const [markPopup, setMarkPopup] = useState<PendingComment | null>(null);
   const onMarkAdd = useCallback((shapes: MediaShape[], at: DOMRect) => {
     const el = markable;
@@ -234,6 +250,17 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     flashRange(el, range);
   }, [jump, active, data, rev, path, src, comments, dispatch]);
 
+  // "jump to source" on a media tab: the tab is open and active; a video also seeks to the comment's time and pauses
+  // (not while marking: the drawing belongs to the frame on screen)
+  useEffect(() => {
+    if (!markableKind || jump?.path !== path || jump.src !== src || !active || !markable) return;
+    dispatch(clearJump());
+    const c = comments.find((x) => x.id === jump.id);
+    if (!c || !isMediaAnchor(c.anchor) || c.anchor.time === undefined || !(markable instanceof HTMLVideoElement) || markingRef.current) return;
+    resumeAt.current = 0; // the jump's time wins over a reload's resume point
+    seekAndPause(markable, c.anchor.time);
+  }, [markableKind, jump, active, markable, path, src, comments, dispatch]);
+
   const note = (key: 'tooLarge' | 'binary' | 'fileGone') => (
     <p className="p-4 text-sm text-muted-foreground">
       {t(key)}
@@ -305,10 +332,11 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <button type="button" aria-label={t('reload')} title={t('reload')} onClick={() => (media ? reloadMedia() : setRev((r) => r + 1))} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
-      {(kind === 'image' || kind === 'video') && !failed && !srcGone ? (
+      {markableKind && !failed && !srcGone ? (
         // the toolbar sits over the pane but outside its scroll, so it stays in the corner in natural size
         <div className="relative flex min-h-0 flex-1 flex-col">
           {body}
+          {markable && <MediaMarks tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} path={path} refName={ref} />}
           {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} held={!!markPopup} />}
           {/* portalled with its own layer: above the markup toolbar, which it may open next to */}
           {markPopup && createPortal(<div className="relative z-30"><CommentPopup pending={markPopup} onClose={closeMarkPopup} onAdded={markAdded} /></div>, document.body)}

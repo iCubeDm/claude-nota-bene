@@ -73,6 +73,7 @@ export const en: Dict = {
   cancel: 'Cancel',
   editTip: '⌘/Ctrl+Enter or ✓ — save\nEsc or ✕ — cancel\nclick outside the card — save',
   orphaned: 'fragment changed',
+  fileChanged: 'the file has changed since',
   sentTag: 'sent',
   // emoji menu (M1-12)
   'emojiTip': 'Emoji',

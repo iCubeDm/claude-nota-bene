@@ -4,21 +4,15 @@ import { MARK_COLORS, PEN_MAX_VALUES, type MediaShape } from '@nota-bene/shared'
 import { ConfirmDialog } from '@/controls/ConfirmDialog.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { box as rectBox, contentBox, rectFrom, shapePath, shapesBounds, simplify, toRel } from './geometry.ts';
+import { box as rectBox, rectFrom, shapePath, shapesBounds, simplify, toRel } from './geometry.ts';
 import { MarkupToolbar } from './MarkupToolbar.tsx';
+import { HALO, HALO_PX, shapeEls, STROKE_PX, useNatSize, useOverlayPlacement, type Media } from './overlay.tsx';
 import { addShape, clear, selectDraft, setColor, setMode, setTool, undo, type MarkTool } from './slice.ts';
 
-type Media = HTMLImageElement | HTMLVideoElement;
 type Pt = { x: number; y: number };
 
-const STROKE_PX = 3;
-/** A dark outline under every stroke, so a white or yellow mark stays visible on a light frame (no CSS filter: cheap). */
-const HALO_PX = STROKE_PX + 2;
-const HALO = 'rgba(0,0,0,0.55)';
 const TOOL_KEYS: Record<string, MarkTool> = { KeyR: 'rect', KeyE: 'ellipse', KeyP: 'pen', KeyA: 'arrow' };
 
-const natSize = (m: Media): [number, number] =>
-  m instanceof HTMLVideoElement ? [m.videoWidth, m.videoHeight] : [m.naturalWidth, m.naturalHeight];
 const editable = (t: EventTarget | null): boolean =>
   t instanceof HTMLElement && (t.isContentEditable || !!t.closest('input, textarea, select, [contenteditable]'));
 
@@ -64,62 +58,20 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
   const liveHalo = useRef<SVGPathElement>(null);
   const livePen = useRef<SVGPolylineElement>(null);
   const livePenHalo = useRef<SVGPolylineElement>(null);
-  const [nat, setNat] = useState<[number, number]>(() => natSize(media));
-  // the natural size arrives after mount (image load, video metadata): follow it whether or not the mode is on
-  const syncNat = useCallback(() => setNat((old) => {
-    const [w, h] = natSize(media);
-    return old[0] === w && old[1] === h ? old : [w, h];
-  }), [media]);
-  useEffect(() => {
-    syncNat();
-    media.addEventListener('load', syncNat);
-    media.addEventListener('loadedmetadata', syncNat);
-    return () => {
-      media.removeEventListener('load', syncNat);
-      media.removeEventListener('loadedmetadata', syncNat);
-    };
-  }, [media, syncNat]);
-  const box = useCallback(() => {
-    const [w, h] = natSize(media);
-    return contentBox(media.getBoundingClientRect(), w, h, fit);
-  }, [media, fit]);
-
-  // the overlay's place: the content box in the pane's scrolled coordinates (it scrolls with the media natively)
-  const place = useCallback(() => {
-    const el = svg.current;
-    if (!el || !pane) return;
-    const b = box();
-    const p = pane.getBoundingClientRect();
-    el.style.left = `${b.x - p.x - pane.clientLeft + pane.scrollLeft}px`;
-    el.style.top = `${b.y - p.y - pane.clientTop + pane.scrollTop}px`;
-    el.style.width = `${b.width}px`;
-    el.style.height = `${b.height}px`;
-  }, [box, pane]);
+  const [nat, syncNat] = useNatSize(media);
 
   // once on, the mode stays through a reconnect (protocol is 0 until the next hello): a drawing never vanishes
   const on = draft.on;
+  const box = useOverlayPlacement(svg, media, fit, on);
   useLayoutEffect(() => {
     if (!on) return;
     syncNat();
-    place();
     // focus off the toggle (gone now) or a text field, so R/E/P/A, Enter and Esc reach the mode at once
     svg.current?.focus({ preventScroll: true });
-    media.addEventListener('load', place);
-    media.addEventListener('loadedmetadata', place);
-    window.addEventListener('resize', place);
     const onScroll = () => void (drag.current && (drag.current.box = box()));
     pane?.addEventListener('scroll', onScroll, { passive: true });
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
-    ro?.observe(media);
-    if (pane) ro?.observe(pane);
-    return () => {
-      media.removeEventListener('load', place);
-      media.removeEventListener('loadedmetadata', place);
-      window.removeEventListener('resize', place);
-      pane?.removeEventListener('scroll', onScroll);
-      ro?.disconnect();
-    };
-  }, [on, media, pane, place, box, syncNat]);
+    return () => pane?.removeEventListener('scroll', onScroll);
+  }, [on, pane, box, syncNat]);
 
   // ---- drawing: refs only until pointerup ----
   // `box`: the content box at pointerdown (no layout read per move); a scroll during the drag refreshes it.
@@ -233,13 +185,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     return () => document.removeEventListener('keydown', onKey, true);
   }, [on, asking, held, media, dispatch, tabId, leave, comment, shapes]);
 
-  const drawn = useMemo(() => shapes.map((s, i) => {
-    const d = shapePath(s, nat[0], nat[1]);
-    return [
-      <path key={`h${i}`} data-halo d={d} stroke={HALO} strokeWidth={HALO_PX} vectorEffect="non-scaling-stroke" />,
-      <path key={i} data-shape={s.kind} d={d} stroke={s.color} vectorEffect="non-scaling-stroke" />,
-    ];
-  }), [shapes, nat]);
+  const drawn = useMemo(() => shapeEls(shapes, nat[0], nat[1]), [shapes, nat]);
 
   if (!offered && !on) return null;
   return (

@@ -1,5 +1,5 @@
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import type { Comment } from '@nota-bene/shared';
+import { isMediaAnchor, type Comment, type MediaAnchor } from '@nota-bene/shared';
 import { fileKey } from '../files/sources.ts';
 // store.ts imports this file for the reducer; every use of serverEvent below is lazy (inside callbacks), so the cycle is safe.
 import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
@@ -103,3 +103,11 @@ export const selectPendingCountByPath = createSelector([selectComments], (items)
   }
   return m;
 });
+
+export type MediaComment = Comment & { anchor: MediaAnchor };
+/** The media comments on one file of one source (`ref` only for another source), in store order. Memoised per (path, ref). */
+export const selectMediaComments = createSelector(
+  [selectComments, (_s: RootState, path: string) => path, (_s: RootState, _p: string, ref?: string) => ref ?? ''],
+  (items, path, ref): MediaComment[] =>
+    items.filter((c): c is MediaComment => isMediaAnchor(c.anchor) && c.anchor.source.path === path && (c.anchor.source.ref ?? '') === ref),
+);

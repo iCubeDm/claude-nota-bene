@@ -7,8 +7,9 @@ import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { selectSwitching } from '@/controls/slice.ts';
 import { Markdown } from '@/feed/Markdown.tsx';
-import { jumpToFileComment, selectFileLoad } from '@/files/slice.ts';
+import { jumpToFileComment, selectFileLoad, selectFileVersion } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
+import { mediaTime } from '@/media/markup/geometry.ts';
 import { activate } from '@/tabs/slice.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { labelText, QUICK_LABELS } from './labels.ts';
@@ -65,6 +66,8 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   });
   // a file source: its open view's load state; undefined (tab closed / not loaded yet) means "unknown", not orphaned
   const fileLoad = useAppSelector((s) => (c?.anchor.source.kind === 'file' ? selectFileLoad(s, c.anchor.source.path, c.anchor.source.ref) : undefined));
+  // a media comment: the file's current version, known while its tab is open (undefined = unknown, no claim)
+  const version = useAppSelector((s) => (c && isMediaAnchor(c.anchor) ? selectFileVersion(s, c.anchor.source.path, c.anchor.source.ref) : undefined));
   const [editing, setEditing] = useState(false);
   const [orphan, setOrphan] = useState(false);
   const body = useRef<HTMLDivElement>(null);
@@ -76,7 +79,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   useEffect(() => {
     const src = c?.anchor.source;
     if (!c || src?.kind !== 'file') return;
-    if (isMediaAnchor(c.anchor)) return setOrphan(false); // placeholder: media orphaning arrives with media handling
+    if (isMediaAnchor(c.anchor)) return setOrphan(false); // a media mark is drawn from relative coordinates: never orphaned
     if (!fileLoad || fileLoad.s === 'loading') return setOrphan(false);
     if (fileLoad.s === 'gone') return setOrphan(true);
     const root = fileRoot(src.path, src.ref);
@@ -102,6 +105,11 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
 
   if (!c) return null;
   const sent = c.status === 'sent';
+  const media = isMediaAnchor(c.anchor) ? c.anchor : null;
+  const changed = !!media?.version && version !== undefined && version !== media.version;
+  // a media comment's images: [0] the frame with the shapes (the thumbnail), [1] the transparent layer (for the agent);
+  // only pasted images after them go to the strip
+  const strip = media ? c.images?.slice(2) : c.images;
   const label = c.label && QUICK_LABELS.find((l) => l.id === c.label);
 
   const finish = (save: boolean) => {
@@ -186,13 +194,27 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
           </span>
         )}
       </div>
-      <div
-        onClick={popover ? undefined : jump}
-        className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
-      >
-        {isMediaAnchor(c.anchor) ? '' : c.anchor.quote}
-      </div>
+      {media ? (
+        <div
+          data-media-thumb
+          onClick={popover ? undefined : jump}
+          className={`flex items-end gap-2 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
+        >
+          {c.images?.[0] && <img src={`/attach/${c.images[0]}`} alt="" loading="lazy" draggable={false} className="max-h-24 max-w-[60%] flex-none rounded border border-border-soft object-contain" />}
+          <span className="min-w-0 truncate font-mono text-[11px]">
+            {media.source.path.slice(media.source.path.lastIndexOf('/') + 1)}{media.time !== undefined ? ` @ ${mediaTime(media.time)}` : ''}
+          </span>
+        </div>
+      ) : (
+        <div
+          onClick={popover ? undefined : jump}
+          className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
+        >
+          {isMediaAnchor(c.anchor) ? null : c.anchor.quote}
+        </div>
+      )}
       {orphan && <div className="mt-1 text-[11px] text-destructive">({t('orphaned')})</div>}
+      {changed && <div className="mt-1 text-[11px] text-warn">{t('fileChanged')}</div>}
       <div
         key={String(editing)}
         ref={body}
@@ -205,7 +227,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
         {/* editing shows the raw markdown source as plain text; otherwise it is rendered (not final: no refs, no mermaid) */}
         {editing ? c.text : <Markdown text={c.text} final={false} breaks noHtml />}
       </div>
-      {c.images?.length ? <Attachments ids={c.images} /> : null}
+      {strip?.length ? <Attachments ids={strip} /> : null}
       {label && (
         <Tooltip>
           <TooltipTrigger asChild>

@@ -1,11 +1,12 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { Comment } from '@nota-bene/shared';
+import type { Comment, MediaAnchor } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { switchSession } from '@/controls/slice.ts';
+import { setFileVersion } from '@/files/slice.ts';
 import { CommentCard, CommentCardPopover } from './CommentCard.tsx';
 
 beforeEach(() => setLang('ru'));
@@ -247,4 +248,43 @@ it('the label chip shows only the emoji; the label is its accessible name (M6-07
   const chip = screen.getByLabelText('Verify this');
   expect(chip.textContent).toBe('🔍');
   expect(chip.className).toMatch(/min-h-7/);
+});
+
+const F = 'f'.repeat(64), L = 'e'.repeat(64), P = 'd'.repeat(64);
+const mediaComment = (o: Partial<MediaAnchor> = {}, c: Partial<Comment> = {}): Comment => comment({
+  anchor: { kind: 'media', source: { kind: 'file', path: 'media/clip.mp4' }, width: 640, height: 360, time: 4.24, version: 'W/"1-1"',
+    shapes: [{ kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.2, h: 0.2 }], ...o },
+  images: [F, L], ...c,
+});
+
+it('the card of a media comment shows the thumbnail and "file changed" when the ETag differs', () => {
+  const { store, view } = setup(mediaComment(), false, false);
+  const thumb = view.container.querySelector<HTMLImageElement>(`[data-media-thumb] img`)!;
+  expect(thumb.getAttribute('src')).toBe(`/attach/${F}`);
+  expect(thumb.className).toMatch(/max-h-24/); // ≤ 96 px high
+  expect(view.container.querySelector('[data-media-thumb]')?.textContent).toBe('clip.mp4 @ 0:04.240');
+  // the frame is the thumbnail, the transparent layer is for the agent: neither repeats in the strip
+  expect(view.container.querySelectorAll('img[src^="/attach/"]')).toHaveLength(1);
+  // the version is unknown (the tab is not open): no claim
+  expect(screen.queryByText('файл изменился с тех пор')).toBeNull();
+  act(() => void store.dispatch(setFileVersion({ path: 'media/clip.mp4', version: 'W/"1-1"' })));
+  expect(screen.queryByText('файл изменился с тех пор')).toBeNull();
+  act(() => void store.dispatch(setFileVersion({ path: 'media/clip.mp4', version: 'W/"2-2"' })));
+  expect(screen.getByText('файл изменился с тех пор')).toBeInTheDocument();
+  expect(screen.queryByText(/фрагмент изменился/)).toBeNull();
+});
+
+it('a media card without a version (a branch source) never says "file changed"; an image has no time; pasted images stay', () => {
+  const { store, view } = setup(mediaComment({ source: { kind: 'file', path: 'p.png' }, time: undefined, version: undefined }, { images: [F, L, P] }), false, false);
+  act(() => void store.dispatch(setFileVersion({ path: 'p.png', version: 'W/"2-2"' })));
+  expect(screen.queryByText('файл изменился с тех пор')).toBeNull();
+  expect(view.container.querySelector('[data-media-thumb]')?.textContent).toBe('p.png');
+  expect([...view.container.querySelectorAll('img[src^="/attach/"]')].map((i) => i.getAttribute('src'))).toEqual([`/attach/${F}`, `/attach/${P}`]);
+});
+
+it('clicking the thumbnail jumps to the media tab', () => {
+  const { store, view } = setup(mediaComment(), false, false);
+  fireEvent.click(view.container.querySelector('[data-media-thumb]')!);
+  expect(store.getState().tabs.active).toBe('file:media/clip.mp4');
+  expect(store.getState().files.jump).toMatchObject({ path: 'media/clip.mp4', id: 'c1' });
 });
