@@ -121,3 +121,38 @@ it('a Clear refused because the agent turned busy after the dialog opened shows 
   expect(commands()).toEqual([]);
   expect(await screen.findByRole('status')).toHaveTextContent('Could not clear: agent is working…');
 });
+
+const idleState = (on: boolean, blocked = false): ServerEvent => ({ kind: 'idle-compact', state: { on, blocked, minutes: 15, minTokens: 200_000 } });
+
+it('the idle-compaction toggle appears once the server tells its state, flips optimistically and sends it', async () => {
+  const { sent, emit } = setup();
+  expect(screen.queryByTestId('idle-compact')).toBeNull();
+  emit(idleState(true));
+  const btn = screen.getByTestId('idle-compact');
+  expect(btn).toHaveAttribute('aria-pressed', 'true');
+  expect(btn.getAttribute('aria-label')).toMatch(/Idle compaction: on.*15 min.*200k/s);
+  await userEvent.click(btn);
+  expect(btn).toHaveAttribute('aria-pressed', 'false');
+  expect(sent.filter((m) => m.type === 'idle-compact')).toEqual([{ type: 'idle-compact', on: false }]);
+  emit(idleState(true)); // another window turned it back on: the echo wins
+  expect(btn).toHaveAttribute('aria-pressed', 'true');
+});
+
+it('blocked by settings.json: the toggle is off, disabled and says why', () => {
+  const { sent, emit } = setup();
+  emit(idleState(true, true));
+  const btn = screen.getByTestId('idle-compact');
+  expect(btn).toBeDisabled();
+  expect(btn).toHaveAttribute('aria-pressed', 'false');
+  expect(btn.getAttribute('aria-label')).toMatch(/settings\.json/);
+  expect(sent.filter((m) => m.type === 'idle-compact')).toEqual([]);
+});
+
+it("the server's idle /compact is a muted line, not the user's bubble", () => {
+  const { emit } = setup();
+  emit(idleState(true), { kind: 'user', id: 'i1', text: '/compact', ts: Date.now(), idle: true });
+  expect(document.querySelector('[data-kind="user"]')).toBeNull();
+  expect(document.querySelector('[data-kind="idle-compact"]')).toHaveTextContent(/⇣ idle compaction · 15 min without activity/);
+  emit(sdk({ type: 'system', subtype: 'status', status: 'compacting' }));
+  expect(document.querySelector('[data-kind="compacting"]')).not.toBeNull();
+});

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { prefsKey, readPrefs, setModePref } from './prefs.ts';
+import { prefsKey, readPrefs, setIdleCompactPref, setModePref } from './prefs.ts';
 
 let home: string;
 const prevHome = process.env.NOTA_BENE_HOME;
@@ -17,7 +17,7 @@ afterEach(() => {
 
 describe('prefs', () => {
   it('defaults when the file is missing', () => {
-    expect(readPrefs()).toEqual({ modes: {} });
+    expect(readPrefs()).toEqual({ modes: {}, idleCompact: {} });
   });
   it('stores a mode per project dir and keeps the others', () => {
     setModePref('/a', 'plan');
@@ -32,13 +32,13 @@ describe('prefs', () => {
   });
   it('corrupt file falls back to defaults and is overwritten by the next save', () => {
     fs.writeFileSync(path.join(home, 'prefs.json'), '{');
-    expect(readPrefs()).toEqual({ modes: {} });
+    expect(readPrefs()).toEqual({ modes: {}, idleCompact: {} });
     setModePref('/a', 'plan');
     expect(readPrefs().modes[prefsKey('/a')]).toBe('plan');
   });
   it('drops unknown mode values', () => {
     fs.writeFileSync(path.join(home, 'prefs.json'), JSON.stringify({ modes: { '/a': 'bogus', '/b': 'plan' }, lang: 'en' }));
-    expect(readPrefs()).toEqual({ modes: { '/b': 'plan' }, lang: 'en' });
+    expect(readPrefs()).toEqual({ modes: { '/b': 'plan' }, lang: 'en', idleCompact: {} });
   });
   it('leaves no tmp file', () => {
     setModePref('/a', 'plan');
@@ -50,6 +50,14 @@ describe('prefs', () => {
     expect(JSON.parse(fs.readFileSync(path.join(home, 'prefs.json'), 'utf8'))).toEqual({
       future: { x: 1 }, lang: 'ru', modes: { '/old': 'plan', '/odd': 'bogus', [prefsKey('/a')]: 'default' },
     });
+  });
+  it('idle compaction is stored per project, keeps the modes, and drops non-boolean values', () => {
+    setModePref('/a', 'plan');
+    setIdleCompactPref('/a', false);
+    setIdleCompactPref('/b', true);
+    expect(readPrefs()).toMatchObject({ modes: { [prefsKey('/a')]: 'plan' }, idleCompact: { [prefsKey('/a')]: false, [prefsKey('/b')]: true } });
+    fs.writeFileSync(path.join(home, 'prefs.json'), JSON.stringify({ modes: {}, idleCompact: { '/x': 'no', '/y': false } }));
+    expect(readPrefs().idleCompact).toEqual({ '/y': false });
   });
   it('keeps a copy of a corrupt file before replacing it', () => {
     fs.writeFileSync(path.join(home, 'prefs.json'), '{ broken');
