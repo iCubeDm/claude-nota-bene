@@ -186,6 +186,13 @@ a compact JSON line in the batch.
 - The card thumbnail.
 - Where marks of sent comments show (dimmed, as text) and how many marks a tab can paint without lag.
 
+## Known gaps after v1 (deferred in review, 2026-10-26)
+
+- No sweep of orphan mark folders: a pending media comment dropped by a session switch, a failed DELETE, or a re-rooting switch leaves `.nota-bene/marks/<id>/` behind (git-ignored, bounded).
+- "Folder missing" is not shown on a card whose `.nota-bene/marks/<id>/` was deleted by hand; the batch still names the files.
+- Two windows on one session (last writer wins) can now delete the mark folder of a comment the other window re-adds.
+- "File changed" is known only while a tab has loaded the file's ETag.
+
 ## Open questions for later (not v1)
 
 - Video time ranges and multi-frame comments.
