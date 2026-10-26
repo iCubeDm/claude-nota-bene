@@ -189,7 +189,8 @@ it('jump in a plain .txt file scrolls by the fragment’s rect, not to the middl
     return out;
   }).find((t) => t.data.includes('TARGET'))!;
   expect(scrolls[0]).toEqual({ el: pane(fileTabId('notes.txt')), top: target(node.data.indexOf('TARGET')) });
-  expect(scrolled).toHaveLength(0); // no element scrollIntoView (that would centre the whole <code>)
+  // no element scrollIntoView inside the pane (that would centre the whole <code>); the tab strip keeps its active tab in view (M6-12)
+  expect(scrolled.filter((el) => !el.closest('[role="tablist"]'))).toHaveLength(0);
 });
 
 it('jump to a chat comment from a file tab switches back to the chat and centres the fragment there', async () => {
