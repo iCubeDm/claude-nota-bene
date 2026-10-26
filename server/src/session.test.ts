@@ -754,4 +754,47 @@ describe('switch', () => {
     s.close();
     fs.rmSync(dirB, { recursive: true, force: true });
   });
+
+  describe('fork', () => {
+    it('starts the agent with fork: true and saves only the new id', async () => {
+      const backend = fakeBackend([{ text: 'hi' }]);
+      const { events, hub } = setup(backend);
+      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
+      expect(backend.starts[0]).toMatchObject({ resume: 'src-id', fork: true });
+      expect(lastSession(home)).toBeUndefined(); // the source is never written
+      const ids: string[] = [];
+      m.onSessionId((id) => ids.push(id));
+      m.send({ id: 'u1', text: 'go' });
+      await until(() => sdkOf(events, 'result').length === 1);
+      const forked = m.info().id!;
+      expect(forked).not.toBe('src-id');
+      expect(lastSession(home)).toBe(forked);
+      expect(ids).toEqual([forked]);
+      m.close();
+    });
+
+    it('a restart before the first turn still forks and still does not save the source', async () => {
+      const backend = fakeBackend([{ text: 'hi' }]);
+      const { hub } = setup(backend);
+      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
+      await m.restart();
+      expect(backend.starts.map((x) => x.fork)).toEqual([true, true]);
+      expect(lastSession(home)).toBeUndefined();
+      m.close();
+    });
+
+    it('after the fork has its id, a restart resumes that id without fork', async () => {
+      const backend = fakeBackend([{ text: 'hi' }]);
+      const { events, hub } = setup(backend);
+      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
+      m.send({ id: 'u1', text: 'go' });
+      await until(() => sdkOf(events, 'result').length === 1);
+      const forked = m.info().id!;
+      await m.restart();
+      expect(backend.starts[1]).toEqual(expect.objectContaining({ resume: forked }));
+      expect(backend.starts[1]!.fork).toBeUndefined();
+      expect(lastSession(home)).toBe(forked);
+      m.close();
+    });
+  });
 });

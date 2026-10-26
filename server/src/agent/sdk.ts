@@ -57,12 +57,13 @@ class SdkSession implements AgentSession {
   private readonly q: ReturnType<typeof query>;
   private readonly warmup: NodeJS.Timeout;
 
-  constructor(o: { cwd: string; resume?: string; permissionMode: Mode; ask: PermissionAsk }) {
+  constructor(o: { cwd: string; resume?: string; fork?: boolean; permissionMode: Mode; ask: PermissionAsk }) {
     this.q = query({
       prompt: this.input,
       options: {
         cwd: o.cwd,
         ...(o.resume ? { resume: o.resume } : {}),
+        ...(o.resume && o.fork ? { forkSession: true } : {}),
         permissionMode: o.permissionMode,
         includePartialMessages: true,
         // predicted next prompt after each turn: the UI shows it as ghost text in the composer

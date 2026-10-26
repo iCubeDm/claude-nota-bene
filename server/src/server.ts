@@ -35,6 +35,9 @@ export async function startServer(o: {
   port: number;
   backend: AgentBackend;
   resume?: string;
+  fork?: boolean;
+  /** called by POST /restart-server (tests stub it) */
+  exit?: (code: number) => void;
   webDist: string;
   allowedOrigins?: string[];
 }): Promise<{ url: string; close(): Promise<void> }> {
@@ -49,6 +52,7 @@ export async function startServer(o: {
       backend: o.backend,
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
+      ...(o.resume && o.fork ? { fork: true } : {}),
     });
     const store = new CommentStore({ dir: path.join(stateDir(), 'comments') });
     // comments are live state, not history: never stored in the replay, a new socket gets the set directly
@@ -64,6 +68,7 @@ export async function startServer(o: {
       if (!restart) store.set(null, []);
       broadcastComments(store.get(id));
     });
+    const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1';
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -95,11 +100,30 @@ export async function startServer(o: {
         ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
         ...attachmentRoutes(attachments, hub),
         '/sessions': sessionsRoute,
+        '/restart-server': (req, res) => {
+          if (req.method !== 'POST') {
+            res.writeHead(405, { allow: 'POST', 'content-type': 'text/plain; charset=utf-8' });
+            res.end('method not allowed');
+            return;
+          }
+          if (!supervised()) {
+            res.writeHead(409, { 'content-type': 'text/plain; charset=utf-8' });
+            res.end('not supervised');
+            return;
+          }
+          // answer first: the exit must not cut the reply; 75 tells the launcher to relaunch with --continue
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+          res.end('{"ok":true}', () => {
+            void Promise.race([close(), new Promise<void>((r) => setTimeout(r, 2000))]).then(() => {
+              setTimeout(() => (o.exit ?? process.exit)(75), 100);
+            });
+          });
+        },
       },
       webDist: o.webDist,
       info: () => {
         const { id, root, title, model } = manager.info();
-        return { root, session: id, title, model };
+        return { root, session: id, title, model, supervised: supervised() };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);

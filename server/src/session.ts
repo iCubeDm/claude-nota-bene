@@ -91,7 +91,7 @@ function realOr(p: string): string {
 }
 
 export async function createSessionManager(o: {
-  hub: EventHub; backend: AgentBackend; cwd: string; resume?: string; attachments?: AttachmentStore;
+  hub: EventHub; backend: AgentBackend; cwd: string; resume?: string; fork?: boolean; attachments?: AttachmentStore;
   /** how long a switch waits for the old agent's message loop to end (tests shorten it) */
   closeTimeoutMs?: number;
   /** how long a busy restart waits for its interrupt (tests shorten it) */
@@ -106,6 +106,9 @@ export async function createSessionManager(o: {
   let lastSession = ''; // the last `session` event sent, as JSON
   let heard: string | null = o.resume ?? null; // the id the id listeners last heard of
   let saved: string | null = null; // last id written to the registry
+  // a fork start: the agent branches off `resume`; until its init names the new id, sessionId is still the SOURCE,
+  // which must never be written to the registry
+  let forkPending = !!(o.fork && o.resume);
   let mode: Mode = readPrefs().modes[prefsKey(root)] ?? 'auto';
   let agent: AgentSession | null = null;
   let loop: Promise<void> | null = null; // the running agent's message loop
@@ -167,6 +170,7 @@ export async function createSessionManager(o: {
         // the CLI sends init at the start of every turn: act only when something is new
         if (type === 'system' && subtype === 'init') {
           if (session_id) {
+            forkPending = false;
             sessionId = session_id;
             if (saved !== session_id) { saved = session_id; saveSession(root, session_id); }
           }
@@ -196,6 +200,7 @@ export async function createSessionManager(o: {
     titleAt = -Infinity;
     const next = typeof f.new_conversation_id === 'string' && SESSION_ID.test(f.new_conversation_id) ? f.new_conversation_id : null;
     if (next) {
+      forkPending = false;
       sessionId = next;
       saved = next;
       try { saveSession(root, next); } catch (e) { reportError(hub, 'session', e); }
@@ -305,7 +310,7 @@ export async function createSessionManager(o: {
     // mid-switch nothing may start an agent: the switch starts the new one after the replay
     if (switching) throw new Error('the session is switching');
     const g = gen;
-    const a = backend.start({ cwd: root, permissionMode: mode, ...(sessionId ? { resume: sessionId } : {}), ask: askFor(g) });
+    const a = backend.start({ cwd: root, permissionMode: mode, ...(sessionId ? { resume: sessionId } : {}), ...(forkPending ? { fork: true } : {}), ask: askFor(g) });
     agent = a;
     loop = pump(a, g);
     return a;
@@ -413,14 +418,16 @@ export async function createSessionManager(o: {
       // 2. the new session's state
       const same = id === sessionId && real === realOr(root);
       root = real;
+      // a restart before the fork's first init keeps forking; any other target ends the pending fork
+      if (!(forkPending && id === sessionId)) forkPending = false;
       sessionId = id;
-      saved = id;
+      saved = forkPending ? null : id;
       heard = id; // the server sends this id's comments in onSwitch, not through the id listeners
       title = null;
       model = null;
       mode = readPrefs().modes[prefsKey(root)] ?? 'auto';
       stats.reset();
-      if (id) {
+      if (id && !forkPending) {
         try { saveSession(root, id); } catch (e) { reportError(hub, 'session', e); }
       }
       // 3. the feed, the header, the mode, the stats; the comments come from the onSwitch listeners

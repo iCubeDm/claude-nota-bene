@@ -67,6 +67,18 @@ export function cwdOf(id: string, projectsDir: string = defaultProjectsDir()): s
   return found;
 }
 
+/** True when some project holds <id>.jsonl (the id of a session that can still be resumed). */
+export function transcriptExists(id: string, projectsDir: string = defaultProjectsDir()): boolean {
+  if (!SAFE_ID.test(id)) return false;
+  let projects: string[];
+  try {
+    projects = fs.readdirSync(projectsDir);
+  } catch {
+    return false;
+  }
+  return projects.some((p) => fs.existsSync(path.join(projectsDir, p, `${id}.jsonl`)));
+}
+
 export type SessionsView = {
   current: string | null;
   root: string;

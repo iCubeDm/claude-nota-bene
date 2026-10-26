@@ -98,11 +98,12 @@ class FakeSession implements AgentSession {
   private readonly modes: Mode[];
   private sessionId: string; // a /clear replaces it
 
-  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string) {
+  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string, fork?: boolean) {
     this.turns = turns;
     this.modes = modes;
     this.ask = ask;
-    this.sessionId = resume ?? DEFAULT_SESSION_ID; // a resumed CLI session keeps its id
+    // a resumed CLI session keeps its id; a fork gets a new one
+    this.sessionId = resume && fork ? `${resume}-fork-${++forkCount}` : (resume ?? DEFAULT_SESSION_ID);
     this.messages = { [Symbol.asyncIterator]: () => this.run() };
   }
 
@@ -282,7 +283,9 @@ class FakeSession implements AgentSession {
   }
 }
 
-type Started = { cwd: string; permissionMode: Mode; resume?: string };
+let forkCount = 0;
+
+type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: boolean };
 
 /**
  * `startModes` records the mode each agent started with, `setModes` every setPermissionMode call, `starts` every
@@ -310,8 +313,8 @@ export function fakeBackend(
     starts,
     start: (s) => {
       startModes.push(s.permissionMode);
-      starts.push({ cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}) });
-      return new FakeSession(turns, s.ask, setModes, s.resume);
+      starts.push({ cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}), ...(s.fork ? { fork: true } : {}) });
+      return new FakeSession(turns, s.ask, setModes, s.resume, s.fork);
     },
     listSessions: async () => sessions.map((x) => {
       const cwd = cwdOf(x);

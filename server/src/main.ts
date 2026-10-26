@@ -4,19 +4,24 @@ import { fileURLToPath } from 'node:url';
 import { fakeFromScript } from './agent/fake.ts';
 import { sdkBackend } from './agent/sdk.ts';
 import { startServer } from './server.ts';
+import { transcriptExists } from './sessions.ts';
 import { lastSession } from './state.ts';
 
 const USAGE =
-  'Usage: node server/src/main.ts [dir] [--port N] [--resume ID] [--continue] [--fake script.json] [--allow-origin URL]';
+  'Usage: node server/src/main.ts [dir] [--port N] [--resume ID [--fork]] [--new] [--continue] [--fake script.json] [--allow-origin URL]';
 
 export function parseArgs(
   argv: string[],
   cwd: string,
-): { dir: string; port: number; resume?: string; continue: boolean; fake?: string; allowOrigins: string[] } {
+): {
+  dir: string; port: number; resume?: string; fork: boolean; new: boolean; continue: boolean; fake?: string; allowOrigins: string[];
+} {
   let dirArg: string | undefined;
   let port = 4777;
   let resume: string | undefined;
   let cont = false;
+  let fork = false;
+  let fresh = false;
   let fake: string | undefined;
   const allowOrigins: string[] = [];
   const value = (i: number): string => {
@@ -32,6 +37,8 @@ export function parseArgs(
       port = Number(v);
     } else if (a === '--resume') resume = value(++i);
     else if (a === '--continue') cont = true;
+    else if (a === '--fork') fork = true;
+    else if (a === '--new') fresh = true;
     else if (a === '--fake') fake = path.resolve(cwd, value(++i)); // same base as the project dir
     else if (a === '--allow-origin') allowOrigins.push(value(++i));
     else if (a.startsWith('--')) throw new Error(`${USAGE}\nUnknown option: ${a}`);
@@ -39,8 +46,23 @@ export function parseArgs(
     else throw new Error(`${USAGE}\nUnexpected argument: ${a}`);
   }
   const dir = fs.realpathSync.native(path.resolve(cwd, dirArg ?? '.'));
-  if (cont) resume = lastSession(dir);
-  return { dir, port, resume, continue: cont, fake, allowOrigins };
+  if (fork && resume === undefined) throw new Error(`${USAGE}\n--fork needs --resume`);
+  if (fresh && resume !== undefined) throw new Error(`${USAGE}\n--new cannot be combined with --resume`);
+  return { dir, port, resume, fork, new: fresh, continue: cont, fake, allowOrigins };
+}
+
+/**
+ * What to resume. An explicit --resume wins (with --fork it branches); --new starts fresh; otherwise (also with
+ * --continue, which is the same thing) the project's last session, but only while its transcript still exists.
+ */
+export function launchTarget(
+  args: Pick<ReturnType<typeof parseArgs>, 'dir' | 'resume' | 'fork' | 'new'>,
+  projectsDir?: string,
+): { resume?: string; fork?: boolean } {
+  if (args.resume !== undefined) return { resume: args.resume, ...(args.fork ? { fork: true } : {}) };
+  if (args.new) return {};
+  const last = lastSession(args.dir);
+  return last && transcriptExists(last, projectsDir) ? { resume: last } : {};
 }
 
 // `npm start -- ../proj` runs with cwd = package root; INIT_CWD is where npm was invoked.
@@ -64,7 +86,7 @@ async function main(): Promise<void> {
     cwd: args.dir,
     port: args.port,
     backend,
-    resume: args.resume,
+    ...launchTarget(args),
     webDist,
     allowedOrigins: args.allowOrigins,
   });

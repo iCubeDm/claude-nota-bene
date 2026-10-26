@@ -126,4 +126,59 @@ describe('server', () => {
     await until(() => seen.length === 1);
     expect(seen[0]).toBe(true); // a plain allow: the adapter echoes the ORIGINAL input
   });
+
+  it('/info.supervised follows NOTA_BENE_SUPERVISED', async () => {
+    const s = await boot();
+    const prev = process.env.NOTA_BENE_SUPERVISED;
+    try {
+      delete process.env.NOTA_BENE_SUPERVISED;
+      expect(await (await fetch(`${s.url}/info`)).json()).toMatchObject({ supervised: false });
+      process.env.NOTA_BENE_SUPERVISED = '1';
+      expect(await (await fetch(`${s.url}/info`)).json()).toMatchObject({ supervised: true });
+    } finally {
+      if (prev === undefined) delete process.env.NOTA_BENE_SUPERVISED; else process.env.NOTA_BENE_SUPERVISED = prev;
+    }
+  });
+
+  describe('POST /restart-server', () => {
+    const prev = process.env.NOTA_BENE_SUPERVISED;
+    afterEach(() => {
+      if (prev === undefined) delete process.env.NOTA_BENE_SUPERVISED; else process.env.NOTA_BENE_SUPERVISED = prev;
+    });
+    const post = (url: string, origin?: string) =>
+      fetch(`${url}/restart-server`, { method: 'POST', ...(origin ? { headers: { origin } } : {}) });
+
+    it('409 when not supervised, and never exits', async () => {
+      delete process.env.NOTA_BENE_SUPERVISED;
+      const codes: number[] = [];
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
+      closers.push(s.close);
+      expect((await post(s.url, s.url)).status).toBe(409);
+      await new Promise((r) => setTimeout(r, 250));
+      expect(codes).toEqual([]);
+    });
+
+    it('403 for a foreign Origin (and for none), even when supervised', async () => {
+      process.env.NOTA_BENE_SUPERVISED = '1';
+      const codes: number[] = [];
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
+      closers.push(s.close);
+      expect((await post(s.url, 'http://evil.example')).status).toBe(403);
+      expect((await post(s.url)).status).toBe(403);
+      await new Promise((r) => setTimeout(r, 250));
+      expect(codes).toEqual([]);
+    });
+
+    it('supervised: answers 200, then exits with 75', async () => {
+      process.env.NOTA_BENE_SUPERVISED = '1';
+      const codes: number[] = [];
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
+      closers.push(s.close);
+      const r = await post(s.url, s.url);
+      expect(r.status).toBe(200);
+      expect(codes).toEqual([]); // the reply came first
+      await until(() => codes.length === 1);
+      expect(codes).toEqual([75]);
+    });
+  });
 });
