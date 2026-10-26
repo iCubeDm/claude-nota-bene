@@ -107,7 +107,7 @@ export const en: Dict = {
   sourceGone: 'This branch or worktree no longer exists',
   fileTree: 'File tree',
   gitBranch: 'git branch',
-  gitDirty: 'uncommitted changes',
+  gitDirty: 'uncommitted changes or new files',
   gitClean: 'clean',
   gitDetached: 'detached',
   // file viewers (M3-08)

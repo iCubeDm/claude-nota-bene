@@ -240,8 +240,10 @@ async function readStatus(root: string): Promise<GitStatus | null> {
       // a repo without commits has no HEAD to resolve, but its branch name is known
       branch = (await run(['symbolic-ref', '--short', '-q', 'HEAD'])).trim() || null;
     }
-    // -uno: untracked files are not "dirty" for this indicator, and a big untracked tree is the costly case
-    const dirty = (await run(['status', '--porcelain=v1', '-uno', '--ignore-submodules'])).trim() !== '';
+    // new files the agent made count too (not the ignored ones); a huge untracked tree that times out falls back to
+    // the tracked files only, so the header still shows something
+    const status = (u: string) => run(['status', '--porcelain=v1', u, '--ignore-submodules']).then((o) => o.trim() !== '');
+    const dirty = await status('-unormal').catch(() => status('-uno'));
     return { branch, detached, dirty };
   } catch {
     return null; // not a repo, no git, a timeout
@@ -252,7 +254,7 @@ const statusCache = new Map<string, { at: number; p: Promise<GitStatus | null> }
 /** Test hook. */
 export const clearStatusCache = () => statusCache.clear();
 
-/** The current branch (or detached) and whether tracked files have uncommitted changes; null outside a repo. Cached per root for 3 s. */
+/** The current branch (or detached) and whether there are uncommitted changes or new files; null outside a repo. Cached per root for 3 s. */
 export function gitStatus(root: string): Promise<GitStatus | null> {
   const hit = statusCache.get(root);
   if (hit && Date.now() - hit.at < STATUS_TTL) return hit.p;

@@ -54,12 +54,17 @@ const get = () => new Promise<{ status: number; body: string }>((resolve, reject
 });
 
 describe('gitStatus', () => {
-  it('clean, dirty (tracked change), untracked files do not count, detached, not a repo', async () => {
+  it('clean, dirty (tracked change or a new file; ignored files do not count), detached, not a repo', async () => {
     clearStatusCache();
     expect(await gitStatus(repo)).toEqual({ branch: 'main', detached: false, dirty: false });
-    fs.writeFileSync(path.join(repo, 'new.txt'), 'untracked');
+    fs.writeFileSync(path.join(repo, '.git/info/exclude'), 'ignored.log\n');
+    fs.writeFileSync(path.join(repo, 'ignored.log'), 'x');
     clearStatusCache();
     expect((await gitStatus(repo))?.dirty).toBe(false);
+    fs.writeFileSync(path.join(repo, 'new.txt'), 'untracked');
+    clearStatusCache();
+    expect((await gitStatus(repo))?.dirty).toBe(true);
+    fs.rmSync(path.join(repo, 'new.txt'));
     fs.writeFileSync(path.join(repo, 'a.md'), 'changed');
     clearStatusCache();
     expect(await gitStatus(repo)).toEqual({ branch: 'main', detached: false, dirty: true });

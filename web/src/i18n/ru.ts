@@ -104,7 +104,7 @@ export const ru = {
   sourceGone: 'Этой ветки или worktree больше нет',
   fileTree: 'Дерево файлов',
   gitBranch: 'ветка git',
-  gitDirty: 'есть незакоммиченные изменения',
+  gitDirty: 'есть незакоммиченные изменения или новые файлы',
   gitClean: 'чисто',
   gitDetached: 'detached',
   // file viewers (M3-08)

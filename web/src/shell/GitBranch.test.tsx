@@ -46,7 +46,7 @@ it('shows ✗ and the uncommitted tooltip when dirty, in ru as well', async () =
   const { ev, el } = await setup();
   await ev(session('/p/proj'));
   expect(el()).toHaveTextContent('(feature/x ✗)');
-  expect(el()).toHaveAttribute('title', 'ветка git · есть незакоммиченные изменения');
+  expect(el()).toHaveAttribute('title', 'ветка git · есть незакоммиченные изменения или новые файлы');
   expect(el()!.querySelector('[data-dirty]')).not.toBeNull();
 });
 
