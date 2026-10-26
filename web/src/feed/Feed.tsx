@@ -3,7 +3,7 @@ import { useT } from '@/i18n/index.ts';
 import { refClick } from '@/refs/refs.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { Markdown } from './Markdown.tsx';
-import { DoneLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
+import { CompactingLine, DoneLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
 import { PlanCard } from './PlanCard.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
 import { ToolLine } from './ToolLine.tsx';
@@ -11,7 +11,7 @@ import { UserMessage } from './UserMessage.tsx';
 
 /** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
 export function Feed() {
-  const { items } = useAppSelector(selectFeed);
+  const { items, compacting } = useAppSelector(selectFeed);
   const t = useT();
   const dispatch = useAppDispatch();
   const root = useRef<HTMLDivElement>(null);
@@ -38,7 +38,7 @@ export function Feed() {
       pane.scrollTop = pane.scrollHeight;
       stick.current = true;
     }
-  }, [items]);
+  }, [items, compacting]);
 
   return (
     <div ref={root} onClick={(e) => refClick(e, dispatch)}>
@@ -69,6 +69,7 @@ export function Feed() {
             return <NoticeLine key={`notice:${i}`} item={it} />;
         }
       })}
+      {compacting !== null && <CompactingLine since={compacting} />}
     </div>
   );
 }

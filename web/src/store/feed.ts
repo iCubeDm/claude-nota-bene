@@ -10,8 +10,11 @@ export type FeedItem =
       /** from the tool_result with the same tool_use_id; absent while the tool still runs */
       result?: { text: string; isError: boolean };
     }
-  /** a one-line mark in the transcript: the context was compacted (pre = tokens before) or cleared; ts 0 = no time */
-  | { kind: 'marker'; what: 'compacted' | 'cleared'; pre?: number; ts: number }
+  /**
+   * a one-line mark in the transcript: the context was compacted (pre = tokens before, ms = how long it took), a
+   * compaction failed (error = the CLI's text), or the context was cleared; ts 0 = no time
+   */
+  | { kind: 'marker'; what: 'compacted' | 'compactFailed' | 'cleared'; pre?: number; ms?: number; error?: string; ts: number }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
   /** `text`: the resumed session id; translated at render. (Server errors are toasts, not feed items: R-M4-5.) */
@@ -29,9 +32,11 @@ export type FeedState = {
   streamN: number;
   /** live results seen so far; a replay does not count. Consumers (the file tree) refresh when it changes. */
   turnSeq: number;
+  /** ts of the `status: compacting` frame while a compaction (manual or auto) runs; null otherwise */
+  compacting: number | null;
 };
 
-export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, turnSeq: 0 };
+export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, turnSeq: 0, compacting: null };
 
 // Loose view of the SDK message: only the fields the feed reads (real shapes: server/test/fixtures/real-frames.json).
 type Block = { type?: string; text?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; content?: unknown };
@@ -52,7 +57,10 @@ type Sdk = {
   user_message_uuids?: string[];
   command_uuid?: string;
   state?: string;
-  compact_metadata?: { pre_tokens?: number };
+  compact_metadata?: { pre_tokens?: number; duration_ms?: number };
+  status?: string | null;
+  compact_result?: string;
+  compact_error?: string;
 };
 
 export const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
@@ -107,8 +115,23 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
     case 'conversation_reset': // live only (never stored): the server's replay [] came first, this adds the line
       return { ...emptyFeed, session: s.session, turnSeq: s.turnSeq, items: [{ kind: 'marker', what: 'cleared', ts }] };
     case 'system':
+      // a compaction: status compacting, then status null with its compact_result, then (on success) the boundary
+      if (m.subtype === 'status') {
+        if (m.status === 'compacting') return { ...s, compacting: ts };
+        if (m.status !== null || s.compacting === null) return s;
+        if (m.compact_result !== 'failed') return { ...s, compacting: null };
+        const failed: FeedItem = { kind: 'marker', what: 'compactFailed', ts, ...(m.compact_error ? { error: m.compact_error } : {}) };
+        return { ...s, compacting: null, items: [...s.items, failed] };
+      }
       if (m.subtype !== 'compact_boundary') return s;
-      return { ...s, items: [...s.items, { kind: 'marker', what: 'compacted', pre: m.compact_metadata?.pre_tokens ?? 0, ts }] };
+      return {
+        ...s,
+        compacting: null,
+        items: [...s.items, {
+          kind: 'marker', what: 'compacted', pre: m.compact_metadata?.pre_tokens ?? 0, ts,
+          ...(m.compact_metadata?.duration_ms ? { ms: m.compact_metadata.duration_ms } : {}),
+        }],
+      };
     case 'stream_event': {
       if (sub) return s;
       const ev = m.event;
@@ -182,7 +205,8 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
       // the live result that follows a clear still arrives: with no user message since the cleared line there is no turn to report
       const lastCleared = closed.findLastIndex((it) => it.kind === 'marker' && it.what === 'cleared');
       const orphan = lastCleared >= 0 && !closed.slice(lastCleared).some((it) => it.kind === 'user');
-      return { ...s, items: orphan ? closed : [...closed, done], busy, forcePending: false, waiting, turnSeq: s.turnSeq + 1 };
+      // a turn never ends mid-compaction: a result with one still shown means its end frame was lost (the agent died)
+      return { ...s, items: orphan ? closed : [...closed, done], busy, forcePending: false, waiting, turnSeq: s.turnSeq + 1, compacting: null };
     }
     case 'command_lifecycle': {
       // a queued send that was cancelled (e.g. Stop with cancel_queued) never gets a result of its own
