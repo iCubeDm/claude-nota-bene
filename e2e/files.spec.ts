@@ -655,9 +655,11 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   const pane = mediaPane(page, 'media/a.mp4');
   const video = pane.locator('video');
   await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  // resolves on `seeked`, or at once when the video already sits at `t` (a same-value assignment may not seek)
   const seek = async (t: number) => {
     await video.evaluate((e: HTMLVideoElement, s) => new Promise<void>((done) => {
       e.pause();
+      if (!e.seeking && Math.abs(e.currentTime - s) < 1e-6) return done();
       e.addEventListener('seeked', () => done(), { once: true });
       e.currentTime = s;
     }), t);
@@ -669,8 +671,16 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   await expect(layer).toBeVisible();
   expect(await video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(false); // no native controls while marking
   const b = await contentBoxOf(video);
-  // the bottom edge (y 0.97) runs through the native controls' strip, the left edge (x 0.1) from above it into it
-  await drag(page, at(b, 0.1, 0.2), at(b, 0.9, 0.97));
+  const vb = (await video.boundingBox())!;
+  // Chrome's native controls on this 320×240 video (measured): the progress bar is the row 10-25 px above the element's
+  // bottom, across the width; the play button sits 30-45 px above it, 16-24 px from the left. The rect's left edge runs
+  // through the play button (x = 20 px), its bottom edge along the progress bar (17 px above the bottom), both inside
+  // the bottom 48 px the marks leave to the controls.
+  const playPt = { x: vb.x + 20, y: vb.y + vb.height - 36 };
+  const barPt = { x: vb.x + vb.width / 2, y: vb.y + vb.height - 17 };
+  const [fx0, fy0] = [(playPt.x - b.x) / b.width, 0.2];
+  const [fx1, fy1] = [0.9, (barPt.y - b.y) / b.height];
+  await drag(page, at(b, fx0, fy0), at(b, fx1, fy1));
   const text = uniq('frame');
   const id = await addMarkComment(page, text);
   await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(true);
@@ -678,25 +688,32 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   await expect(mark).toHaveCount(1);
 
   // a click on the stroke opens the comment's card
-  const top = at(b, 0.5, 0.2);
+  const top = at(b, 0.5, fy0);
   await page.mouse.click(top.x, top.y);
   const popover = page.getByRole('dialog').locator(`[data-comment-id="${id}"]`);
   await expect(popover).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
   // the stroke takes the click above the bottom 48 px of the element; within them the video (its controls) does
-  const vb = (await video.boundingBox())!;
   const hitAt = (pt: Pt) => page.evaluate(({ x, y }) => {
     const el = document.elementFromPoint(x, y);
     return el?.closest('[data-hit]')?.getAttribute('data-hit') ?? el?.tagName.toLowerCase() ?? null;
   }, pt);
-  const leftEdge = (y: number) => ({ x: b.x + 0.1 * b.width, y });
-  expect(await hitAt(leftEdge(vb.y + vb.height - 60))).toBe(id);
-  expect(await hitAt(leftEdge(vb.y + vb.height - 20))).toBe('video');
-  expect(await hitAt({ x: b.x + 0.5 * b.width, y: b.y + 0.97 * b.height })).toBe('video');
-  // a real click on the stroke inside the strip: no card
-  await page.mouse.click(b.x + 0.5 * b.width, b.y + 0.97 * b.height);
-  await expect(page.getByRole('dialog').locator('[data-comment-id]')).toHaveCount(0);
+  expect(await hitAt({ x: playPt.x, y: vb.y + vb.height - 60 })).toBe(id);
+  expect(await hitAt(playPt)).toBe('video');
+  expect(await hitAt(barPt)).toBe('video');
+  const noCard = () => expect(page.getByRole('dialog').locator('[data-comment-id]')).toHaveCount(0);
+  const state = () => video.evaluate((e: HTMLVideoElement) => ({ paused: e.paused, t: e.currentTime }));
+  // real clicks on the stroke inside the strip reach the controls: the play button plays, the progress bar seeks
+  await video.evaluate((e: HTMLVideoElement) => { e.muted = true; });
+  await page.mouse.click(playPt.x, playPt.y);
+  await expect.poll(async () => (await state()).paused).toBe(false);
+  await noCard();
+  await seek(12.3);
+  await expect(mark).toHaveCount(1);
+  await page.mouse.click(barPt.x, barPt.y); // the middle of the bar: about 15 s of 30
+  await expect.poll(async () => Math.abs((await state()).t - 12.3)).toBeGreaterThan(1);
+  await noCard();
 
   // shown only while paused at its time (± 0.04 s)
   await seek(12.3);
@@ -719,7 +736,7 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   const batch = batchText(frames, text)!;
   expect(batch).toContain('[media/a.mp4 @ 0:12.300 · 320×240]');
   const [x, y, w, h] = rectOf(batch);
-  for (const [got, want] of [[x, 0.1], [y, 0.2], [w, 0.8], [h, 0.77]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(0.005);
+  for (const [got, want] of [[x, fx0], [y, fy0], [w, fx1 - fx0], [h, fy1 - fy0]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(0.005);
 });
 
 test('deleting the comment removes its folder @files', async ({ page }) => {
@@ -732,7 +749,7 @@ test('deleting the comment removes its folder @files', async ({ page }) => {
   await markUpBtn(page).click();
   await expect(markupLayer(page, 'media/wide.png')).toBeVisible();
   const b = await contentBoxOf(img);
-  await page.keyboard.press('e');
+  await page.keyboard.press('e'); // the ellipse tool
   await drag(page, at(b, 0.4, 0.4), at(b, 0.6, 0.6));
   const text = uniq('delete');
   const id = await addMarkComment(page, text);
@@ -763,8 +780,34 @@ test('4K-ish drawing stays responsive: a 300-point pen stroke, the pointer-move 
     window.addEventListener('pointermove', () => { t0 = performance.now(); }, true);
     window.addEventListener('pointermove', () => { if (t0) w.__moves.push(performance.now() - t0); t0 = 0; });
   });
+  // the work after the handler (style, layout, paint of the growing polyline) is outside that bracket, so two probes
+  // over the same stroke: long tasks (>= 50 ms on the main thread), and the gaps between animation frames. Headless
+  // Chrome's frames are not vsync-paced exactly and the driver's moves arrive in bursts, so only the median gap is
+  // asserted (a lagging stroke would push every gap up, not just a few)
+  const longtask = await page.evaluate(() => PerformanceObserver.supportedEntryTypes.includes('longtask'));
+  await page.evaluate(() => {
+    const w = window as unknown as { __long: number[]; __frames: number[]; __stop: boolean; __obs?: PerformanceObserver };
+    w.__long = [];
+    w.__frames = [];
+    w.__stop = false;
+    if (PerformanceObserver.supportedEntryTypes.includes('longtask')) {
+      w.__obs = new PerformanceObserver((l) => { for (const e of l.getEntries()) w.__long.push(e.duration); });
+      w.__obs.observe({ type: 'longtask' });
+    }
+    const tick = (t: number) => { w.__frames.push(t); if (!w.__stop) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
   const b = await contentBoxOf(img);
   await stroke(page, Array.from({ length: 300 }, (_, i) => at(b, 0.05 + 0.9 * (i / 299), 0.5 + 0.3 * Math.sin(i / 15))));
+  const probe = await page.evaluate(async () => {
+    const w = window as unknown as { __long: number[]; __frames: number[]; __stop: boolean; __obs?: PerformanceObserver };
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // the stroke's last frame is in
+    w.__stop = true;
+    for (const e of w.__obs?.takeRecords() ?? []) w.__long.push(e.duration);
+    w.__obs?.disconnect();
+    const gaps = w.__frames.slice(1).map((t, i) => t - w.__frames[i]);
+    return { long: w.__long, gaps };
+  });
   const pen = layer.locator('[data-shape="pen"]');
   await expect(pen).toHaveCount(1);
   // the stroke completed: its path spans the drawn width
@@ -775,8 +818,14 @@ test('4K-ish drawing stays responsive: a 300-point pen stroke, the pointer-move 
   const sorted = [...moves].sort((u, v) => u - v);
   const median = sorted[Math.floor(sorted.length / 2)];
   test.info().annotations.push({ type: 'pointermove', description: `n=${moves.length} median=${median.toFixed(3)} ms p95=${sorted[Math.floor(sorted.length * 0.95)].toFixed(3)} ms max=${sorted[sorted.length - 1].toFixed(3)} ms` });
-  console.log(test.info().annotations.at(-1)!.description);
+  const gaps = [...probe.gaps].sort((u, v) => u - v);
+  const gapMedian = gaps[Math.floor(gaps.length / 2)];
+  test.info().annotations.push({ type: 'frames', description: `longtask ${longtask ? `supported, ${probe.long.length} (${probe.long.map((d) => d.toFixed(0)).join(', ')} ms)` : 'not supported'}; frames=${gaps.length + 1} gap median=${gapMedian.toFixed(1)} ms p95=${gaps[Math.floor(gaps.length * 0.95)].toFixed(1)} ms max=${gaps[gaps.length - 1].toFixed(1)} ms` });
+  for (const a of test.info().annotations.slice(-2)) console.log(a.description);
   expect(median).toBeLessThan(4);
+  expect(probe.long, 'long tasks during the stroke (ms)').toEqual([]);
+  expect(gaps.length).toBeGreaterThan(30); // frames ran during the stroke
+  expect(gapMedian).toBeLessThanOrEqual(20);
   // leave without a comment: the drawing is discarded on confirmation
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: /^(Discard|Выбросить)$/ }).click();
