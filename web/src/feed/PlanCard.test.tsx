@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ClientMessage } from '@nota-bene/shared';
+import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { whereOf } from '@/comments/send.ts';
 import { SelectionButton, type PendingSelection } from '@/comments/SelectionButton.tsx';
@@ -25,10 +26,12 @@ function setup(onComment: (s: PendingSelection) => void = () => {}) {
   const store = makeStore({ url: 'ws://x', connect: vi.fn(() => ({ send: (m: ClientMessage) => (sent.push(m), true), close() {} })) });
   const view = render(
     <Provider store={store}>
-      <main data-chat-pane>
-        <div id="items"><Feed /></div>
-        <SelectionButton onComment={onComment} />
-      </main>
+      <TooltipProvider>
+        <main data-chat-pane>
+          <div id="items"><Feed /></div>
+          <SelectionButton onComment={onComment} />
+        </main>
+      </TooltipProvider>
     </Provider>,
   );
   act(() => {

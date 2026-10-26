@@ -332,3 +332,27 @@ test('Esc while the agent works: picker, then popup, then the turn @slow', async
   await expect(donesAfter(page, next).first()).toHaveText(/прервано|interrupted/);
   await expect(working).toBeHidden();
 });
+
+test('one step to a comment: a label chip next to the selection, or just start typing @chat', async ({ page }) => {
+  await open(page);
+  const text = await turn(page, 'bar');
+  await select(page, text, 0, 4);
+  await page.getByRole('button', { name: /^(Looks good|Выглядит хорошо)$/ }).click();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page).first()).toContainText('👍');
+  await expect(popup(page)).toBeHidden();
+
+  // a mouse selection takes the focus out of the composer; the scripted one does not
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await select(page, text, 0, 4);
+  await expect(page.getByTestId('selection-bar')).toBeVisible();
+  await page.keyboard.press('x');
+  await expect(popup(page)).toBeVisible();
+  await expect(commentBox(page)).toBeFocused();
+  await page.keyboard.type('yz');
+  await expect(commentBox(page)).toHaveValue('xyz');
+  await page.keyboard.press('Escape');
+
+  await cards(page).first().getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
+  await expect(cards(page)).toHaveCount(0);
+});

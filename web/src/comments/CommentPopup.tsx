@@ -24,7 +24,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   const switching = useAppSelector(selectSwitching);
   const root = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(pending.text ?? '');
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [note, setNote] = useState('');
@@ -55,7 +55,10 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   // focus once positioned: a `visibility:hidden` textarea (before the layout effect sets pos) cannot take focus
   const placed = pos !== null;
   useEffect(() => {
-    if (placed) area.current?.focus({ preventScroll: true });
+    if (!placed || !area.current) return;
+    area.current.focus({ preventScroll: true });
+    const end = area.current.value.length; // opened by typing: the caret goes after what was typed
+    area.current.setSelectionRange(end, end);
   }, [placed]);
 
   useEffect(() => {

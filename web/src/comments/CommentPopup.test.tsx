@@ -22,7 +22,7 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
 });
 
-function setup() {
+function setup(p: PendingSelection = pending) {
   const sent: ClientMessage[] = [];
   const store = makeStore({
     url: 'ws://x',
@@ -37,7 +37,7 @@ function setup() {
       <TooltipProvider>
         <p id="outside">outside</p>
         <Composer />
-        <CommentPopup pending={pending} onClose={onClose} />
+        <CommentPopup pending={p} onClose={onClose} />
       </TooltipProvider>
     </Provider>,
   );
@@ -200,4 +200,12 @@ it('while switching, a hovered chip explains why it is off', async () => {
   const chip = screen.getByRole('button', { name: 'Verify this' });
   fireEvent.focus(chip.parentElement!);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('switching…');
+});
+
+it('opened by typing: the typed letter is in the field, the caret after it', async () => {
+  setup({ ...pending, text: 'н' });
+  const area = screen.getByRole('textbox', { name: 'Comment…' }) as HTMLTextAreaElement;
+  await waitFor(() => expect(document.activeElement).toBe(area));
+  expect(area.value).toBe('н');
+  expect(area.selectionStart).toBe(1);
 });

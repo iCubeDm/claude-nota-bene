@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientMessage } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { Composer } from '@/composer/Composer.tsx';
@@ -22,18 +22,20 @@ afterEach(() => {
 });
 
 // the button hides on tab switches, so it reads the store
-const withStore = (ui: React.ReactElement) =>
-  render(<Provider store={makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) })}>{ui}</Provider>);
+const withStore = (ui: React.ReactElement, store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) })) =>
+  render(<Provider store={store}><TooltipProvider>{ui}</TooltipProvider></Provider>);
 
 function setup(items: string) {
   const onComment = vi.fn<(s: PendingSelection) => void>();
+  const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   const view = withStore(
     <main data-chat-pane>
       <div id="items" dangerouslySetInnerHTML={{ __html: items }} />
       <SelectionButton onComment={onComment} />
     </main>,
+    store,
   );
-  return { onComment, view, q: (id: string) => view.container.querySelector(`[data-item-id="${id}"]`)! };
+  return { onComment, view, store, q: (id: string) => view.container.querySelector(`[data-item-id="${id}"]`)! };
 }
 
 function select(a: Node, ao: number, b: Node, bo: number) {
@@ -76,7 +78,7 @@ it('a selection spanning two items is clipped to the first', async () => {
   const t2 = q('u1').firstChild!;
   select(t1, 6, t2, 6);
   await up(q('u1'));
-  fireEvent.click(screen.getByRole('button'));
+  fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
   const sel = onComment.mock.calls[0][0];
   expect(sel.anchor.source).toEqual({ kind: 'message', id: 'a1' });
   expect(sel.anchor.quote).toBe('brave world');
@@ -93,7 +95,7 @@ async function shown() {
 
 it('mousedown on the button is default-prevented so the selection survives', async () => {
   await shown();
-  expect(fireEvent.mouseDown(screen.getByRole('button'))).toBe(false);
+  expect(fireEvent.mouseDown(screen.getByRole('button', { name: '💬 Comment' }))).toBe(false);
 });
 
 it('Esc hides the button', async () => {
@@ -185,7 +187,7 @@ it('a whole user bubble yields a quote without the meta header', async () => {
   const u = q('u1');
   select(u, 0, u, u.childNodes.length);
   await up(u);
-  fireEvent.click(screen.getByRole('button'));
+  fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
   expect(onComment.mock.calls[0][0].anchor.quote).toBe('do the thing');
 });
 
@@ -256,7 +258,7 @@ it('a selection from a file root into something outside is clipped to the file',
   const o = view.container.querySelector('#outside p')!.firstChild!;
   select(t, 6, o, 3);
   await up(root);
-  fireEvent.click(screen.getByRole('button'));
+  fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
   expect(onComment.mock.calls[0][0].anchor.quote).toBe('brave world');
 });
 
@@ -283,7 +285,7 @@ it('an md file whose content has its own data-file-path: the selection still anc
   const t = root.querySelector('[data-file-path="x.md"] p')!.firstChild!;
   select(t, 7, t, 12);
   await up(root);
-  fireEvent.click(screen.getByRole('button'));
+  fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
   const { anchor } = onComment.mock.calls[0][0];
   expect(anchor.source).toEqual({ kind: 'file', path: 'docs/n.md' });
   expect(anchor.quote).toBe('brave');
@@ -342,5 +344,62 @@ it('the button has no transition, so it appears in place instead of flying in fr
   const b = screen.getByRole('button', { name: /comment/i });
   expect(b.className).toContain('transition-none');
   expect(b.className).not.toContain('transition-all');
-  expect(b.style.visibility).toBe('visible');
+  expect(screen.getByTestId('selection-bar').style.visibility).toBe('visible');
+});
+
+describe('one step to a comment', () => {
+  async function shown() {
+    const r = setup(A);
+    const t = r.q('a1').querySelector('p')!.firstChild!;
+    select(t, 6, t, 11);
+    await up(r.q('a1'));
+    return r;
+  }
+
+  it('a label chip next to the selection adds a labelled comment at once and opens the panel', async () => {
+    const { store, onComment } = await shown();
+    fireEvent.click(screen.getByRole('button', { name: 'Looks good' }));
+    const [c] = store.getState().comments.items;
+    expect(c).toMatchObject({ label: 'looks-good', text: '', anchor: { quote: 'brave' } });
+    expect(store.getState().comments.ui.panelOpen).toBe(true);
+    expect(onComment).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('selection-bar')).toBeNull();
+    expect(window.getSelection()!.isCollapsed).toBe(true);
+  });
+
+  it('offers only the most used labels; the rest stay in the popup', async () => {
+    await shown();
+    const names = screen.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
+    expect(names).toEqual(['💬 Comment', 'Looks good', 'Clarify this', 'Verify this', 'Out of scope']);
+  });
+
+  it('typing a letter opens the popup with that letter', async () => {
+    const { onComment } = await shown();
+    const e = new KeyboardEvent('keydown', { key: 'п', bubbles: true, cancelable: true });
+    act(() => { document.body.dispatchEvent(e); });
+    expect(e.defaultPrevented).toBe(true);
+    expect(onComment).toHaveBeenCalledWith(expect.objectContaining({ text: 'п', anchor: expect.objectContaining({ quote: 'brave' }) }));
+    expect(screen.queryByTestId('selection-bar')).toBeNull();
+  });
+
+  it('Enter opens the popup empty', async () => {
+    const { onComment } = await shown();
+    act(() => { fireEvent.keyDown(document.body, { key: 'Enter' }); });
+    expect(onComment).toHaveBeenCalledWith(expect.not.objectContaining({ text: expect.anything() }));
+  });
+
+  it('shortcuts, space and keys typed into a field are left alone', async () => {
+    const { onComment } = await shown();
+    const field = document.createElement('textarea');
+    document.body.append(field);
+    act(() => {
+      fireEvent.keyDown(document.body, { key: 'c', metaKey: true });
+      fireEvent.keyDown(document.body, { key: ' ' });
+      fireEvent.keyDown(document.body, { key: 'Shift' });
+      fireEvent.keyDown(field, { key: 'a' });
+    });
+    field.remove();
+    expect(onComment).not.toHaveBeenCalled();
+    expect(screen.getByTestId('selection-bar')).toBeInTheDocument();
+  });
 });

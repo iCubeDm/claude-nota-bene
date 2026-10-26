@@ -2,13 +2,25 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor, AnchorSource } from '@nota-bene/shared';
 import { makeAnchor } from '@/anchors/resolve.ts';
 import { offsetsOf, textOf } from '@/anchors/text.ts';
+import type { QuickLabelId } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
+import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
-import { useAppSelector } from '@/store/store.ts';
+import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { labelText, QUICK_LABELS } from './labels.ts';
+import { LabelTip } from './LabelTip.tsx';
+import { addComment, setPanelOpen } from './slice.ts';
 
-/** What the popup (M1-10) needs: where the text is anchored and where to put the popup. */
-export type PendingSelection = { anchor: Anchor; rect: DOMRect };
+/** What the popup (M1-10) needs: where the text is anchored and where to put the popup; `text` is what was typed to open it. */
+export type PendingSelection = { anchor: Anchor; rect: DOMRect; text?: string };
+
+/** The labels offered right next to the selection, one click each; the rest are in the popup. */
+const BAR: QuickLabelId[] = ['looks-good', 'clarify', 'verify', 'out-of-scope'];
+const BAR_LABELS = QUICK_LABELS.filter((l) => BAR.includes(l.id));
+
+const editable = (t: EventTarget | null): boolean =>
+  t instanceof HTMLElement && (t.isContentEditable || !!t.closest('input, textarea, select, [contenteditable]'));
 
 const elementOf = (n: Node): Element | null => (n.nodeType === Node.ELEMENT_NODE ? (n as Element) : n.parentElement);
 
@@ -76,14 +88,20 @@ function attachedInside(rect: DOMRect, view: View): boolean {
   return edge >= view.top && edge <= view.bottom;
 }
 
-/** Floating "comment" button next to a text selection in the chat or an open file. */
+/**
+ * Floating bar next to a text selection in the chat or an open file: "comment" opens the popup, a label chip adds a
+ * labelled comment at once, and typing (or Enter) opens the popup with what was typed.
+ */
 export function SelectionButton({ onComment }: { onComment: (s: PendingSelection) => void }) {
   const t = useT();
+  const dispatch = useAppDispatch();
   const [sel, setSel] = useState<PendingSelection | null>(null);
-  const shown = useRef(false);
+  const selNow = useRef<PendingSelection | null>(null);
+  selNow.current = sel;
+  const onCommentNow = useRef(onComment);
+  onCommentNow.current = onComment;
   const dismissed = useRef(false); // Esc / click: the DOM selection stays, so scroll must not bring the button back
-  shown.current = sel !== null;
-  const btn = useRef<HTMLButtonElement>(null);
+  const btn = useRef<HTMLDivElement>(null);
   const switchingNow = useRef(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   // a tab switch hides the pane the selection is in: the button goes with it
@@ -106,9 +124,21 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
     const hide = () => setSel(null);
     // capture phase + preventDefault: Esc that dismisses the button must not also interrupt the agent (Composer skips defaultPrevented)
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !shown.current) return;
+      const s = selNow.current;
+      if (!s || e.isComposing) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        dismissed.current = true;
+        hide();
+        return;
+      }
+      // type to comment: a printable key (not space, which scrolls) or Enter, outside any field, without shortcuts
+      if (e.metaKey || e.ctrlKey || e.altKey || editable(e.target)) return;
+      const typed = e.key.length === 1 && e.key !== ' ';
+      if (!typed && e.key !== 'Enter') return;
       e.preventDefault();
       dismissed.current = true;
+      onCommentNow.current(typed ? { ...s, text: e.key } : s);
       hide();
     };
     // scroll (also the feed's own autoscroll while streaming): follow the text, hide only when the selection is gone or scrolled out of view.
@@ -145,20 +175,47 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
   }, [sel]);
 
   if (!sel) return null;
+  const label = (id: QuickLabelId) => {
+    dismissed.current = true;
+    dispatch(addComment({ anchor: sel.anchor, text: '', label: id }));
+    window.getSelection()?.removeAllRanges();
+    dispatch(setPanelOpen(true));
+    setSel(null);
+  };
   return (
-    <Button
+    <div
       ref={btn}
-      size="sm"
-      className="fixed z-10 transition-none shadow-[0_6px_20px_rgba(0,0,0,0.4)]"
+      data-testid="selection-bar"
+      className="fixed z-10 flex items-center gap-1 rounded-[10px] border border-border bg-popover p-1 shadow-[0_6px_20px_rgba(0,0,0,0.4)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
       onMouseDown={(e) => e.preventDefault()} // keep the text selected through the click
-      onClick={() => {
-        dismissed.current = true;
-        onComment(sel);
-        setSel(null);
-      }}
     >
-      {t('commentBtn')}
-    </Button>
+      <Button
+        size="sm"
+        className="transition-none"
+        onClick={() => {
+          dismissed.current = true;
+          onComment(sel);
+          setSel(null);
+        }}
+      >
+        {t('commentBtn')}
+      </Button>
+      {BAR_LABELS.map((l) => (
+        <Tooltip key={l.id}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={labelText(l.id)}
+              onClick={() => label(l.id)}
+              className="inline-flex min-h-7 min-w-7 items-center justify-center rounded-full px-1.5 text-sm leading-none hover:bg-accent hover:text-accent-foreground"
+            >
+              {l.emoji}
+            </button>
+          </TooltipTrigger>
+          <LabelTip id={l.id} />
+        </Tooltip>
+      ))}
+    </div>
   );
 }
