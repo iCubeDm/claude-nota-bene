@@ -108,3 +108,15 @@
 .nb-media-pane.nb-natural:not([hidden]) { display: block; }
 .nb-fit { max-width: 100%; max-height: calc(100% - 2rem); object-fit: contain; }
 .nb-media-pane.nb-natural .nb-fit { max-width: none; max-height: none; margin: 1rem auto; }
+
+/* file-type letter marks (FileIcon): generated content, so the letters are never part of a row's text or a copy */
+.nb-icon-label {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  user-select: none;
+}
+.nb-icon-label::before { content: attr(data-label); }

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { setValueAndCaret } from '@/comments/insertText.ts';
-import { ICONS, Svg, iconForPath } from '@/tabs/TabStrip.tsx';
+import { FileIcon } from '@/files/FileIcon.tsx';
 import { placeListFor, revealSelected } from './placeList.ts';
 
 // copied from the prototype: `@` at a word start, up to the caret
@@ -149,7 +149,7 @@ export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElemen
             onClick={() => pick(k)}
               className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[12.5px] text-foreground ${k === state.sel ? 'bg-primary/15' : 'hover:bg-accent'}`}
           >
-            <Svg>{dir ? ICONS.dir : iconForPath(p)}</Svg>
+            <FileIcon path={p} dir={dir} />
             <span className="flex-none">{highlight(clean.slice(cut) + (dir ? '/' : ''), state.q)}</span>
             <span className="truncate text-muted-foreground">{clean.slice(0, cut)}</span>
           </div>

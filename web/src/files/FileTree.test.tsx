@@ -41,8 +41,11 @@ const live = (store: ReturnType<typeof setup>, ev: ServerEvent) => act(() => { s
 
 it('expanding a folder fetches it once; a file click opens a tab', async () => {
   const store = setup();
+  expect((await row('src')).querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('dir');
   fireEvent.click(await row('src'));
-  await row('main.ts');
+  // file-type icons (M6-11): an open folder, a TypeScript file
+  expect((await row('main.ts')).querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('ts');
+  expect(screen.getByRole('button', { name: /^src/ }).querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('dirOpen');
   fireEvent.click(screen.getByRole('button', { name: /^src/ })); // collapse
   fireEvent.click(screen.getByRole('button', { name: /^src/ })); // expand again
   await row('main.ts');

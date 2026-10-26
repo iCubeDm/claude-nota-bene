@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
-import { AUDIO, IMAGE, VIDEO } from '@/files/kinds.ts';
+import { FileIcon } from '@/files/FileIcon.tsx';
 import { fileKey } from '@/files/sources.ts';
 import { SourceChip } from '@/files/SourcePicker.tsx';
 import { selectSession, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
@@ -13,14 +13,9 @@ export const Svg = ({ children, size = 14 }: { children: ReactNode; size?: numbe
 );
 export const ICONS = {
   chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
-  file: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
-  media: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></>,
   dir: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   comments: <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></>,
-  img: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-9 9" /></>,
 };
-export const iconForPath = (p: string) => (VIDEO.test(p) || AUDIO.test(p) ? ICONS.media : IMAGE.test(p) ? ICONS.img : ICONS.file);
-const iconFor = (tab: Tab) => (tab.kind === 'chat' ? ICONS.chat : iconForPath(tab.path));
 
 const basename = (p: string) => p.split('/').pop() || p;
 
@@ -51,7 +46,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           className={`group flex h-7 max-w-[260px] flex-none cursor-pointer items-center gap-1.5 rounded-lg pr-1.5 pl-2.5 text-[12.5px] font-medium whitespace-nowrap hover:bg-muted/50 hover:text-foreground ${active ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
         >
           <span className="hidden size-1.5 flex-none animate-pulse rounded-full bg-primary group-data-[playing=true]:inline-block" />
-          <Svg>{iconFor(tab)}</Svg>
+          {tab.kind === 'chat' ? <Svg>{ICONS.chat}</Svg> : <FileIcon path={tab.path} />}
           <span className="truncate">{label}</span>
           {tab.kind === 'file' && tab.ref && <SourceChip name={tab.ref} />}
           {badge > 0 && <span data-badge className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{badge}</span>}

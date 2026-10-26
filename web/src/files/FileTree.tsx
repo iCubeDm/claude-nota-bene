@@ -3,7 +3,8 @@ import type { TreeEntry } from '@nota-bene/shared';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { selectActiveTab, openFile } from '@/tabs/slice.ts';
-import { ICONS, Svg, iconForPath } from '@/tabs/TabStrip.tsx';
+import { Svg } from '@/tabs/TabStrip.tsx';
+import { FileIcon } from './FileIcon.tsx';
 import { clearReveal, pickSource, revealFile, selectTree, setDirs, setTreeOpen, toggleDir } from '@/tree/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { useStore } from 'react-redux';
@@ -191,7 +192,7 @@ export function FileTree() {
             <button type="button" data-path={p} aria-expanded={isOpen} onClick={() => { setExpanding(false); d(toggleDir(p)); }} style={pad}
               className={`flex h-6 w-full items-center gap-1.5 rounded pr-2 text-left text-xs text-foreground/85 hover:bg-muted/50 hover:text-foreground${dot}`}>
               <Svg size={12}><path d="m9 6 6 6-6 6" className={isOpen ? 'origin-center rotate-90' : ''} style={{ transformBox: 'fill-box' }} /></Svg>
-              <Svg>{ICONS.dir}</Svg>
+              <FileIcon dir open={isOpen} />
               <span className="min-w-0 flex-1 truncate">{e.name}</span>
             </button>
             {isOpen && renderDir(p, depth + 1)}
@@ -204,7 +205,7 @@ export function FileTree() {
         <button key={p} type="button" data-path={p} onClick={() => d(openFile({ path: p, src, ref }))} style={pad}
           className={`flex h-6 w-full items-center gap-1.5 rounded pr-2 text-left text-xs hover:bg-muted/50 hover:text-foreground${dot} ${activePath === p ? 'bg-primary/15 text-foreground' : 'text-foreground/85'}`}>
           <span className="w-3 flex-none" />
-          <Svg>{iconForPath(e.name)}</Svg>
+          <FileIcon path={e.name} />
           <span className="min-w-0 flex-1 truncate">{e.name}</span>
           {n > 0 && <span data-badge className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{n}</span>}
         </button>

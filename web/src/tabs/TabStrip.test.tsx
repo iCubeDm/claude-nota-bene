@@ -59,6 +59,7 @@ it('Copy path writes the project-relative path; Reveal is not in the menu (it is
 
 it('labels are basenames with the full path in title; aria-selected follows the active tab', () => {
   setup(['src/a/x.ts']);
+  expect(tab('x.ts').querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('ts'); // M6-11
   expect(tab('x.ts')).toHaveAttribute('title', 'src/a/x.ts');
   expect(tab('x.ts')).toHaveAttribute('aria-selected', 'true');
   expect(tab('Chat')).toHaveAttribute('aria-selected', 'false');

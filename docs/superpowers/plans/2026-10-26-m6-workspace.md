@@ -123,12 +123,12 @@ The hotkey list appears in the `?` help.
 - [x] Remove "Reveal in tree" from the tab context menu (the user: it belongs in the tree header).
 
 ### M6-11: File-type icons
-- [ ] Use a small built-in icon set by extension and well-known names, in the tree, tabs, the `@` picker and Cmd+E:
+- [x] Use a small built-in icon set by extension and well-known names, in the tree, tabs, the `@` picker and Cmd+E:
   - `.ts/.tsx/.js/.mjs/.json/.md/.css/.html/.py/.sh/.yml/.toml`;
   - images, video, audio;
   - `package.json`, `README`, `.gitignore`, `Dockerfile`;
   - folders, closed and open.
-- [ ] The icons are coloured as in IntelliJ, inline SVG, with no new dependency. If a third-party set is used, it must be MIT-licensed, vendored, and have its licence noted.
+- [x] The icons are coloured as in IntelliJ, inline SVG, with no new dependency. If a third-party set is used, it must be MIT-licensed, vendored, and have its licence noted.
 
 ### M6-12: Tab overflow, IntelliJ-style
 - [ ] No horizontal scrollbar. The wheel scrolls the strip, and the active tab scrolls into view.
