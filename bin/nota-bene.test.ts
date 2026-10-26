@@ -240,6 +240,26 @@ describe('nota-bene launcher', () => {
     expect(windows()['4794']).toBeUndefined();
   }, 15000);
 
+  it('a launcher whose parent shell is SIGKILLed stops with its server: gone within 6 s, port free', async () => {
+    // `; true`: the shell stays the launcher's parent instead of exec-ing it
+    const q = (a: string) => `'${a.replace(/'/g, `'\\''`)}'`;
+    const cmd = [process.execPath, BIN, project, '--port', '4793', '--fake', FAKE, '--no-open'].map(q).join(' ');
+    const wrapper = spawn('/bin/sh', ['-c', `${cmd}; true`], { env: env(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    groups.add(wrapper.pid!);
+    let err = '';
+    wrapper.stderr!.on('data', (d) => (err += d));
+    const w = await waitFor(() => windows()['4793']);
+    await waitFor(() => info(4793));
+    expect(w.launcherPid).not.toBe(wrapper.pid);
+    process.kill(wrapper.pid!, 'SIGKILL'); // the shell only, not its group
+    const t0 = Date.now();
+    await waitFor(() => !alive(w.launcherPid!) && !alive(w.pid), 6000);
+    expect(Date.now() - t0).toBeLessThan(6000);
+    expect(await portFree(4793)).toBe(true);
+    expect(windows()['4793']).toBeUndefined(); // stopped as on SIGTERM: unregistered
+    expect(err).toMatch(/the parent process \(pid \d+\) is gone — stopping/);
+  }, 15000);
+
   it('without --port takes the first free port of the range, by a real bind test (loopback and wildcard holders)', async () => {
     await hold(4791);
     await hold(4792, '0.0.0.0');
