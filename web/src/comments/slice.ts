@@ -21,6 +21,7 @@ export const commentsSlice = createSlice({
   reducers: {
     setItems: (s, a: PayloadAction<Comment[]>) => void (s.items = a.payload),
     markSending: (s, a: PayloadAction<string[]>) => void (s.sendingIds = [...s.sendingIds, ...a.payload]),
+    unmarkSending: (s, a: PayloadAction<string[]>) => void (s.sendingIds = s.sendingIds.filter((id) => !a.payload.includes(id))),
     setUnsynced: (s, a: PayloadAction<boolean>) => void (s.unsynced = a.payload),
     markResent: (s) => void ((s.unsynced = false), (s.resent = true)),
     setPanelOpen: (s, a: PayloadAction<boolean>) => void (s.ui.panelOpen = a.payload),
@@ -48,7 +49,7 @@ export const commentsSlice = createSlice({
     }),
 });
 
-export const { markSending, setPanelOpen, openCommentCard, closeCommentCard } = commentsSlice.actions;
+export const { markSending, unmarkSending, setPanelOpen, openCommentCard, closeCommentCard } = commentsSlice.actions;
 
 /** Update locally first, then send the FULL set; a closed socket keeps the local change for the next sync. */
 // Accepted race: two edits within one round trip can see the first echo overwrite the second locally until the second echo lands.

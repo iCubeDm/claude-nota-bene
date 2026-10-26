@@ -111,3 +111,13 @@ it('ConfirmDialog: Enter on the Cancel button cancels, not confirms', async () =
   expect(onCancel).toHaveBeenCalledTimes(1);
   expect(onConfirm).not.toHaveBeenCalled();
 });
+
+it('a Clear refused because the agent turned busy after the dialog opened shows the short note', async () => {
+  const { emit, commands } = setup();
+  await userEvent.click(screen.getByRole('button', { name: /Clear context/ }));
+  await screen.findByRole('dialog');
+  emit({ kind: 'user', id: 'u1', text: 'hi', ts: 1 }); // another window sent
+  await userEvent.keyboard('{Enter}');
+  expect(commands()).toEqual([]);
+  expect(await screen.findByRole('status')).toHaveTextContent('Could not clear: agent is working…');
+});

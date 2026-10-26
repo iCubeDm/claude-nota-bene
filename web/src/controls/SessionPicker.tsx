@@ -3,7 +3,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { getLang, t as tNow, useT } from '@/i18n/index.ts';
 import { selectBusy, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ConfirmDialog } from './ConfirmDialog.tsx';
-import { selectSwitching, switchSession, type SwitchResult } from './slice.ts';
+import { selectSwitching, switchSession } from './slice.ts';
+import { REFUSED, useNote } from './useNote.ts';
 
 /** GET /sessions (server/src/sessions.ts SessionsView). */
 export type SessionsView = {
@@ -47,8 +48,6 @@ export const brief = (status: number | null, body: string): string => {
   return s.length > 120 ? `${s.slice(0, 119)}…` : s;
 };
 
-const REFUSED: Record<Exclude<SwitchResult, 'sent'>, Parameters<typeof tNow>[0]> = { busy: 'working', switching: 'switching', offline: 'offline' };
-
 /**
  * "Sessions ▾" in the header (claude --resume): every session of every folder, this project first. Picking one asks,
  * then sends `switch`; the header says "switching…" until the new session is announced. Off while the agent works or
@@ -68,9 +67,7 @@ export function SessionPicker() {
   const trigger = useRef<HTMLButtonElement>(null);
   const loadSeq = useRef(0);
   const confirmed = useRef(false);
-  const [note, setNote] = useState('');
-  const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(noteTimer.current), []);
+  const [note, showNote] = useNote();
   const session = useAppSelector(selectSession);
 
   // another session or root now (another window switched, a /clear): what the menu or the question showed is stale
@@ -213,9 +210,7 @@ export function SessionPicker() {
             // sent: the trigger is disabled now, so the focus goes to the composer (the draft waits there)
             confirmed.current = r === 'sent';
             if (r !== 'sent') {
-              setNote(t('switchFail') + t(REFUSED[r]));
-              clearTimeout(noteTimer.current);
-              noteTimer.current = setTimeout(() => setNote(''), 4000);
+              showNote(t('switchFail') + t(REFUSED[r]));
             }
           }}
           onCancel={() => { confirmed.current = false; setAsk(null); }}

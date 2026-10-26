@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import type { QuickLabelId } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
-import { useAppDispatch } from '@/store/store.ts';
+import { selectSwitching } from '@/controls/slice.ts';
+import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { instructionOf, labelText, QUICK_LABELS } from './labels.ts';
 import { EmojiMenu } from './EmojiMenu.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
@@ -17,6 +18,8 @@ import { addComment, setPanelOpen } from './slice.ts';
 export function CommentPopup({ pending, onClose }: { pending: PendingSelection; onClose: () => void }) {
   const t = useT();
   const dispatch = useAppDispatch();
+  // the comment set belongs to the session being left: no new comment mid-switch (the server resets it with the session)
+  const switching = useAppSelector(selectSwitching);
   const root = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
@@ -38,7 +41,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   const uploading = intake.pending.length > 0;
 
   const add = (label?: QuickLabelId) => {
-    if (uploading) return;
+    if (uploading || switching) return;
     const body = text.trim();
     const has = !!(body || label || images.length);
     if (has) dispatch(addComment({ anchor: pending.anchor, text: body, ...(label && { label }), ...(images.length && { images: images.map((i) => i.id) }) }));
@@ -137,8 +140,8 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
           <button
             key={l.id}
             type="button"
-            title={instructionOf({ label: l.id })}
-            disabled={uploading}
+            title={switching ? t('switching') : instructionOf({ label: l.id })}
+            disabled={uploading || switching}
             onClick={() => add(l.id)}
             className="rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
           >
@@ -171,7 +174,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
             📎
           </button>
           <span data-slot="emoji"><EmojiMenu target={area} /></span>
-          <Button size="xs" disabled={uploading} onClick={() => add()}>{t('add')}</Button>
+          <Button size="xs" disabled={uploading || switching} title={switching ? t('switching') : undefined} onClick={() => add()}>{t('add')}</Button>
         </span>
       </div>
     </div>

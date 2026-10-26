@@ -262,3 +262,12 @@ test('compact_boundary adds a compacted line, live or replayed', () => {
   expect(fold([cb]).items).toEqual(want);
   expect(reduce(emptyFeed, { kind: 'replay', events: [cb] }).items).toEqual(want);
 });
+
+test('the live result that follows a clear adds no done line; one after a new message does', () => {
+  const s0 = fold([user(), result()]);
+  const cleared = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7), result({ duration_ms: 0 })], s0);
+  expect(cleared.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
+  expect(cleared.busy).toBe(false);
+  const next = fold([user({ id: 'u2' }), result()], cleared);
+  expect(next.items.map((i) => i.kind)).toEqual(['marker', 'user', 'done']);
+});

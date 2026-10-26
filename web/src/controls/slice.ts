@@ -113,10 +113,12 @@ controlsListener.startListening({
 });
 
 /** compact / clear. Refused while busy or switching (the server would answer `busy` too); the confirmation for clear is the caller's. */
-export const runCommand = (name: 'compact' | 'clear'): AppThunk => (_d, getState, { send }) => {
+export type CommandResult = 'sent' | 'busy' | 'switching' | 'offline';
+export const runCommand = (name: 'compact' | 'clear'): AppThunk<CommandResult> => (_d, getState, { send }) => {
   const st = getState();
-  if (st.feed.busy || st.controls.switching) return;
-  send({ type: 'command', name });
+  if (st.controls.switching) return 'switching';
+  if (st.feed.busy) return 'busy';
+  return send({ type: 'command', name }) ? 'sent' : 'offline';
 };
 
 /**

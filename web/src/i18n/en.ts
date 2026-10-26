@@ -169,6 +169,8 @@ export const en: Dict = {
   restartFail: 'Could not restart the server: ',
   restartMenu: 'Restart menu',
   switchFail: 'Could not switch: ',
+  clearFail: 'Could not clear: ',
+  sendRefused: 'Not sent: a session switch is in progress',
   sessFail: 'Could not load sessions: ',
   loading: 'loading…',
   untitled: '(untitled)',

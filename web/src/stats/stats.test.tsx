@@ -83,3 +83,15 @@ it('labels follow the language', () => {
   act(() => setLang('ru'));
   expect(screen.getByRole('meter')).toHaveAttribute('aria-label', 'контекст 10%');
 });
+
+it('the meters sit in the composer tools row, left of the compact and clear buttons (prototype footer)', async () => {
+  const { Composer } = await import('@/composer/Composer.tsx');
+  const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+  render(<Provider store={store}><TooltipProvider><Composer /></TooltipProvider></Provider>);
+  act(() => { store.dispatch(serverEvent({ kind: 'stats', stats: { context: ctx(40), limits: null, cost: null } } as ServerEvent)); });
+  const meter = screen.getByRole('meter');
+  const compact = screen.getByRole('button', { name: /Compact context/ });
+  const row = meter.closest('[data-tools-row]')!;
+  expect(row).toContainElement(compact);
+  expect(meter.compareDocumentPosition(compact) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});

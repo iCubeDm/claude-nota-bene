@@ -179,7 +179,10 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
       const waiting = answered ? s.waiting.filter((id) => !answered.includes(id))
         : m.is_error === true ? [] : s.waiting;
       const busy = s.forcePending || (m.queued_turn_count ?? 0) > 0 || waiting.length > 0;
-      return { ...s, items: [...closed, done], busy, forcePending: false, waiting, turnSeq: s.turnSeq + 1 };
+      // the live result that follows a clear still arrives: with no user message since the cleared line there is no turn to report
+      const lastCleared = closed.findLastIndex((it) => it.kind === 'marker' && it.what === 'cleared');
+      const orphan = lastCleared >= 0 && !closed.slice(lastCleared).some((it) => it.kind === 'user');
+      return { ...s, items: orphan ? closed : [...closed, done], busy, forcePending: false, waiting, turnSeq: s.turnSeq + 1 };
     }
     case 'command_lifecycle': {
       // a queued send that was cancelled (e.g. Stop with cancel_queued) never gets a result of its own
@@ -229,7 +232,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'comments': // handled by the comments store, not the feed
     case 'stats': // handled by the stats store (M4)
     case 'mode':
-    case 'send-refused': // handled in M5-08 (the web side of the refusal)
+    case 'send-refused': // composer/refused.ts: restores the draft, never the feed
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
     default: {

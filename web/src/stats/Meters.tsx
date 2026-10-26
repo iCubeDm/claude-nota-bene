@@ -59,5 +59,5 @@ export function Meters() {
     ),
   ].filter(Boolean);
   if (!parts.length) return null;
-  return <div className="flex items-center justify-end gap-3 pb-1.5 text-xs text-muted-foreground">{parts}</div>;
+  return <span className="flex flex-none items-center gap-3 font-mono text-[11px] text-muted-foreground">{parts}</span>;
 }

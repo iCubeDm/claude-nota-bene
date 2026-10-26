@@ -10,6 +10,7 @@ import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent, useAppDispatch } from '@/store/store.ts';
 import { addImage, uploadFinished, uploadStarted } from '@/composer/slice.ts';
 import { openFile } from '@/tabs/slice.ts';
+import { getToasts, resetToasts } from '@/shell/toast.ts';
 import { sendBatch } from './send.ts';
 import { CommentsPanel } from './CommentsPanel.tsx';
 
@@ -257,4 +258,42 @@ it('a send from a file tab switches to the chat, where the reply shows; offline 
   act(() => { r = off.dispatch(sendBatch(false)); });
   expect(r).toBe('offline');
   expect(off.getState().tabs.active).toBe('file:notes.md');
+});
+
+const lastSend = (sent: ClientMessage[]) => sent.filter((m) => m.type === 'send').at(-1) as Extract<ClientMessage, { type: 'send' }>;
+
+it('send-refused restores the draft, the images and the comment ids, and toasts', async () => {
+  resetToasts();
+  const { sent, store, box } = setup([cm('c1')]);
+  act(() => void store.dispatch(addImage({ id: 'a'.repeat(64) + '.png', mediaType: 'image/png' })));
+  await userEvent.type(box, 'please{Enter}');
+  const m = lastSend(sent);
+  expect(box.value).toBe('');
+  expect(store.getState().comments.sendingIds).toEqual(['c1']);
+  act(() => void store.dispatch(serverEvent({ kind: 'send-refused', id: m.id, reason: 'switching' })));
+  expect(box.value).toBe('please');
+  expect(store.getState().composer.images).toHaveLength(1);
+  expect(store.getState().comments.sendingIds).toEqual([]);
+  expect(getToasts().map((x) => x.title)).toContain('Not sent: a session switch is in progress');
+});
+
+it('send-refused keeps a newer draft, and says what it was', async () => {
+  resetToasts();
+  const { sent, store, box } = setup([]);
+  await userEvent.type(box, 'first{Enter}');
+  await userEvent.type(box, 'second');
+  act(() => void store.dispatch(serverEvent({ kind: 'send-refused', id: lastSend(sent).id, reason: 'switching' })));
+  expect(box.value).toBe('second');
+  const t = getToasts().find((x) => x.title === 'Not sent: a session switch is in progress');
+  expect(t?.msg).toContain('first');
+});
+
+it('the echo ends the wait: a later send-refused with that id restores nothing', async () => {
+  resetToasts();
+  const { sent, store, box } = setup([]);
+  await userEvent.type(box, 'ok{Enter}');
+  const m = lastSend(sent);
+  act(() => void store.dispatch(serverEvent({ kind: 'user', id: m.id, text: 'ok', ts: 9 })));
+  act(() => void store.dispatch(serverEvent({ kind: 'send-refused', id: m.id, reason: 'switching' })));
+  expect(box.value).toBe('');
 });
