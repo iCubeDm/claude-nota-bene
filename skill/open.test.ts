@@ -124,13 +124,17 @@ const env = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => {
 };
 
 type Result = { code: number; out: string };
-function nb(args: string, o: { cwd?: string; env?: Record<string, string>; sid?: string; script?: string } = {}) {
-  fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
+type RunOpts = { cwd?: string; env?: Record<string, string>; script?: string; shell?: string };
+/** Runs `<shell> argv...` (default: /bin/bash, the shebang's interpreter, 3.2 on macOS) in the test environment. */
+function sh(argv: string[], o: RunOpts = {}) {
   return new Promise<Result>((resolve) => {
-    // /bin/bash: the shebang's interpreter (3.2 on macOS), not whatever bash is first on PATH
-    execFile('/bin/bash', [o.script ?? stubApp, args, o.sid ?? SID], { cwd: o.cwd ?? project, env: env(o.env), timeout: 30_000 },
+    execFile(o.shell ?? '/bin/bash', argv, { cwd: o.cwd ?? project, env: env(o.env), timeout: 30_000 },
       (err, stdout, stderr) => resolve({ code: err ? ((err as { code?: number }).code ?? -1) : 0, out: stdout + stderr }));
   });
+}
+function nb(args: string, o: RunOpts & { sid?: string } = {}) {
+  fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
+  return sh([o.script ?? stubApp, args, o.sid ?? SID], o);
 }
 const launches = (): string[][] => {
   try {
@@ -413,4 +417,137 @@ describe('two /nb calls on one folder at the same moment', () => {
     expect(roots.filter((r) => r === project)).toHaveLength(1);
     expect(url(a)).toBe(`http://127.0.0.1:${registry()[0]!.replace('.json', '')}`);
   }, 60_000);
+});
+
+// --plan: what the /nb skill runs. It launches nothing; the skill runs NB-RUN as a background task, then NB-WAIT.
+describe('--plan', () => {
+  const stubBin = () => path.join(tmp, 'app/bin/nota-bene.mjs');
+  const plan = (args: string, o: RunOpts & { sid?: string } = {}) => {
+    fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
+    return sh([o.script ?? stubApp, '--plan', args, o.sid ?? SID], o);
+  };
+  const lines = (r: Result) => Object.fromEntries(r.out.trimEnd().split('\n').map((l) => {
+    const m = /^(NB-RUN|NB-WAIT|NB-NAME): (.*)$/.exec(l);
+    if (!m) throw new Error(`not a plan line: ${l}`);
+    return [m[1], m[2]];
+  }));
+
+  it('new: the foreground launcher with --new, the wait, the task name; nothing launched', async () => {
+    const r = await plan('new');
+    expect(r.code).toBe(0);
+    expect(r.out).toBe(`NB-RUN: node ${stubBin()} ${project} --new\n`
+      + `NB-WAIT: ${stubApp} --wait ${project}\n`
+      + 'NB-NAME: Nota Bene · project\n');
+    expect(launches()).toEqual([]);
+    expect(opened()).toEqual([]);
+  });
+
+  it('no argument: the default resume, and --last words the note the wait prints', async () => {
+    let r = await plan('');
+    expect(lines(r)['NB-RUN']).toBe(`node ${stubBin()} ${project}`);
+    expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} `
+      + String.raw`\ \(new\ session:\ no\ earlier\ window\ session\ for\ this\ folder\)`);
+    const id = 'feedface-0000-4000-8000-000000000001';
+    fs.writeFileSync(path.join(nbHome, 'sessions.json'), JSON.stringify({ [project]: id }));
+    fs.mkdirSync(path.join(claudeDir, 'projects/p'), { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, 'projects/p', `${id}.jsonl`), '');
+    r = await plan('');
+    expect(lines(r)['NB-RUN']).toBe(`node ${stubBin()} ${project}`);
+    expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} `
+      + String.raw`\ \(resumed\ the\ last\ window\ session\ feedface\)`);
+    expect(launches()).toEqual([]);
+  });
+
+  it('fork with a valid session id: --resume SID --fork', async () => {
+    const r = await plan('форк');
+    expect(r.code).toBe(0);
+    expect(lines(r)['NB-RUN']).toBe(`node ${stubBin()} ${project} --resume ${SID} --fork`);
+    expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} ` + String.raw`\ \(forked\ from\ this\ conversation\)`);
+  });
+
+  it('a window already open on the folder: the usual NB: line, brought to front, no NB-RUN', async () => {
+    await fakeWindow(4792, project);
+    register(4792, project, process.pid);
+    let r = await plan('');
+    expect(r.out).toBe('NB: already open at http://127.0.0.1:4792 (brought to front).\n');
+    expect(opened()).toEqual(['http://127.0.0.1:4792']);
+    r = await plan('fork');
+    expect(r.out).toMatch(/^NB: a window is already open on this folder at http:\/\/127\.0\.0\.1:4792 .*NOT switched/);
+    await fakeWindow(4793, path.join(tmp, 'elsewhere'));
+    const other = path.join(project, 'sub');
+    fs.mkdirSync(other);
+    await fakeWindow(4794, other); // unregistered: found by the /info scan
+    r = await plan('new', { cwd: other });
+    expect(r.out).toBe('NB: already open at http://127.0.0.1:4794 (brought to front).\n');
+    expect(launches()).toEqual([]);
+  });
+
+  it('guards and refusals are the same NB: lines', async () => {
+    let r = await plan('', { env: { AI_IDE_SUPERVISED: '1' } });
+    expect(r.out).toBe('NB: already running inside Nota Bene — nothing to open.\n');
+    r = await plan('', { cwd: home });
+    expect(r.out).toBe(`NB: refusing to open the whole ${home} as a project — cd into a project first.\n`);
+    r = await plan('frobnicate');
+    expect(r.out).toMatch(/^NB: unknown argument 'frobnicate'\. /);
+    r = await plan('fork', { sid: 'x; rm -rf ~' });
+    expect(r.code).toBe(1);
+    expect(r.out).toBe("NB: no valid session id to fork ('x; rm -rf ~').\n");
+    const d = binDir('oldnode-plan', [['node', '#!/bin/sh\necho 23.5.1\n']]);
+    r = await plan('', { env: { PATH: `${d}:${process.env.PATH}` } });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/^NB: Nota Bene needs Node >= 23\.6; found 23\.5\.1/);
+    expect(launches()).toEqual([]);
+  });
+
+  it('a folder named `p r$oj Проект`: both commands are plain ASCII and read back exactly in bash and zsh', async () => {
+    const odd = path.join(project, 'p r$oj Проект');
+    fs.mkdirSync(odd);
+    const r = await plan('new', { cwd: odd });
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^[\x20-\x7e\n]*NB-NAME: Nota Bene · p r\$oj Проект\n$/); // no raw byte before the name
+    const { 'NB-RUN': run, 'NB-WAIT': wait } = lines(r);
+    // a stub node records the argv it gets
+    const got = path.join(tmp, 'node-argv.log');
+    const d = binDir('stubnode', [['node', `#!/bin/sh\n"${process.execPath}" -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- "$@" >> "${got}"\n`]]);
+    const shells = ['/bin/bash', ...(fs.existsSync('/bin/zsh') ? ['/bin/zsh'] : [])];
+    for (const shell of shells) {
+      fs.rmSync(got, { force: true });
+      const e = await sh(['-c', run!], { shell, cwd: tmp, env: { PATH: `${d}:${process.env.PATH}` } });
+      expect(e.code, e.out).toBe(0);
+      expect(fs.readFileSync(got, 'utf8').trim().split('\n').map((l) => JSON.parse(l))).toEqual([[stubBin(), odd, '--new']]);
+    }
+    // the wait finds the window of that folder
+    await fakeWindow(4792, odd);
+    register(4792, odd, process.pid);
+    for (const shell of shells) {
+      const w = await sh(['-c', wait!], { shell, cwd: tmp });
+      expect(w).toEqual({ code: 0, out: `NB: opened http://127.0.0.1:4792 for ${odd}.\n` });
+    }
+  });
+});
+
+describe('--wait', () => {
+  it('prints the URL with the note once the window is up', async () => {
+    await fakeWindow(4793, project);
+    register(4793, project, process.pid);
+    const r = await sh([stubApp, '--wait', project, ' (forked from this conversation)']);
+    expect(r).toEqual({ code: 0, out: `NB: opened http://127.0.0.1:4793 for ${project} (forked from this conversation).\n` });
+  });
+
+  it('polls until a window that comes up later is registered', async () => {
+    const waiting = sh([stubApp, '--wait', project]);
+    await new Promise((res) => setTimeout(res, 1200));
+    await fakeWindow(4794, project);
+    register(4794, project, process.pid);
+    expect(await waiting).toEqual({ code: 0, out: `NB: opened http://127.0.0.1:4794 for ${project}.\n` });
+  });
+
+  it('times out (NB_WAIT_SECS, test only) with a pointer to the task output, exit 1', async () => {
+    await fakeWindow(4795, path.join(tmp, 'elsewhere')); // another folder's window is not ours
+    register(4795, path.join(tmp, 'elsewhere'), process.pid);
+    const t0 = Date.now();
+    const r = await sh([stubApp, '--wait', project], { env: { NB_WAIT_SECS: '1' } });
+    expect(r).toEqual({ code: 1, out: "NB: the window did not come up in 1s — see the background task's output.\n" });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(1000);
+  });
 });
