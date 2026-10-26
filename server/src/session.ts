@@ -15,6 +15,9 @@ import { cwdOf, titleOf } from './sessions.ts';
 import { saveSession, stateDir } from './state.ts';
 import { StatsService } from './stats.ts';
 
+/** The project's own mode, else Settings → Defaults, else auto. */
+const modeFor = (root: string): Mode => { const p = readPrefs(); return p.modes[prefsKey(root)] ?? p.defaultMode ?? 'auto'; };
+
 /**
  * A refused switch or restart. Reported as `where: 'switch'`, also when it was refused for being busy (a turn, a
  * permission or another switch in progress): the client ends its "switching" state on exactly this, never on a `busy`
@@ -128,7 +131,7 @@ export async function createSessionManager(o: {
   // a fork start: the agent branches off `resume`; until its init names the new id, sessionId is still the SOURCE,
   // which must never be written to the registry
   let forkPending = !!(o.fork && o.resume);
-  let mode: Mode = readPrefs().modes[prefsKey(root)] ?? 'auto';
+  let mode: Mode = modeFor(root);
   let agent: AgentSession | null = null;
   let loop: Promise<void> | null = null; // the running agent's message loop
   // Bumped when a session is torn down (switch, close). Everything an agent can trigger later (its messages, its
@@ -502,7 +505,7 @@ export async function createSessionManager(o: {
       heard = id; // the server sends this id's comments in onSwitch, not through the id listeners
       title = null;
       model = null;
-      mode = readPrefs().modes[prefsKey(root)] ?? 'auto';
+      mode = modeFor(root);
       stats.reset();
       if (id && !forkPending) {
         try { saveSession(root, id); } catch (e) { reportError(hub, 'session', e); }

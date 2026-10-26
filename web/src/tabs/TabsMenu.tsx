@@ -1,10 +1,9 @@
 import { useRef, useState, type RefObject } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
-import { FileIcon } from '@/files/FileIcon.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { activate, selectTabs, type Tab } from './slice.ts';
-import { ICONS, Svg, focusTab } from './TabStrip.tsx';
+import { Svg, TabIcon, focusTab } from './TabStrip.tsx';
 
 /** The ids of the tabs not fully inside the strip's visible width (a 1 px slack for subpixel layouts). */
 export function hiddenTabs(strip: HTMLElement): Set<string> {
@@ -35,9 +34,9 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
   const input = useRef<HTMLInputElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
 
-  const label = (tab: Tab) => (tab.kind === 'chat' ? title || t('chat') : tab.path.split('/').pop() || tab.path);
+  const label = (tab: Tab) => (tab.kind === 'chat' ? title || t('chat') : tab.kind === 'settings' ? t('settings') : tab.path.split('/').pop() || tab.path);
   const needle = q.trim().toLowerCase();
-  const match = (tab: Tab) => !needle || (tab.kind === 'chat' ? label(tab) : tab.path).toLowerCase().includes(needle);
+  const match = (tab: Tab) => !needle || (tab.kind === 'file' ? tab.path : label(tab)).toLowerCase().includes(needle);
   // no query: the hidden ones, then all; a query: every match once
   const sections: { name: string; items: Tab[] }[] = needle
     ? [{ name: '', items: tabs.filter(match) }]
@@ -114,7 +113,7 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
                     ref={(el) => { if (i === cur) el?.scrollIntoView?.({ block: 'nearest' }); }}
                     className={`flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs ${i === cur ? 'bg-muted text-foreground' : 'text-foreground/85'}`}
                   >
-                    {tab.kind === 'chat' ? <Svg>{ICONS.chat}</Svg> : <FileIcon path={tab.path} />}
+                    <TabIcon tab={tab} />
                     <span className={`truncate ${tab.id === active ? 'font-semibold text-primary' : ''}`}>{label(tab)}</span>
                     {tab.kind === 'file' && <span className="min-w-0 flex-1 truncate text-right font-mono text-[10.5px] text-muted-foreground">{dirOf(tab.path)}{tab.ref ? ` @ ${tab.ref}` : ''}</span>}
                   </button>

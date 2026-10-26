@@ -17,6 +17,7 @@ import type { IdleConfig } from './idle.ts';
 import { listSessionsView } from './sessions.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
+import { controlToken, systemRoutes } from './system.ts';
 
 // Process-wide handlers are registered once; each running server's hub is in this set.
 const hubs = new Set<EventHub>();
@@ -39,8 +40,10 @@ export async function startServer(o: {
   backend: AgentBackend;
   resume?: string;
   fork?: boolean;
-  /** called by POST /restart-server (tests stub it) */
+  /** called by POST /restart-server and /control/stop (tests stub it) */
   exit?: (code: number) => void;
+  /** the checkout the server runs from (Settings → About's version); default: two levels above this file */
+  repoDir?: string;
   webDist: string;
   allowedOrigins?: string[];
   /** idle compaction timing and the settings.json check (tests shorten / stub them) */
@@ -83,6 +86,13 @@ export async function startServer(o: {
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
     const root = () => manager.info().root;
+    let ownPort = 0; // set after listen
+    // the exit after a reply (restart-server 75, stop 0): close what can be closed, but never hang on it
+    const exitWith = (code: number) => {
+      void Promise.race([close(), new Promise<void>((r) => setTimeout(r, 2000))]).then(() => {
+        setTimeout(() => (o.exit ?? process.exit)(code), 100);
+      });
+    };
     const marks = new MarkFiles({ root, stateDir });
     const sessionsRoute: http.RequestListener = (req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -127,17 +137,24 @@ export async function startServer(o: {
           }
           // answer first: the exit must not cut the reply; 75 tells the launcher to relaunch with --continue
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-          res.end('{"ok":true}', () => {
-            void Promise.race([close(), new Promise<void>((r) => setTimeout(r, 2000))]).then(() => {
-              setTimeout(() => (o.exit ?? process.exit)(75), 100);
-            });
-          });
+          res.end('{"ok":true}', () => exitWith(75));
         },
+        ...systemRoutes({
+          hub, root, port: () => ownPort, repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..'),
+          control: {
+            supervised,
+            restartAgent: () => void manager.restart().catch(switchFailed),
+            restartServer: () => exitWith(75),
+            stop: () => exitWith(0), // the launcher treats 0 as "stop" and unregisters the window
+          },
+        }),
       },
       webDist: o.webDist,
+      controlToken,
       info: () => {
         const { id, root, title, model } = manager.info();
-        return { root, session: id, title, model, supervised: supervised() };
+        // busy and clients: for another window's Settings → Windows
+        return { root, session: id, title, model, supervised: supervised(), busy: manager.busy(), clients: hub.clients() };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);
@@ -280,6 +297,7 @@ export async function startServer(o: {
     }
 
     const port = (server.address() as AddressInfo).port;
+    ownPort = port;
     // a supervised window keeps its registry entry's root current, so a relaunch reopens the folder it switched to
     manager.onSwitch((_id, { restart }) => {
       if (restart || !supervised()) return;

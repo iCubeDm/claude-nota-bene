@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream';
 import type { EventHub } from './hub.ts';
 import { reportError } from './errors.ts';
+import { CONTROL_HEADER, tokenOk } from './system.ts';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -31,7 +32,7 @@ function statFile(p: string): fs.Stats | null {
   }
 }
 
-const PREFIX_ROUTES = ['/attach/', '/marks/'];
+const PREFIX_ROUTES = ['/attach/', '/marks/', '/control/'];
 
 export function isAllowedHost(host: string | undefined, allowed: readonly string[]): boolean {
   return host !== undefined && allowed.includes(host.toLowerCase());
@@ -44,6 +45,8 @@ export function httpHandler(o: {
   allowedHosts: string[]; // read per request, so the caller may fill it after listen()
   allowedOrigins?: string[]; // same; any method other than GET/HEAD needs an Origin from this list
   extra?: Record<string, RequestListener>;
+  /** the per-user control token: a POST to /control/<action> carrying it needs no Origin (server-to-server, system.ts) */
+  controlToken?: () => string;
 }): RequestListener {
   const root = path.resolve(o.webDist);
 
@@ -67,13 +70,20 @@ export function httpHandler(o: {
         text(res, 403, 'forbidden host');
         return;
       }
-      if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.headers.origin !== undefined && (o.allowedOrigins ?? []).includes(req.headers.origin))) {
-        text(res, 403, 'forbidden origin');
-        return;
-      }
       const raw = req.url ?? '/';
       const qi = raw.indexOf('?');
       const rawPath = qi === -1 ? raw : raw.slice(0, qi);
+      const control = rawPath.startsWith('/control/');
+      if (control) {
+        // token only, never a page: an Origin (any browser request) is refused even with a token
+        if (req.headers.origin !== undefined || !o.controlToken || !tokenOk(req.headers[CONTROL_HEADER], o.controlToken())) {
+          text(res, 403, 'forbidden');
+          return;
+        }
+      } else if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.headers.origin !== undefined && (o.allowedOrigins ?? []).includes(req.headers.origin))) {
+        text(res, 403, 'forbidden origin');
+        return;
+      }
 
       // /attach/<id> and /marks/<id>[/<name>] are dynamic: matched by prefix
       const prefix = PREFIX_ROUTES.find((p) => rawPath.startsWith(p));

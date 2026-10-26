@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { getLang, setLang, useT } from '@/i18n/index.ts';
-import { selectConn, selectSession, useAppSelector } from '@/store/store.ts';
+import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { openSettings } from '@/tabs/slice.ts';
+import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
 import { SessionPicker } from '@/controls/SessionPicker.tsx';
 import { GitBranch } from './GitBranch.tsx';
 import { RestartMenu } from './RestartMenu.tsx';
@@ -8,6 +10,7 @@ import { selectRestarting, selectSwitching } from '@/controls/slice.ts';
 
 export function Header() {
   const t = useT();
+  const d = useAppDispatch();
   const other = getLang() === 'ru' ? 'en' : 'ru';
   const conn = useAppSelector(selectConn);
   const session = useAppSelector(selectSession);
@@ -29,6 +32,16 @@ export function Header() {
       {/* enabled while busy: the escape hatch for a stuck agent (R-M4-4); only a running switch/restart disables it */}
       <RestartMenu />
       <span id="session" className="font-mono text-[11px]">{[session?.model, session?.id?.slice(0, 8)].filter(Boolean).join(' · ')}</span>
+      <button
+        type="button"
+        id="settingsBtn"
+        aria-label={t('settings')}
+        title={t('settingsTip')}
+        onClick={() => d(openSettings())}
+        className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        <Svg size={15}>{ICONS.settings}</Svg>
+      </button>
       <button
         type="button"
         id="langBtn"

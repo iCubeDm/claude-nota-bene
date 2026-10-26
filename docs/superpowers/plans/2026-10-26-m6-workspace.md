@@ -148,14 +148,21 @@ The hotkey list appears in the `?` help.
 ## Package C — settings
 
 ### M6-15: Settings tab (R-M6-4)
-- [ ] ⚙ next to the language toggle opens a `settings` tab. It is unique and cannot be pinned twice.
-- [ ] Sections:
+- [x] ⚙ next to the language toggle opens a `settings` tab. It is unique and cannot be pinned twice.
+- [x] Sections:
   - **Windows:** every running Nota Bene window, from the registry + `/info` + a prototype port scan. Each row has folder, session title, port, uptime, tab connected or headless, and busy, with the actions open / restart agent / restart server / stop. Stop asks for confirmation and refuses the current window.
   - **Storage:** sizes of `attachments/` and `comments/`. "Clean unreferenced attachments" deletes attachments that no comment, session transcript or open draft references. It shows a dry-run count first and moves the files to `~/.nota-bene/trash/` rather than deleting them.
   - **Defaults:** language; the default permission mode for new projects.
   - **About:** version (the git describe of the repo), state dir, log paths.
-- [ ] Server routes `/system/windows`, `/system/storage` (GET) and `/system/storage/clean` (POST, Origin-checked).
-- [ ] Stopping another window goes through that window's own `/restart-server`-style route (`POST /shutdown`, Origin-checked, only for the same user's windows on 127.0.0.1). It never kills a pid directly.
+- [x] Server routes `/system/windows`, `/system/storage` (GET) and `/system/storage/clean` (POST, Origin-checked).
+- [x] Stopping another window goes through that window's own `/restart-server`-style route (`POST /shutdown`, Origin-checked, only for the same user's windows on 127.0.0.1). It never kills a pid directly.
+
+- Rulings (2026-10-26):
+  - Cross-window control: A's page asks A's server (`POST /system/windows/action`, Origin-checked), which relays to B's `POST /control/<action>` with the per-user token `<stateDir>/control-token` (mode 600). `/control/` refuses any request with an Origin and any without the token; a relay goes only to a registered window whose pid is alive and whose /info answers with the registered root. The current window's own actions stay in its header (409 here).
+  - "Clean": attachments no comments file mentions and older than 24 h (a draft may hold a fresh one; the server cannot see drafts) move to `<stateDir>/trash/attachments/<stamp>/`. Transcripts are not scanned: a replay re-creates any transcript image under the same content id.
+  - No prototype port scan: the prototype is retired (2026-10-26) and no prototype window is left.
+  - Logs: only the detached launcher's `$TMPDIR/nota-bene-PORT.log` is a file; a foreground window's log is its Claude Code task, said so in About.
+  - The Settings tab is not saved with the file tabs.
 
 ### M6-16: e2e and real smoke
 - [ ] e2e for the strips, tab overflow, Cmd+E, the hotkeys and the Settings tab.

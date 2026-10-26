@@ -1,0 +1,332 @@
+// The Settings tab's server side (M6-15): windows, storage, defaults, about. Plus the control routes another window's
+// server uses to restart or stop this one.
+//
+// Cross-window control: a page may only talk to its own server (Origin check), so window A's page asks A's server,
+// and A's server relays to B's `/control/<action>` with the per-user control token (`<stateDir>/control-token`,
+// mode 600). A browser page never sees the token, so no web page can drive /control; any process of the same user
+// could read the file, which is the same trust the state dir already has. A relay goes only to a registered window
+// whose pid is alive and whose /info answers with the registered root (a reused port gets nothing, not the token).
+import { execFile } from 'node:child_process';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import fs from 'node:fs';
+import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { MODES, type Mode } from '@nota-bene/shared';
+import { reportError } from './errors.ts';
+import type { EventHub } from './hub.ts';
+import { readPrefs, setDefaultModePref } from './prefs.ts';
+import { stateDir } from './state.ts';
+import { pidAlive, readWindows } from './windows.ts';
+
+export const CONTROL_HEADER = 'x-nota-bene-control';
+export const CONTROL_ACTIONS = ['restart-agent', 'restart-server', 'stop'] as const;
+export type ControlAction = (typeof CONTROL_ACTIONS)[number];
+/** An attachment younger than this is kept by "clean": an open draft may hold it (the server cannot see drafts). */
+export const CLEAN_MIN_AGE_MS = 24 * 3600_000;
+const TOKEN_RE = /^[0-9a-f]{64}$/;
+const ID_RE = /[0-9a-f]{64}/g;
+
+/** The per-user control token, created once (mode 600). */
+export function controlToken(): string {
+  const file = path.join(stateDir(), 'control-token');
+  const read = () => {
+    try {
+      const t = fs.readFileSync(file, 'utf8').trim();
+      return TOKEN_RE.test(t) ? t : null;
+    } catch {
+      return null;
+    }
+  };
+  const have = read();
+  if (have) return have;
+  const t = randomBytes(32).toString('hex');
+  try {
+    fs.writeFileSync(file, t, { flag: 'wx', mode: 0o600 });
+    return t;
+  } catch {
+    // another server wrote it first (use that one), or the file is unreadable/garbage (replace it atomically)
+    const again = read();
+    if (again) return again;
+    const tmp = `${file}.tmp${process.pid}`;
+    fs.writeFileSync(tmp, t, { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    return t;
+  }
+}
+
+export function tokenOk(header: string | string[] | undefined, token: string): boolean {
+  if (typeof header !== 'string' || header.length !== token.length) return false;
+  return timingSafeEqual(Buffer.from(header), Buffer.from(token));
+}
+
+/** Bytes and file count under `dir`; symlinks are counted as links, never followed. A missing dir is zero. */
+export function dirSize(dir: string): { bytes: number; files: number } {
+  let bytes = 0;
+  let files = 0;
+  const walk = (d: string) => {
+    let names: fs.Dirent[];
+    try {
+      names = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      const p = path.join(d, n.name);
+      if (n.isDirectory()) walk(p);
+      else if (n.isFile()) {
+        try {
+          bytes += fs.lstatSync(p).size;
+          files++;
+        } catch { /* vanished meanwhile */ }
+      }
+    }
+  };
+  walk(dir);
+  return { bytes, files };
+}
+
+/** Every 64-hex id mentioned in any comments file: conservative (a stray match only keeps more). */
+function referencedIds(commentsDir: string): Set<string> {
+  const out = new Set<string>();
+  let names: string[];
+  try {
+    names = fs.readdirSync(commentsDir);
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    if (!n.endsWith('.json')) continue;
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(commentsDir, n), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const m of text.matchAll(ID_RE)) out.add(m[0]);
+  }
+  return out;
+}
+
+/**
+ * Attachments no comment references and older than CLEAN_MIN_AGE_MS. Session transcripts are not scanned: a replay
+ * re-creates any image of its transcript under the same content id, so trashing one loses nothing.
+ */
+export function cleanCandidates(now = Date.now()): { files: string[]; bytes: number } {
+  const dir = path.join(stateDir(), 'attachments');
+  const refs = referencedIds(path.join(stateDir(), 'comments'));
+  const files: string[] = [];
+  let bytes = 0;
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return { files, bytes };
+  }
+  for (const n of names) {
+    const m = /^([0-9a-f]{64})\.[a-z]+$/.exec(n);
+    if (!m || refs.has(m[1]!)) continue;
+    try {
+      const st = fs.lstatSync(path.join(dir, n));
+      if (!st.isFile() || now - st.mtimeMs < CLEAN_MIN_AGE_MS) continue;
+      files.push(n);
+      bytes += st.size;
+    } catch { /* vanished */ }
+  }
+  return { files, bytes };
+}
+
+/** Moves the candidates to `<stateDir>/trash/attachments/<stamp>/` (never deletes). */
+export function cleanAttachments(now = Date.now()): { moved: number; bytes: number; trash: string } {
+  const { files } = cleanCandidates(now);
+  const src = path.join(stateDir(), 'attachments');
+  const trash = path.join(stateDir(), 'trash', 'attachments', new Date(now).toISOString().replace(/[:.]/g, '-'));
+  let moved = 0;
+  let bytes = 0;
+  if (files.length) fs.mkdirSync(trash, { recursive: true });
+  for (const n of files) {
+    try {
+      const size = fs.lstatSync(path.join(src, n)).size;
+      fs.renameSync(path.join(src, n), path.join(trash, n));
+      moved++;
+      bytes += size;
+    } catch { /* vanished or re-referenced meanwhile: skipped */ }
+  }
+  return { moved, bytes, trash };
+}
+
+export type WindowInfo = { root: string; session?: string | null; title?: string | null; supervised?: boolean; busy?: boolean; clients?: number };
+export type WindowRow = {
+  port: number; root: string; pid: number; startedAt: number; current: boolean;
+  /** live: answers with its root; restarting: in a relaunch gap; silent: pid alive, no answer; stale: gone */
+  state: 'live' | 'restarting' | 'silent' | 'stale';
+  session: string | null; title: string | null; supervised: boolean; busy: boolean; clients: number;
+};
+
+export async function probeWindow(port: number, timeoutMs = 700): Promise<WindowInfo | null> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/info`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) return null;
+    const j = (await r.json()) as WindowInfo;
+    return j && typeof j.root === 'string' ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function listWindows(own: number, probe = probeWindow): Promise<WindowRow[]> {
+  const rows = await Promise.all(Object.entries(readWindows()).map(async ([key, w]): Promise<WindowRow> => {
+    const port = Number(key);
+    const alive = pidAlive(w.pid);
+    const info = alive ? await probe(port) : null;
+    const state: WindowRow['state'] = !alive
+      ? (w.launcherPid !== undefined && pidAlive(w.launcherPid) ? 'restarting' : 'stale')
+      : info && info.root === w.root ? 'live' : 'silent';
+    const live = state === 'live' && info;
+    return {
+      port, root: w.root, pid: w.pid, startedAt: w.startedAt, current: port === own, state,
+      session: live ? info.session ?? null : null, title: live ? info.title ?? null : null,
+      supervised: live ? !!info.supervised : false, busy: live ? !!info.busy : false, clients: live ? info.clients ?? 0 : 0,
+    };
+  }));
+  return rows.sort((a, b) => a.port - b.port);
+}
+
+const gitDescribe = (dir: string): Promise<string> => new Promise((resolve) => {
+  execFile('git', ['describe', '--tags', '--always', '--dirty'], { cwd: dir, timeout: 3000 }, (e, out) => resolve(e ? 'unknown' : out.trim()));
+});
+
+function json(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body));
+}
+function text(res: ServerResponse, status: number, body: string, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', ...headers });
+  res.end(body);
+}
+const only = (method: string, req: IncomingMessage, res: ServerResponse): boolean => {
+  if (req.method === method || (method === 'GET' && req.method === 'HEAD')) return true;
+  text(res, 405, 'method not allowed', { allow: method === 'GET' ? 'GET, HEAD' : method });
+  return false;
+};
+const MAX_BODY = 4096;
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const c of req as AsyncIterable<Buffer>) {
+    size += c.length;
+    if (size > MAX_BODY) throw new Error('body too large');
+    chunks.push(c);
+  }
+  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+}
+
+export function systemRoutes(o: {
+  hub: EventHub;
+  /** the current project root (a switch changes it) */
+  root: () => string;
+  /** this server's port (known after listen) */
+  port: () => number;
+  /** the checkout the server runs from, for the version */
+  repoDir: string;
+  /** run after the reply is out; `supervised` says whether restart-server can be caught by a launcher */
+  control: { supervised(): boolean; restartAgent(): void; restartServer(): void; stop(): void };
+  probe?: (port: number) => Promise<WindowInfo | null>;
+  relay?: (port: number, action: ControlAction, token: string) => Promise<number>;
+}): Record<string, RequestListener> {
+  const probe = o.probe ?? probeWindow;
+  const relay = o.relay ?? (async (port, action, token) => {
+    const r = await fetch(`http://127.0.0.1:${port}/control/${action}`, { method: 'POST', headers: { [CONTROL_HEADER]: token }, signal: AbortSignal.timeout(3000) });
+    return r.status;
+  });
+  const fail = (res: ServerResponse, where: string, e: unknown) => {
+    reportError(o.hub, where, e);
+    if (!res.headersSent) text(res, 500, 'internal error');
+  };
+
+  return {
+    '/system/about': (req, res) => {
+      if (!only('GET', req, res)) return;
+      const port = o.port();
+      const log = path.join(os.tmpdir(), `nota-bene-${port}.log`);
+      void gitDescribe(o.repoDir).then((version) => json(res, 200, {
+        version, stateDir: stateDir(), logs: fs.existsSync(log) ? [log] : [], node: process.version, pid: process.pid,
+      }), (e) => fail(res, '/system/about', e));
+    },
+
+    '/system/prefs': (req, res) => {
+      if (req.method === 'POST') {
+        void readJson(req).then((b) => {
+          const mode = (b as { defaultMode?: unknown }).defaultMode;
+          if (!(MODES as readonly unknown[]).includes(mode)) return text(res, 400, 'bad defaultMode');
+          setDefaultModePref(mode as Mode);
+          json(res, 200, { defaultMode: mode });
+        }).catch((e: unknown) => (e instanceof SyntaxError || (e instanceof Error && e.message === 'body too large') ? text(res, 400, 'bad request') : fail(res, '/system/prefs', e)));
+        return;
+      }
+      if (!only('GET', req, res)) return;
+      json(res, 200, { defaultMode: readPrefs().defaultMode ?? 'auto' });
+    },
+
+    '/system/storage': (req, res) => {
+      if (!only('GET', req, res)) return;
+      try {
+        const sd = stateDir();
+        const c = cleanCandidates();
+        json(res, 200, {
+          attachments: dirSize(path.join(sd, 'attachments')),
+          comments: dirSize(path.join(sd, 'comments')),
+          trash: dirSize(path.join(sd, 'trash')),
+          marks: { ...dirSize(path.join(o.root(), '.nota-bene', 'marks')), root: o.root() },
+          unreferenced: { files: c.files.length, bytes: c.bytes },
+        });
+      } catch (e) {
+        fail(res, '/system/storage', e);
+      }
+    },
+
+    '/system/storage/clean': (req, res) => {
+      if (!only('POST', req, res)) return;
+      try {
+        json(res, 200, cleanAttachments());
+      } catch (e) {
+        fail(res, '/system/storage/clean', e);
+      }
+    },
+
+    '/system/windows': (req, res) => {
+      if (!only('GET', req, res)) return;
+      listWindows(o.port(), probe).then((rows) => json(res, 200, rows), (e) => fail(res, '/system/windows', e));
+    },
+
+    '/system/windows/action': (req, res) => {
+      if (!only('POST', req, res)) return;
+      void readJson(req).then(async (b) => {
+        const { port, action } = b as { port?: unknown; action?: unknown };
+        if (!Number.isInteger(port) || !(CONTROL_ACTIONS as readonly unknown[]).includes(action)) return text(res, 400, 'bad request');
+        if (port === o.port()) return text(res, 409, 'this window'); // its own controls are in its header
+        const w = readWindows()[String(port)];
+        if (!w || !pidAlive(w.pid)) return text(res, 404, 'no such window');
+        const info = await probe(port as number);
+        if (!info || info.root !== w.root) return text(res, 409, 'window not answering');
+        const status = await relay(port as number, action as ControlAction, controlToken());
+        json(res, status === 200 ? 200 : 502, { status });
+      }).catch((e: unknown) => (e instanceof SyntaxError || (e instanceof Error && e.message === 'body too large') ? text(res, 400, 'bad request') : fail(res, '/system/windows/action', e)));
+    },
+
+    // reached only with the control token (http.ts lets /control/ through without an Origin when the token matches)
+    '/control/': (req, res) => {
+      if (!only('POST', req, res)) return;
+      const action = (req.url ?? '').split('?')[0]!.slice('/control/'.length) as ControlAction;
+      if (!CONTROL_ACTIONS.includes(action)) return text(res, 404, 'not found');
+      if (action === 'restart-server' && !o.control.supervised()) return text(res, 409, 'not supervised');
+      // answer first: a restart or stop must not cut the reply
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end('{"ok":true}', () => {
+        if (action === 'restart-agent') o.control.restartAgent();
+        else if (action === 'restart-server') o.control.restartServer();
+        else o.control.stop();
+      });
+    },
+  };
+}

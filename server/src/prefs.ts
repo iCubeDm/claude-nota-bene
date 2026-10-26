@@ -5,7 +5,8 @@ import type { Mode } from '@nota-bene/shared';
 import { stateDir } from './state.ts';
 
 /** `idleCompact[root]`: idle compaction per project dir; absent = on (the default) */
-export type Prefs = { modes: Record<string, Mode>; lang?: 'ru' | 'en'; idleCompact: Record<string, boolean> };
+/** `defaultMode`: the mode of a project with no entry in `modes` (Settings → Defaults; absent = auto) */
+export type Prefs = { modes: Record<string, Mode>; lang?: 'ru' | 'en'; idleCompact: Record<string, boolean>; defaultMode?: Mode };
 
 const isMode = (v: unknown): v is Mode => (MODES as readonly unknown[]).includes(v);
 let reported = false; // a broken file is reported once per process, not on every read
@@ -34,7 +35,7 @@ export function readPrefs(): Prefs {
   try {
     const data: unknown = JSON.parse(raw);
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('prefs.json is not an object');
-    const { modes, lang, idleCompact } = data as { modes?: unknown; lang?: unknown; idleCompact?: unknown };
+    const { modes, lang, idleCompact, defaultMode } = data as { modes?: unknown; lang?: unknown; idleCompact?: unknown; defaultMode?: unknown };
     const out: Prefs = { modes: {}, idleCompact: {} };
     if (modes && typeof modes === 'object' && !Array.isArray(modes)) {
       for (const [k, v] of Object.entries(modes)) if (isMode(v)) out.modes[k] = v;
@@ -43,6 +44,7 @@ export function readPrefs(): Prefs {
       for (const [k, v] of Object.entries(idleCompact)) if (typeof v === 'boolean') out.idleCompact[k] = v;
     }
     if (lang === 'ru' || lang === 'en') out.lang = lang;
+    if (isMode(defaultMode)) out.defaultMode = defaultMode;
     return out;
   } catch (e) {
     if (!reported) {
@@ -103,6 +105,11 @@ export function updateRawPrefs(fn: (raw: Record<string, unknown>) => void): void
   const tmp = `${f}.tmp${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
   fs.renameSync(tmp, f);
+}
+
+/** Settings → Defaults: the mode a project without its own entry starts in. */
+export function setDefaultModePref(mode: Mode): void {
+  updateRawPrefs((raw) => void (raw.defaultMode = mode));
 }
 
 export function prototypeImported(): boolean {

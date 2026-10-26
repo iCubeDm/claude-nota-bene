@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useAppSelector } from '@/store/store.ts';
 import { FileView } from '@/files/FileView.tsx';
+import { SettingsView } from '@/settings/SettingsView.tsx';
 import { selectTabs } from './slice.ts';
 
 /**
@@ -15,7 +16,12 @@ export function Panes({ chat }: { chat: ReactNode }) {
         {chat}
       </main>
       {open.map((tab) =>
-        tab.kind === 'file' ? <FileView key={`${rootGen}:${tab.id}`} path={tab.path} src={tab.src} refName={tab.ref} active={active === tab.id} /> : null,
+        tab.kind === 'file' ? <FileView key={`${rootGen}:${tab.id}`} path={tab.path} src={tab.src} refName={tab.ref} active={active === tab.id} />
+          : tab.kind === 'settings' ? (
+            <div key="settings" data-pane="settings" data-anchor-skip hidden={active !== 'settings'} className="grid-pane relative min-h-0 flex-1 overflow-auto">
+              <SettingsView active={active === 'settings'} />
+            </div>
+          ) : null,
       )}
     </>
   );

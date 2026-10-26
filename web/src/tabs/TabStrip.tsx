@@ -16,7 +16,12 @@ export const ICONS = {
   chat: <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />,
   dir: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   comments: <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M8 9h8M8 13h5" /></>,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
 };
+
+/** A tab's icon: the chat and Settings have their own, a file its type's. */
+export const TabIcon = ({ tab }: { tab: Tab }) =>
+  tab.kind === 'file' ? <FileIcon path={tab.path} /> : <Svg>{tab.kind === 'chat' ? ICONS.chat : ICONS.settings}</Svg>;
 
 const basename = (p: string) => p.split('/').pop() || p;
 
@@ -29,7 +34,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
   const d = useAppDispatch();
   const badge = useAppSelector((s) => (tab.kind === 'file' ? selectPendingCountByPath(s)[fileKey(tab.path, tab.ref)] ?? 0 : 0));
   const title = useAppSelector((s) => selectSession(s)?.title ?? null);
-  const label = tab.kind === 'chat' ? title || t('chat') : basename(tab.path);
+  const label = tab.kind === 'chat' ? title || t('chat') : tab.kind === 'settings' ? t('settings') : basename(tab.path);
   const isChat = tab.kind === 'chat';
   return (
     <ContextMenu>
@@ -51,7 +56,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           className={`group flex h-7 max-w-[260px] flex-none cursor-pointer items-center gap-1.5 rounded-lg pr-1.5 pl-2.5 text-[12.5px] font-medium whitespace-nowrap hover:bg-muted/50 hover:text-foreground ${active ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
         >
           <span className="hidden size-1.5 flex-none animate-pulse rounded-full bg-primary group-data-[playing=true]:inline-block" />
-          {tab.kind === 'chat' ? <Svg>{ICONS.chat}</Svg> : <FileIcon path={tab.path} />}
+          <TabIcon tab={tab} />
           <span className="truncate">{label}</span>
           {tab.kind === 'file' && tab.ref && <SourceChip name={tab.ref} />}
           {badge > 0 && <span data-badge className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{badge}</span>}
