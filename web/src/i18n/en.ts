@@ -154,10 +154,10 @@ export const en: Dict = {
   compactFailed: (err, at) => `⇣ compaction failed${err ? ': ' + err : ''}${at ? ' · ' + at : ''}`,
   compacting: (elapsed, usual) => `⇣ compacting the context · ${elapsed} · usually ~${usual}`,
   compactingTip: 'Estimated from past compactions: the SDK does not report how much is left',
-  idleTip: (on, minutes, minK) =>
-    `Idle compaction: ${on ? 'on' : 'off'}.\nAfter ${minutes} min with no turn and no activity in the window, a context of ${minK}+ tokens is compacted while the prompt cache is still warm (as the terminal Claude Code does). Click to turn it ${on ? 'off' : 'on'} for this project`,
+  idleTip: (on, minutes, away, minK) =>
+    `Idle compaction: ${on ? 'on' : 'off'}.\n${minutes} min after the agent's turn, if the window saw no activity for ${away} min, a context of ${minK}+ tokens is compacted while the prompt cache is still warm (as the terminal Claude Code does). Click to turn it ${on ? 'off' : 'on'} for this project`,
   idleBlocked: 'Idle compaction is off in ~/.claude/settings.json ("idleCompaction": false)',
-  idleLine: (minutes, at) => `⇣ idle compaction${minutes ? ` · ${minutes} min without activity` : ''}${at ? ' · ' + at : ''}`,
+  idleLine: (minutes, at) => `⇣ idle compaction${minutes ? ` · ${minutes} min after the turn` : ''}${at ? ' · ' + at : ''}`,
   cleared: (at) => `○ new conversation · context cleared${at ? ' · ' + at : ''}`,
   sessions: 'Sessions',
   sessTip: 'Open another Claude Code session, from any folder (like claude --resume)',

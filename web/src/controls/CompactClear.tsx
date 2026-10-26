@@ -20,7 +20,7 @@ export function CompactClear() {
   const [note, showNote] = useNote();
   const idle = useAppSelector(selectIdleCompact);
   const idleOn = !!idle && idle.on && !idle.blocked;
-  const idleTip = !idle ? '' : idle.blocked ? t('idleBlocked') : t('idleTip', idle.on, idle.minutes, fmtK(idle.minTokens));
+  const idleTip = !idle ? '' : idle.blocked ? t('idleBlocked') : t('idleTip', idle.on, idle.minutes, idle.awayMinutes, fmtK(idle.minTokens));
   return (
     <>
       <Tooltip>

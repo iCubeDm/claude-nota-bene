@@ -152,10 +152,10 @@ export const ru = {
   compactFailed: (err: string, at: string) => `⇣ сжать контекст не удалось${err ? ': ' + err : ''}${at ? ' · ' + at : ''}`,
   compacting: (elapsed: string, usual: string) => `⇣ сжимаю контекст · ${elapsed} · обычно ~${usual}`,
   compactingTip: 'Оценка по прошлым сжатиям: SDK не сообщает, сколько осталось',
-  idleTip: (on: boolean, minutes: number, minK: string) =>
-    `Сжатие в простое: ${on ? 'вкл' : 'выкл'}.\nЕсли ${minutes} мин нет ни ходов, ни действий в окне, а контекст не меньше ${minK} токенов, контекст сжимается, пока кэш промпта ещё тёплый (как в терминальном Claude Code). Щелчок — ${on ? 'выключить' : 'включить'} для этого проекта`,
+  idleTip: (on: boolean, minutes: number, away: number, minK: string) =>
+    `Сжатие в простое: ${on ? 'вкл' : 'выкл'}.\nЧерез ${minutes} мин после хода агента, если ${away} мин в окне не было действий, а контекст не меньше ${minK} токенов, контекст сжимается, пока кэш промпта ещё тёплый (как в терминальном Claude Code). Щелчок — ${on ? 'выключить' : 'включить'} для этого проекта`,
   idleBlocked: 'Сжатие в простое выключено в ~/.claude/settings.json ("idleCompaction": false)',
-  idleLine: (minutes: string, at: string) => `⇣ сжатие в простое${minutes ? ` · ${minutes} мин без действий` : ''}${at ? ' · ' + at : ''}`,
+  idleLine: (minutes: string, at: string) => `⇣ сжатие в простое${minutes ? ` · ${minutes} мин после хода` : ''}${at ? ' · ' + at : ''}`,
   cleared: (at: string) => `○ новый разговор · контекст очищен${at ? ' · ' + at : ''}`,
   sessions: 'Сессии',
   sessTip: 'Открыть другую сессию Claude Code — из любой папки (как claude --resume)',

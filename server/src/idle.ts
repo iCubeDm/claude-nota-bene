@@ -5,17 +5,20 @@ import path from 'node:path';
 /**
  * Idle compaction (the terminal CLI's feature, which the SDK does not run): a long conversation nobody touches is
  * compacted while its prompt cache is still warm, so the next message does not reprocess the whole context uncached.
- * Unlike the CLI (54 min), it fires after `idleMs` without a turn or any UI activity (the user's call: 15 min), but
- * only while the cache of the last turn can still be warm: past `cacheMs` a compaction would read it all uncached
- * and lose detail for nothing.
+ * Like the CLI (~54 min), it fires `afterMs` after the last turn ended, and only when the window has seen no activity
+ * for `awayMs` (someone reading a long reply is not away). Past `cacheMs` the cache may be gone: a compaction then
+ * would read it all uncached and lose detail for nothing, so it gives up.
  */
-export const IDLE_MS = 15 * 60_000;
+export const AFTER_MS = 50 * 60_000;
+export const AWAY_MS = 15 * 60_000;
 /** the prompt cache is written for 1 h (measured on our sessions); keep a margin for the compaction call itself */
 export const CACHE_MS = 55 * 60_000;
+/** busy, switched off or someone active at the time: look again this often until the cache runs out */
+export const RETRY_MS = 60_000;
 /** the CLI's minimum; a summary is ~20k tokens, so compacting much less buys nothing */
 export const MIN_TOKENS = 200_000;
 
-export type IdleConfig = { idleMs: number; cacheMs: number; minTokens: number };
+export type IdleConfig = { afterMs: number; awayMs: number; retryMs: number; cacheMs: number; minTokens: number };
 
 const num = (v: string | undefined): number | undefined => {
   const n = Number(v);
@@ -26,7 +29,9 @@ const num = (v: string | undefined): number | undefined => {
 export function idleConfig(env: NodeJS.ProcessEnv = process.env): IdleConfig {
   const minutes = num(env.NOTA_BENE_IDLE_COMPACT_MINUTES);
   return {
-    idleMs: minutes !== undefined && minutes > 0 ? minutes * 60_000 : IDLE_MS,
+    afterMs: minutes !== undefined && minutes > 0 ? minutes * 60_000 : AFTER_MS,
+    awayMs: AWAY_MS,
+    retryMs: RETRY_MS,
     cacheMs: CACHE_MS,
     minTokens: num(env.CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS) ?? MIN_TOKENS,
   };
@@ -43,7 +48,7 @@ export function offInClaudeSettings(env: NodeJS.ProcessEnv = process.env): boole
   }
 }
 
-export type IdleWhy = 'started' | 'off' | 'busy' | 'small' | 'cold';
+export type IdleWhy = 'started' | 'off' | 'busy' | 'active' | 'small' | 'cold';
 
 type IdleOptions = {
   config: IdleConfig;
@@ -63,6 +68,7 @@ type IdleOptions = {
 export class IdleCompactor {
   private timer: NodeJS.Timeout | null = null;
   private turnEnd: number | null = null; // armed: when the last turn ended
+  private lastActivity = 0;
   private readonly now: () => number;
   private readonly o: IdleOptions;
 
@@ -71,16 +77,15 @@ export class IdleCompactor {
     this.now = o.now ?? Date.now;
   }
 
-
-  /** A turn ended: arm and count from now. */
+  /** A turn ended: arm, due `afterMs` from now. */
   turnEnded(): void {
-    this.turnEnd = this.now();
-    this.schedule();
+    this.turnEnd = this.lastActivity = this.now();
+    this.schedule(this.o.config.afterMs);
   }
 
-  /** Any activity (a send, a command, the UI): count again from now. */
+  /** Any activity (a send, a command, the UI): someone is here. */
   touch(): void {
-    if (this.turnEnd !== null) this.schedule();
+    this.lastActivity = this.now();
   }
 
   /** A compaction (any) or a new session: nothing to do until the next turn. */
@@ -98,27 +103,29 @@ export class IdleCompactor {
     this.timer = null;
   }
 
-  private schedule(): void {
+  private schedule(ms: number): void {
     this.clear();
-    this.timer = setTimeout(() => this.fire(), this.o.config.idleMs);
+    this.timer = setTimeout(() => this.fire(), ms);
     this.timer.unref();
   }
 
   private fire(): void {
     this.timer = null;
     const why = this.decide();
-    // busy (a stuck permission, a dead agent) or switched off: look again later, so turning it back on still counts
-    // this stretch; the cache check ends it either way
-    if (why === 'busy' || why === 'off') this.schedule();
+    // not now (busy, switched off, someone here): look again until the cache runs out, so leaving a little later or
+    // turning it back on still counts
+    if (why === 'busy' || why === 'off' || why === 'active') this.schedule(this.o.config.retryMs);
     else this.disarm();
     if (why === 'started') this.o.compact();
     this.o.onFire?.(why);
   }
 
   private decide(): IdleWhy {
-    if (this.turnEnd === null || this.now() - this.turnEnd > this.o.config.cacheMs) return 'cold';
+    const now = this.now();
+    if (this.turnEnd === null || now - this.turnEnd > this.o.config.cacheMs) return 'cold';
     if (!this.o.enabled()) return 'off';
     if (this.o.busy()) return 'busy';
+    if (now - this.lastActivity < this.o.config.awayMs) return 'active';
     if ((this.o.contextUsed() ?? 0) < this.o.config.minTokens) return 'small';
     return 'started';
   }
