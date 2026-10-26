@@ -16,8 +16,10 @@ npm install
 ## Install the `/nb` skill
 
 ```sh
-ln -s "$PWD/skill" ~/.claude/skills/nb
+ln -sfn "$PWD/skill" ~/.claude/skills/nb
 ```
+
+This replaces an existing `~/.claude/skills/nb` link (for example one pointing at the prototype).
 
 ## Usage
 
@@ -30,11 +32,13 @@ In any project, inside Claude Code:
 Without the skill:
 
 ```sh
-node bin/nota-bene.mjs [dir] [--port N] [--resume ID [--fork]] [--new] [--detach]
-npm start [-- <dir> --port N]     # builds web/dist, serves on 4777
+node bin/nota-bene.mjs [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
+node bin/nota-bene.mjs --find DIR   # port of the live window serving DIR, or exit 1
+node bin/nota-bene.mjs --last DIR   # DIR's last session id if its transcript exists, or exit 1
+npm start [-- <dir> --port N]     # builds web/dist, serves on 4777, unsupervised
 ```
 
-One window per folder; live windows use ports 4777-4799. The launcher relaunches the server on restart and crashes.
+One window per folder; live windows use ports 4777-4799, except 4780 and 4790-4795. The launcher rebuilds a stale `web/dist`, opens the browser (unless `--no-open`), and relaunches the server on restart and crashes.
 
 ## Dev mode
 
@@ -46,7 +50,7 @@ npm run dev      # server :4780 + Vite :5173, state in ~/.nota-bene-dev
 
 ```sh
 npm test         # unit (vitest)
-npm run e2e      # Playwright, ports 4791-4795
+npm run e2e      # Playwright, ports 4791-4795 (tests only ever use 4790-4795)
 ```
 
 ## State

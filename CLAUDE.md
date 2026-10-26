@@ -8,24 +8,25 @@ A browser IDE over Claude Code: the chat with the agent, inline margin comments 
 - `prototype/` — retired archive (2026-10-26, M5), kept as a reference and no longer changed. See `prototype/CLAUDE.md`.
 - `docs/` — notes, specs, plans, the draft feedback to Anthropic.
 
-The local root compat symlinks (`server.mjs`, `public`, `ide.sh`, ...) were removed at the M5 switch-over.
+The local root compat symlinks (`server.mjs`, `public`, `ide.sh`, ...) are removed at the M5 switch-over (see M5-10).
 
 ## Rebuild (root)
 
 Node >= 23.6 (the server runs `.ts` directly). From the repo root:
 
-- `/nb`, `/nb new`, `/nb fork` — from Claude Code, via `skill/` (linked as `~/.claude/skills/nb`): open the window for the caller's folder; resume its last session / start fresh / continue this conversation as a branch.
-- `nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach]` (`bin/nota-bene.mjs`) — the launcher the skill uses. One window per folder (a launch takes the folder's lock and gives way to a window already serving it). It supervises the server: exit 75 relaunches at once with `--continue`; 0, 130, 143 exit; anything else is a crash, relaunched after 1 s, giving up at 5 crashes within 60 s. `--detach` prints one line (`opened URL` or `already-open URL`).
+- `/nb`, `/nb new`, `/nb fork` — from Claude Code, via `skill/` (linked with `ln -sfn "$PWD/skill" ~/.claude/skills/nb`): open the window for the caller's folder; resume its last session / start fresh / continue this conversation as a branch.
+- `node bin/nota-bene.mjs [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]` — the launcher the skill uses. It rebuilds a stale `web/dist`, then opens the browser (`--no-open` skips that). One window per folder (a launch takes the folder's lock and gives way to a window already serving it, waiting up to 10 s for one in its restart gap). It supervises the server: exit 75 relaunches at once with `--continue`; 0, 130, 143 exit; anything else is a crash, relaunched after 1 s, giving up at 5 crashes within 60 s. A relaunch keeps the port and the registry entry (no other launch takes the port meanwhile); a 98 on a relaunch gives up at once. `--detach` prints one line (`opened URL` or `already-open URL`).
+- `node bin/nota-bene.mjs --find DIR` prints the port of the live window serving DIR (exit 1 if none); `node bin/nota-bene.mjs --last DIR` prints DIR's last session id if its transcript still exists (exit 1 otherwise). Both are the skill's helpers.
 - `npm start [-- <dir> --port N --resume ID --continue]` — builds `web/dist`, then serves app + API from the server directly, unsupervised (default port 4777; project = the directory you ran npm from, or the `<dir>` argument, relative to it).
 - `npm run dev` — server on 4780 (`node --watch`, with `--allow-origin http://localhost:5173`) + Vite on 5173 (proxies `/info` and `/ws` to the server). Open http://localhost:5173. Dev has its own state dir, `~/.nota-bene-dev` (set `NOTA_BENE_HOME` to override; the prototype import is off), so experiments never touch the working `~/.nota-bene`; the server logs `state: <dir>` at startup.
 - `npm test` — unit tests (vitest, ports are 0 / random).
 - `npm run e2e` — Playwright, ports 4791-4795. The `files` project uses `ffmpeg` on PATH to generate its media fixtures at startup; without it the media tests are skipped with a message (`NB_E2E_FFMPEG=0` forces that path).
 
-Ports: live windows 4777-4799, skipping 4780 and 4790-4795 when the launcher picks one; dev 4780 (server) and 5173 (Vite); manual smoke 4790; e2e 4791-4795. Never use 4777-4781 for tests while live windows run. `/info.root` tells windows apart.
+Ports: launcher windows may sit anywhere in 4777-4799 except 4780 and 4790-4795; dev 4780 (server) and 5173 (Vite); tests use only 4790-4795 (manual smoke 4790, unit/e2e 4791-4795), never another port. `/info.root` tells windows apart.
 
 State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo:
 
-- `sessions.json` — last session per project and port
+- `sessions.json` — the last session per project (folder)
 - `prefs.json` — agent permission mode per project dir (`modes[root]`), plus the `importedPrototype` marker of the one-time prototype import
 - `comments/<sessionId>.json` — pending and sent margin comments of one agent session
 - `attachments/<sha256>.<ext>` — pasted images, content-addressed; only ids travel over the socket
@@ -46,8 +47,9 @@ If the project root is this directory, the chat window you are talking through i
 
 Rebuild window:
 
-- Changes to `web/` take effect after `npm run build -w web` and a page reload (tell the user to reload). A launcher restart also rebuilds a stale `web/dist`.
+- Changes to `web/` take effect after `npm run build -w web` and a page reload (tell the user to reload). "Restart the server" (exit 75) does NOT rebuild `web/dist`; only a new launcher run does (it rebuilds a stale one).
 - Changes to `server/` (or `shared/`) need a server restart: ask the user to open the ↻ menu and pick "Restart the server"; the session resumes automatically. **Do not kill, restart or curl your own window's server** — that kills your own turn. Finish the turn first.
+- Before asking for "Restart the server", check the edit: run `npx tsc -b`, then start the server once on 4790 with a temp project and temp `NOTA_BENE_HOME` (`node server/src/main.ts <tmpdir> --port 4790`), see it answer `/info`, and stop it. A broken server edit crash-loops under the launcher, which gives up after 5 crashes — the window does not come back and the user has to relaunch it.
 - Test server changes on a separate port (4790) with a temp project dir and temp `NOTA_BENE_HOME`, never on a live window's port.
 
 Prototype window (only while some are still running during the transition; the prototype is not changed any more):
