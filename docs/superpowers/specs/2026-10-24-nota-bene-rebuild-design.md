@@ -236,6 +236,17 @@ Feature freeze on `prototype/` from M0's start, except for bug fixes.
 
 ## Follow-ups (found in daily use)
 
+- **System menu: every running Nota Bene window** (requested 2026-10-26, after an orphaned prototype server was found holding port 4777 for two days with no tab attached).
+  - The source is the launcher's registry (`~/.nota-bene/windows/`) plus `/info` per port, and a port scan of 4777–4799 for prototype windows.
+  - Each row shows:
+    - folder, session title, port and uptime;
+    - whether any browser tab is connected (a server with zero sockets is "headless");
+    - whether the agent is busy.
+  - Actions per row:
+    - open (bring the tab up, or open one);
+    - restart the agent or server;
+    - stop. Stop is confirmed and refuses the window you are in.
+  - Ships after the switch-over, next to M2 (agents and tasks share the same kind of drawer).
 - **Media and picture-in-picture loop** (prototype bug, 2026-10-25). A video plays; opening a second video sends the first to PiP; opening a third one starts an endless media-selection loop until one video stops. Rule for the rebuild (M3, Files & media):
   - Switching from a playing media tab to **another media tab** never uses PiP: the previous media pauses.
   - PiP is used only when leaving a playing video for a **non-media** tab (chat, agent, shell, text file), and there is at most one PiP window.
