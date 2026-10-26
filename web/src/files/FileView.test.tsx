@@ -115,6 +115,31 @@ it('image toggles natural size on click', () => {
   expect(calls).toHaveLength(0);
 });
 
+it('every pane has the grid; media is fitted; md and code are cards with the R-M6-2 widths', async () => {
+  const img = setup('p.png');
+  expect(img.r.container.querySelector('[data-pane="file:p.png"]')?.className).toMatch(/grid-pane.*nb-media-pane/);
+  expect(img.r.container.querySelector('img')?.className).toContain('nb-fit');
+  fireEvent.click(img.r.container.querySelector('img')!);
+  expect(img.r.container.querySelector('[data-pane]')?.className).toContain('nb-natural');
+  cleanup();
+  const v = setup('v.mp4');
+  expect(v.r.container.querySelector('[data-pane]')?.className).toMatch(/grid-pane.*nb-media-pane/);
+  expect(v.r.container.querySelector('video')?.className).toContain('nb-fit');
+  cleanup();
+  const a = setup('s.mp3');
+  expect(a.r.container.querySelector('[data-pane]')?.className).toContain('grid-pane');
+  expect(a.r.container.querySelector('audio')?.className).toContain('max-w-xl');
+  cleanup();
+  spec.body = '# hi';
+  const md = setup('n.md');
+  await waitFor(() => expect(md.r.container.querySelector('[data-file-path] > .nb-card.nb-prose')).not.toBeNull());
+  expect(md.r.container.querySelector('[data-pane]')?.className).toContain('grid-pane');
+  cleanup();
+  spec.body = 'x';
+  const code = setup('a.ts');
+  await waitFor(() => expect(code.r.container.querySelector('[data-file-path] > pre.nb-card.nb-code')).not.toBeNull());
+});
+
 it('video and audio carry data-media-tab', () => {
   const v = setup('v.mp4');
   expect(v.r.container.querySelector('video[controls][data-media-tab="file:v.mp4"]')).not.toBeNull();

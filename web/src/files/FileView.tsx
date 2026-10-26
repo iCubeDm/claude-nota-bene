@@ -189,23 +189,23 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   } else if (kind === 'image') {
     body = (
       // M3-13 relies on data-pane as the pane's scroll container; data-file-path (text/md only) marks the text root
-      <div data-pane={tabId} hidden={!active} className={`grid-pane relative min-h-0 flex-1 overflow-auto ${natural ? '' : '[&:not([hidden])]:grid place-items-center'}`}>
+      <div data-pane={tabId} hidden={!active} className={`grid-pane nb-media-pane relative min-h-0 flex-1 overflow-auto${natural ? ' nb-natural' : ''}`}>
         <img
           src={mediaUrl}
           alt={path}
           onError={onError}
           onClick={() => setNatural((v) => !v)}
-          className={natural ? 'max-w-none cursor-zoom-out' : 'max-h-full max-w-full cursor-zoom-in object-contain'}
+          className={`nb-fit ${natural ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
         />
       </div>
     );
   } else if (kind === 'video' || kind === 'audio') {
     body = (
-      <div data-pane={tabId} hidden={!active} className="grid-pane relative [&:not([hidden])]:grid min-h-0 flex-1 place-items-center overflow-auto p-4">
+      <div data-pane={tabId} hidden={!active} className={`grid-pane nb-media-pane relative min-h-0 flex-1 overflow-auto`}>
         {kind === 'video' ? (
-          <video ref={mediaRef} controls preload="metadata" src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="max-h-full max-w-full" />
+          <video ref={mediaRef} controls preload="metadata" src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="nb-fit" />
         ) : (
-          <audio ref={mediaRef} controls src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="w-full max-w-xl" />
+          <audio ref={mediaRef} controls src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="w-full max-w-xl p-4" />
         )}
       </div>
     );
@@ -213,8 +213,8 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     const inner =
       data == null ? null
       : data.s === 'text' ? (
-        kind === 'md' ? <div className="mx-auto max-w-3xl p-4" onClick={(e) => refClick(e, dispatch, src)}><Markdown text={data.text} final src={src} baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
-        : <pre className="m-0 p-4 font-mono text-xs leading-relaxed whitespace-pre"><CodeText text={data.text} path={path} /></pre>
+        kind === 'md' ? <div className="nb-card nb-prose px-10 pt-5 pb-7" onClick={(e) => refClick(e, dispatch, src)}><Markdown text={data.text} final src={src} baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
+        : <pre className="nb-card nb-code overflow-x-auto p-4 font-mono text-xs leading-relaxed whitespace-pre"><CodeText text={data.text} path={path} /></pre>
       )
       : data.s === 'error' ? <p className="p-4 text-sm text-destructive">{data.message}</p>
       : data.s === 'sourceGone' ? goneSrc

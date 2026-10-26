@@ -90,3 +90,19 @@
 /* brief highlight on the source item after "jump to source" in a comment card */
 @keyframes nb-flash { from { background-color: oklch(0.88 0.18 95 / 0.35); } to { background-color: transparent; } }
 .nb-flash { animation: nb-flash 1.2s ease-out; }
+
+/* R-M6-2: content width follows the viewport. Prose (chat card, md files) and code are centred paper cards. */
+.nb-prose { width: min(100%, clamp(860px, 62vw, 1280px)); }
+.nb-code { width: min(100%, clamp(960px, 78vw, 1600px)); }
+.nb-card {
+  margin: 1rem auto 1.5rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 0.75rem;
+  background: var(--card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+/* Media panes: one definite grid cell, so max-height in % resolves; a click toggles the natural size (.nb-natural scrolls). */
+.nb-media-pane:not([hidden]) { display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; }
+.nb-media-pane.nb-natural:not([hidden]) { display: block; }
+.nb-fit { max-width: 100%; max-height: calc(100% - 2rem); object-fit: contain; }
+.nb-media-pane.nb-natural .nb-fit { max-width: none; max-height: none; margin: 1rem auto; }
