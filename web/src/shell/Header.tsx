@@ -27,8 +27,7 @@ export function Header() {
     <header className="relative z-[6] flex h-12 flex-none items-center gap-3 border-b border-border-soft bg-chrome px-4 text-xs text-muted-foreground backdrop-blur-[24px]">
       <img id="logo" src="/icon.svg" alt="Nota Bene" className="-mr-1 size-6" />
       <b id="proj" className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{project}</b>
-      <span id="root-path" className="min-w-0 truncate font-mono text-[11px] opacity-70">{session?.root ?? ''}</span>
-      {/* after the project, not before the logo: it belongs to the project's files */}
+      {/* right after the project name, labelled: an icon-only button after the long path was easy to miss */}
       <button
         type="button"
         id="toggleTree"
@@ -36,10 +35,12 @@ export function Header() {
         aria-label={t('fileTree')}
         title={t('fileTree')}
         onClick={() => d(setTreeOpen(!treeOpen))}
-        className={`grid size-7 flex-none place-items-center rounded-lg hover:bg-muted hover:text-foreground ${treeOpen ? 'bg-primary/15 text-primary' : ''}`}
+        className={`flex h-7 flex-none items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-muted hover:text-foreground ${treeOpen ? 'bg-primary/15 text-primary' : ''}`}
       >
-        <Svg size={16}>{ICONS.dir}</Svg>
+        <Svg size={15}>{ICONS.dir}</Svg>
+        {t('files')}
       </button>
+      <span id="root-path" className="min-w-0 truncate font-mono text-[11px] opacity-70">{session?.root ?? ''}</span>
       <span className="flex-1" />
       <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : switching ? t(restarting ? 'restarting' : 'switching') : ''}</span>
       <SessionPicker />
