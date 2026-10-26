@@ -35,7 +35,7 @@ export function TasksLine() {
         const meta = [fmtElapsed(now - tk.start), tk.tokens ? `${fmtK(tk.tokens)} tok` : '', tk.tool].filter(Boolean).join(' · ');
         return (
           <div key={id} title={tk.summary || tk.desc} className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
-            <span aria-hidden className="animate-pulse text-accent">⚙</span>
+            <span aria-hidden className="animate-pulse text-nb-accent">⚙</span>
             <span className="overflow-hidden text-ellipsis text-foreground/85">{tk.desc}</span>
             <span className="flex-none font-mono text-[10.5px]">{meta}</span>
           </div>

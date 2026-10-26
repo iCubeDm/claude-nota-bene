@@ -49,7 +49,7 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
           {sent.length
             ? sent.map((c) => (
                 <div key={c.id} className="mt-1.5">
-                  <blockquote className="border-l-2 border-border pl-2">{c.anchor.quote}</blockquote>
+                  <blockquote className="border-l-2 border-nb-accent pl-2">{c.anchor.quote}</blockquote>
                   <div>
                     →{' '}
                     {c.label && <span className="mr-1 rounded bg-muted px-1">{labelOf(c)}</span>}

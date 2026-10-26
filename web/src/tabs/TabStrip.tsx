@@ -54,7 +54,7 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           <Svg>{iconFor(tab)}</Svg>
           <span className="truncate">{label}</span>
           {tab.kind === 'file' && tab.ref && <SourceChip name={tab.ref} />}
-          {badge > 0 && <span data-badge className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{badge}</span>}
+          {badge > 0 && <span data-badge className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{badge}</span>}
           {!isChat && (
             <button
               type="button"

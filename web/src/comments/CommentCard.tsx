@@ -185,7 +185,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
       </div>
       <div
         onClick={popover ? undefined : jump}
-        className={`line-clamp-3 border-l-2 border-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
+        className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
       >
         {c.anchor.quote}
       </div>

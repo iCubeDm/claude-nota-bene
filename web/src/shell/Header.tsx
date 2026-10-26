@@ -56,7 +56,7 @@ export function Header() {
         className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-muted hover:text-foreground ${panelOpen ? 'bg-primary/15 text-primary' : ''}`}
       >
         {t('comments')}
-        {pendingN > 0 && <span className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{pendingN}</span>}
+        {pendingN > 0 && <span className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{pendingN}</span>}
       </button>
       <button
         type="button"

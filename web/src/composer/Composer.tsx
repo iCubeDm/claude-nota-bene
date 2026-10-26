@@ -137,7 +137,7 @@ export function Composer() {
       <div className="flex min-h-0 items-center gap-2.5 pt-2 text-xs text-muted-foreground">
         {busy && (
           <>
-            <span className="animate-pulse text-accent">●</span>
+            <span className="animate-pulse text-nb-accent">●</span>
             {t('working')}
           </>
         )}
