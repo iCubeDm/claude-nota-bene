@@ -60,6 +60,9 @@ function seedFiles(dir) {
       ff('-f', 'lavfi', '-i', `color=c=${color}:s=320x240:d=30:r=10,noise=alls=100:allf=t`, '-b:v', '1M', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-movflags', '+faststart', path.join(dir, `media/${name}.mp4`));
     }
     ff('-f', 'lavfi', '-i', 'sine=d=3', path.join(dir, 'media/s.mp3'));
+    // media comments: a 2:1 image a wide pane letterboxes, and a 4K one for the drawing's lag (solid: a few KB each)
+    ff('-f', 'lavfi', '-i', 'color=c=0x3a6ea5:s=1000x500', '-frames:v', '1', path.join(dir, 'media/wide.png'));
+    ff('-f', 'lavfi', '-i', 'color=c=0x556b2f:s=3840x2160', '-frames:v', '1', path.join(dir, 'media/4k.png'));
   } else console.warn('e2e/serve.mjs: no ffmpeg, media fixtures skipped');
   fs.writeFileSync(path.join(dir, 'big.log'), 'x'.repeat(3 * 1024 * 1024));
   fs.symlinkSync(os.tmpdir(), path.join(dir, 'link-out'));

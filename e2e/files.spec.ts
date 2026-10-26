@@ -1,4 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import fs from 'node:fs';
+import nodePath from 'node:path';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // M3-13: comments on an open file, in a real browser (hidden panes and rects cannot be checked in jsdom).
 const composer = (page: Page) => page.getByPlaceholder(/Message the agent|Сообщение агенту/);
@@ -452,4 +454,331 @@ test('the docked panels are resized by dragging their edge, and keep the width a
   await expect.poll(async () => (await sheet.boundingBox())!.width).toBeCloseTo(before + 100, 0);
   await page.locator('[data-resizer="right"]').dblclick(); // back to the default, for the other tests
   await expect.poll(async () => (await sheet.boundingBox())!.width).toBeCloseTo(300, 0);
+});
+
+// ---- Media comments: markup on an image or a paused video frame (media/wide.png 1000×500, media/4k.png 3840×2160 and
+// media/a.mp4 320×240 come from e2e/serve.mjs). Every test starts by deleting pending comments and leaves none behind.
+const mediaPane = (page: Page, path: string) => page.locator(`[data-pane="file:${path}"]`);
+const markupLayer = (page: Page, path: string) => mediaPane(page, path).locator('svg[data-markup-layer]');
+const markUpBtn = (page: Page) => page.getByRole('button', { name: /^(Mark up|Разметить)$/ });
+type Pt = { x: number; y: number };
+
+async function clearPending(page: Page) {
+  await openPanel(page);
+  while ((await cards(page).count()) > 0) {
+    const n = await cards(page).count();
+    await cards(page).first().getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
+    await expect(cards(page)).toHaveCount(n - 1);
+  }
+}
+
+/** Every websocket frame the page sends, as text. */
+function sentFrames(page: Page): string[] {
+  const frames: string[] = [];
+  page.on('websocket', (ws) => ws.on('framesent', (f) => frames.push(String(f.payload))));
+  return frames;
+}
+
+/** The batch (a string with a `→ ` line) inside a sent frame that contains `needle`, or undefined. */
+function batchText(frames: string[], needle: string): string | undefined {
+  const find = (v: unknown): string | undefined => {
+    if (typeof v === 'string') return v.includes(needle) && v.includes('\n→ ') ? v : undefined;
+    if (v && typeof v === 'object') for (const x of Object.values(v)) { const s = find(x); if (s) return s; }
+    return undefined;
+  };
+  for (const f of frames) {
+    if (!f.includes(needle)) continue;
+    try { const s = find(JSON.parse(f)); if (s) return s; } catch { /* not JSON */ }
+  }
+  return undefined;
+}
+
+/**
+ * The media's content box in client px, computed here, independently of the app: object-fit: contain of the natural
+ * size inside the element's box (in natural size the element box is the natural size, so contain is the identity).
+ */
+const contentBoxOf = (media: Locator): Promise<Box> => media.evaluate((el) => {
+  const r = el.getBoundingClientRect();
+  const [w, h] = el instanceof HTMLVideoElement ? [el.videoWidth, el.videoHeight] : [(el as HTMLImageElement).naturalWidth, (el as HTMLImageElement).naturalHeight];
+  const s = Math.min(r.width / w, r.height / h);
+  return { x: r.x + (r.width - w * s) / 2, y: r.y + (r.height - h * s) / 2, width: w * s, height: h * s };
+});
+const at = (b: Box, fx: number, fy: number): Pt => ({ x: b.x + fx * b.width, y: b.y + fy * b.height });
+
+async function drag(page: Page, from: Pt, to: Pt, steps = 8) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps });
+  await page.mouse.up();
+}
+
+async function stroke(page: Page, pts: Pt[]) {
+  await page.mouse.move(pts[0].x, pts[0].y);
+  await page.mouse.down();
+  for (const p of pts.slice(1)) await page.mouse.move(p.x, p.y);
+  await page.mouse.up();
+}
+
+/** Comment (Enter) on the drawing, type the text, Add; returns the new card's comment id once it is in the panel. */
+async function addMarkComment(page: Page, text: string): Promise<string> {
+  await page.keyboard.press('Enter');
+  await page.getByPlaceholder('Comment…').fill(text);
+  await page.getByRole('button', { name: /^(Add|Добавить)$/ }).click();
+  const card = cards(page).filter({ hasText: text });
+  await expect(card).toHaveCount(1);
+  return (await card.getAttribute('data-comment-id'))!;
+}
+
+const projectRoot = async (page: Page): Promise<string> => ((await (await page.request.get('/info')).json()) as { root: string }).root;
+const markDir = (root: string, id: string) => nodePath.join(root, '.nota-bene', 'marks', id);
+
+/** Decodes a project PNG in the browser (via /file) and reads its size and the alpha at `pts` (natural px). */
+const pngAlpha = (page: Page, file: string, pts: [number, number][]) => page.evaluate(async ({ file, pts }) => {
+  const img = new Image();
+  img.src = `/file?path=${encodeURIComponent(file)}`;
+  await img.decode();
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0);
+  return { width: c.width, height: c.height, alpha: pts.map(([x, y]) => ctx.getImageData(x, y, 1, 1).data[3]) };
+}, { file, pts });
+
+/** `rect x= y= w= h= (px X,Y W×H)` of the batch, as numbers. */
+function rectOf(batch: string): number[] {
+  const m = /rect x=([\d.]+) y=([\d.]+) w=([\d.]+) h=([\d.]+) \(px (\d+),(\d+) (\d+)×(\d+)\)/.exec(batch);
+  expect(m, batch).not.toBeNull();
+  return m!.slice(1).map(Number);
+}
+
+async function sendAndSettle(page: Page) {
+  await page.locator('#cSend').click();
+  await expect(chatTab(page)).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(/agent is working|агент работает/)).toBeHidden();
+}
+
+test('mark up an image: rect + pen, comment, files in the project, coordinates in the batch @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the media fixtures with it');
+  const frames = sentFrames(page);
+  await page.setViewportSize({ width: 1280, height: 1100 }); // a tall pane: the 2:1 image leaves bands above and below
+  await start(page);
+  await clearPending(page);
+  await openFromTree(page, 'media/wide.png');
+  const img = mediaPane(page, 'media/wide.png').locator('img');
+  await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth)).toBe(1000);
+  // letterboxing: the element is stretched over the pane, object-fit: contain paints the 2:1 image in its middle, so
+  // the element box is not the drawable area (the app's CSS never stretches it; this forces the trap)
+  await page.addStyleTag({ content: '[data-pane="file:media/wide.png"] img.nb-fit { width: 100%; height: calc(100% - 2rem); }' });
+  await expect.poll(async () => { const [e, c] = [(await img.boundingBox())!, await contentBoxOf(img)]; return e.height - c.height; }).toBeGreaterThan(200);
+  const b = await contentBoxOf(img);
+
+  await markUpBtn(page).click();
+  const layer = markupLayer(page, 'media/wide.png');
+  await expect(layer).toBeVisible();
+  await drag(page, at(b, 0.25, 0.25), at(b, 0.75, 0.5));
+  await expect(layer.locator('[data-shape="rect"]')).toHaveCount(1);
+  await page.keyboard.press('p');
+  await stroke(page, Array.from({ length: 20 }, (_, i) => at(b, 0.1 + i * 0.01, 0.75 + 0.05 * Math.sin(i / 3))));
+  await expect(layer.locator('[data-shape="pen"]')).toHaveCount(1);
+  const text = uniq('wide');
+  const id = await addMarkComment(page, text);
+  await expect(layer).toHaveCount(0); // added: the mode is left, the mark shows instead
+  await expect(mediaPane(page, 'media/wide.png').locator(`[data-media-marks] [data-mark="${id}"]`)).toHaveCount(1);
+  await expect(cards(page).filter({ hasText: text }).locator('[data-media-thumb] img')).toBeVisible();
+
+  // the two files, in the fixture project; the layer at the natural size, the rect's top edge opaque, the rest clear
+  const root = await projectRoot(page);
+  for (const f of ['frame.jpg', 'layer.png']) expect(fs.existsSync(nodePath.join(markDir(root, id), f)), f).toBe(true);
+  const px = await pngAlpha(page, `.nota-bene/marks/${id}/layer.png`, [[500, 125], [10, 10]]);
+  expect([px.width, px.height]).toEqual([1000, 500]);
+  expect(px.alpha).toEqual([255, 0]);
+
+  await sendAndSettle(page);
+  await expect.poll(() => batchText(frames, text)).toBeTruthy();
+  const batch = batchText(frames, text)!;
+  expect(batch).toContain('[media/wide.png · 1000×500]');
+  const [x, y, w, h, X, Y, W, H] = rectOf(batch);
+  for (const [got, want] of [[x, 0.25], [y, 0.25], [w, 0.5], [h, 0.25]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(0.005);
+  for (const [got, want] of [[X, 250], [Y, 125], [W, 500], [H, 125]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(5);
+  expect(batch).toMatch(/> pen \d+ pts, bbox x=0\.1 /);
+  expect(batch).toContain('📎 images: ');
+  expect(batch).toContain(`files: .nota-bene/marks/${id}/frame.jpg, .nota-bene/marks/${id}/layer.png`);
+  await expect(reply(page, text)).toContainText('images: 2');
+});
+
+test('natural size, scrolled to the bottom-right: the same mapping @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the media fixtures with it');
+  const frames = sentFrames(page);
+  await start(page);
+  await clearPending(page);
+  await openFromTree(page, 'media/4k.png');
+  const pane = mediaPane(page, 'media/4k.png');
+  const img = pane.locator('img');
+  await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth)).toBe(3840);
+  await img.click(); // natural size
+  await expect.poll(() => img.evaluate((e) => e.getBoundingClientRect().width)).toBe(3840);
+  await pane.evaluate((el) => el.scrollTo(el.scrollWidth, el.scrollHeight));
+  await expect.poll(() => pane.evaluate((el) => el.scrollLeft > 2000 && el.scrollTop > 1000)).toBe(true);
+
+  await markUpBtn(page).click();
+  await expect(markupLayer(page, 'media/4k.png')).toBeVisible();
+  const b = await contentBoxOf(img);
+  // natural px (3360,1836)-(3744,2095): fractions 0.875,0.85 - 0.975,0.97; inside what the scrolled pane shows
+  const [p, q] = [at(b, 0.875, 0.85), at(b, 0.975, 0.97)];
+  const view = (await pane.boundingBox())!;
+  expect(p.x > view.x && p.y > view.y && q.x < view.x + view.width && q.y < view.y + view.height, JSON.stringify({ p, q, view })).toBe(true);
+  await drag(page, p, q);
+  const text = uniq('natural');
+  const id = await addMarkComment(page, text);
+  // the layer, at 3840×2160: the top edge's middle (3552,1836) is drawn, the top-left corner is not
+  const px = await pngAlpha(page, `.nota-bene/marks/${id}/layer.png`, [[3552, 1836], [100, 100]]);
+  expect([px.width, px.height]).toEqual([3840, 2160]);
+  expect(px.alpha).toEqual([255, 0]);
+
+  await sendAndSettle(page);
+  await expect.poll(() => batchText(frames, text)).toBeTruthy();
+  const batch = batchText(frames, text)!;
+  expect(batch).toContain('[media/4k.png · 3840×2160]');
+  const [x, y, w, h, X, Y, W, H] = rectOf(batch);
+  for (const [got, want] of [[x, 0.875], [y, 0.85], [w, 0.1], [h, 0.12]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(0.005);
+  for (const [got, want] of [[X, 3360], [Y, 1836], [W, 384], [H, 259]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(3);
+  expect(batch).not.toMatch(/scaled|×0\./); // a mostly empty layer fits at full size
+});
+
+test('mark up a paused video frame: the time is in the batch; the mark shows only when paused there @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
+  const frames = sentFrames(page);
+  await start(page);
+  await clearPending(page);
+  await openFromTree(page, 'media/a.mp4');
+  const pane = mediaPane(page, 'media/a.mp4');
+  const video = pane.locator('video');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  const seek = async (t: number) => {
+    await video.evaluate((e: HTMLVideoElement, s) => new Promise<void>((done) => {
+      e.pause();
+      e.addEventListener('seeked', () => done(), { once: true });
+      e.currentTime = s;
+    }), t);
+  };
+  await seek(12.3);
+
+  await markUpBtn(page).click();
+  const layer = markupLayer(page, 'media/a.mp4');
+  await expect(layer).toBeVisible();
+  expect(await video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(false); // no native controls while marking
+  const b = await contentBoxOf(video);
+  // the bottom edge (y 0.97) runs through the native controls' strip, the left edge (x 0.1) from above it into it
+  await drag(page, at(b, 0.1, 0.2), at(b, 0.9, 0.97));
+  const text = uniq('frame');
+  const id = await addMarkComment(page, text);
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(true);
+  const mark = pane.locator(`[data-media-marks] [data-mark="${id}"]`);
+  await expect(mark).toHaveCount(1);
+
+  // a click on the stroke opens the comment's card
+  const top = at(b, 0.5, 0.2);
+  await page.mouse.click(top.x, top.y);
+  const popover = page.getByRole('dialog').locator(`[data-comment-id="${id}"]`);
+  await expect(popover).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  // the stroke takes the click above the bottom 48 px of the element; within them the video (its controls) does
+  const vb = (await video.boundingBox())!;
+  const hitAt = (pt: Pt) => page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest('[data-hit]')?.getAttribute('data-hit') ?? el?.tagName.toLowerCase() ?? null;
+  }, pt);
+  const leftEdge = (y: number) => ({ x: b.x + 0.1 * b.width, y });
+  expect(await hitAt(leftEdge(vb.y + vb.height - 60))).toBe(id);
+  expect(await hitAt(leftEdge(vb.y + vb.height - 20))).toBe('video');
+  expect(await hitAt({ x: b.x + 0.5 * b.width, y: b.y + 0.97 * b.height })).toBe('video');
+  // a real click on the stroke inside the strip: no card
+  await page.mouse.click(b.x + 0.5 * b.width, b.y + 0.97 * b.height);
+  await expect(page.getByRole('dialog').locator('[data-comment-id]')).toHaveCount(0);
+
+  // shown only while paused at its time (± 0.04 s)
+  await seek(12.3);
+  await expect(mark).toHaveCount(1);
+  await seek(12.5);
+  await expect(mark).toHaveCount(0);
+  await seek(12.33);
+  await expect(mark).toHaveCount(1);
+  await video.evaluate(async (e: HTMLVideoElement) => { e.muted = true; await e.play(); });
+  await expect(mark).toHaveCount(0);
+
+  // the card's jump: seeks the playing video back to the time and pauses it
+  await cards(page).filter({ hasText: text }).locator('[data-media-thumb]').click();
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.paused && Math.abs(e.currentTime - 12.3) < 0.01)).toBe(true);
+  await expect(mark).toHaveCount(1);
+  await expect(cards(page).filter({ hasText: text })).toContainText('a.mp4 @ 0:12.300');
+
+  await sendAndSettle(page);
+  await expect.poll(() => batchText(frames, text)).toBeTruthy();
+  const batch = batchText(frames, text)!;
+  expect(batch).toContain('[media/a.mp4 @ 0:12.300 · 320×240]');
+  const [x, y, w, h] = rectOf(batch);
+  for (const [got, want] of [[x, 0.1], [y, 0.2], [w, 0.8], [h, 0.77]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(0.005);
+});
+
+test('deleting the comment removes its folder @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the media fixtures with it');
+  await start(page);
+  await clearPending(page);
+  await openFromTree(page, 'media/wide.png');
+  const img = mediaPane(page, 'media/wide.png').locator('img');
+  await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth)).toBe(1000);
+  await markUpBtn(page).click();
+  await expect(markupLayer(page, 'media/wide.png')).toBeVisible();
+  const b = await contentBoxOf(img);
+  await page.keyboard.press('e');
+  await drag(page, at(b, 0.4, 0.4), at(b, 0.6, 0.6));
+  const text = uniq('delete');
+  const id = await addMarkComment(page, text);
+  const dir = markDir(await projectRoot(page), id);
+  expect(fs.existsSync(nodePath.join(dir, 'layer.png'))).toBe(true);
+  await cards(page).filter({ hasText: text }).getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
+  await expect(cards(page).filter({ hasText: text })).toHaveCount(0);
+  await expect.poll(() => fs.existsSync(dir)).toBe(false);
+  await expect(mediaPane(page, 'media/wide.png').locator(`[data-mark="${id}"]`)).toHaveCount(0);
+});
+
+test('4K-ish drawing stays responsive: a 300-point pen stroke, the pointer-move handler median under 4 ms @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the media fixtures with it');
+  await start(page);
+  await openFromTree(page, 'media/4k.png');
+  const img = mediaPane(page, 'media/4k.png').locator('img');
+  await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth)).toBe(3840);
+  await markUpBtn(page).click();
+  const layer = markupLayer(page, 'media/4k.png');
+  await expect(layer).toBeVisible();
+  await page.keyboard.press('p');
+  // per pointermove: from a window capture listener (before React's root listener) to a window bubble one (after it),
+  // so the time is React's dispatch plus the app's handler, for real input events
+  await page.evaluate(() => {
+    const w = window as unknown as { __moves: number[] };
+    w.__moves = [];
+    let t0 = 0;
+    window.addEventListener('pointermove', () => { t0 = performance.now(); }, true);
+    window.addEventListener('pointermove', () => { if (t0) w.__moves.push(performance.now() - t0); t0 = 0; });
+  });
+  const b = await contentBoxOf(img);
+  await stroke(page, Array.from({ length: 300 }, (_, i) => at(b, 0.05 + 0.9 * (i / 299), 0.5 + 0.3 * Math.sin(i / 15))));
+  const pen = layer.locator('[data-shape="pen"]');
+  await expect(pen).toHaveCount(1);
+  // the stroke completed: its path spans the drawn width
+  const pb = (await pen.boundingBox())!;
+  expect(pb.width).toBeGreaterThan(0.85 * b.width);
+  const moves = await page.evaluate(() => (window as unknown as { __moves: number[] }).__moves);
+  expect(moves.length).toBeGreaterThan(100); // Chrome may coalesce some moves (the handler reads them all)
+  const sorted = [...moves].sort((u, v) => u - v);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  test.info().annotations.push({ type: 'pointermove', description: `n=${moves.length} median=${median.toFixed(3)} ms p95=${sorted[Math.floor(sorted.length * 0.95)].toFixed(3)} ms max=${sorted[sorted.length - 1].toFixed(3)} ms` });
+  console.log(test.info().annotations.at(-1)!.description);
+  expect(median).toBeLessThan(4);
+  // leave without a comment: the drawing is discarded on confirmation
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: /^(Discard|Выбросить)$/ }).click();
+  await expect(layer).toHaveCount(0);
 });
