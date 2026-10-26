@@ -1,0 +1,216 @@
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { Provider } from 'react-redux';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type { MediaShape, ServerEvent } from '@nota-bene/shared';
+import { TooltipProvider } from '@/components/ui/tooltip.tsx';
+import { setLang } from '@/i18n/index.ts';
+import { connState, makeStore, serverEvent } from '@/store/store.ts';
+import { MarkupLayer } from './MarkupLayer.tsx';
+import { addShape, selectDraft, setMode } from './slice.ts';
+
+const TAB = 'file:p.png';
+const rect = (x: number, y: number, w: number, h: number) => ({
+  x, y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h, toJSON() { return this; },
+}) as DOMRect;
+
+let pane: HTMLDivElement;
+beforeEach(() => {
+  setLang('en');
+  Element.prototype.setPointerCapture = () => {}; // jsdom has no pointer capture
+  pane = document.createElement('div');
+  pane.getBoundingClientRect = () => rect(0, 0, 1000, 1000);
+  document.body.append(pane);
+});
+afterEach(() => { cleanup(); pane.remove(); vi.restoreAllMocks(); });
+
+/** A 2000×1000 image letterboxed in a 1000×1000 element: content box (0, 250) 1000×500. */
+function image() {
+  const img = document.createElement('img');
+  Object.defineProperty(img, 'naturalWidth', { value: 2000 });
+  Object.defineProperty(img, 'naturalHeight', { value: 1000 });
+  img.getBoundingClientRect = () => rect(0, 0, 1000, 1000);
+  pane.append(img);
+  return img;
+}
+
+function setup(media: HTMLImageElement | HTMLVideoElement = image(), protocol = 4) {
+  const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+  store.dispatch(serverEvent({ kind: 'hello', protocol } as ServerEvent));
+  const onAdd = vi.fn();
+  const ui = () => (
+    <Provider store={store}>
+      <TooltipProvider>
+        <MarkupLayer tabId={TAB} media={media} fit="contain" onAdd={onAdd} />
+      </TooltipProvider>
+    </Provider>
+  );
+  const r = render(ui());
+  const dispatch = vi.spyOn(store, 'dispatch');
+  return { store, r, onAdd, dispatch, ui, draft: () => selectDraft(store.getState(), TAB) };
+}
+const toggle = () => screen.getByRole('button', { name: /mark up/i });
+const layer = () => pane.querySelector<SVGSVGElement>('svg[data-markup-layer]')!;
+const drag = (pts: [number, number][]) => {
+  const [first, ...rest] = pts;
+  fireEvent.pointerDown(layer(), { button: 0, clientX: first[0], clientY: first[1], pointerId: 1, isPrimary: true });
+  for (const [x, y] of rest) fireEvent.pointerMove(layer(), { clientX: x, clientY: y, pointerId: 1 });
+  const last = pts[pts.length - 1];
+  fireEvent.pointerUp(layer(), { clientX: last[0], clientY: last[1], pointerId: 1 });
+};
+const key = (k: Partial<KeyboardEventInit>) => fireEvent.keyDown(document.body, k);
+
+it('the mode is not offered to a server below protocol 4', () => {
+  setup(image(), 3);
+  expect(screen.queryByRole('button', { name: /mark up/i })).toBeNull();
+  cleanup();
+  setup(image(), 4);
+  expect(toggle()).toBeInTheDocument();
+});
+
+it('entering the mode pauses a playing video', () => {
+  const v = document.createElement('video');
+  v.getBoundingClientRect = () => rect(0, 0, 1000, 1000);
+  pane.append(v);
+  let paused = false;
+  Object.defineProperty(v, 'paused', { get: () => paused });
+  const pause = vi.spyOn(v, 'pause').mockImplementation(() => { paused = true; });
+  const { draft } = setup(v);
+  fireEvent.click(toggle());
+  expect(pause).toHaveBeenCalledTimes(1);
+  expect(draft().on).toBe(true);
+  expect(layer()).not.toBeNull();
+});
+
+it('the layer sits on the content box, inside the pane', () => {
+  setup();
+  fireEvent.click(toggle());
+  expect(layer().parentElement).toBe(pane);
+  const st = layer().style;
+  expect([st.left, st.top, st.width, st.height]).toEqual(['0px', '250px', '1000px', '500px']);
+});
+
+it('a drag with the rect tool adds a rect in relative coordinates of the content box', () => {
+  const { draft } = setup();
+  fireEvent.click(toggle());
+  // the content box is (0,250) 1000×500: x 100→300 is 0.1→0.3; y 350→450 is 0.2→0.4; dragged up-left
+  drag([[300, 450], [200, 400], [100, 350]]);
+  expect(draft().shapes).toEqual([{ kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.2, h: 0.2 }]);
+  // outside the content box (the letterbox) clamps to the edge
+  drag([[500, 100], [600, 50]]);
+  expect(draft().shapes).toHaveLength(1); // zero height: not a shape
+  drag([[500, 600], [1200, 900]]);
+  expect(draft().shapes[1]).toEqual({ kind: 'rect', color: '#ff3b30', x: 0.5, y: 0.7, w: 0.5, h: 0.3 });
+});
+
+it('ellipse and arrow tools by key, a colour by digit (any keyboard layout)', () => {
+  const { draft } = setup();
+  fireEvent.click(toggle());
+  key({ key: 'у', code: 'KeyE' }); // E on a Russian layout
+  key({ key: '2', code: 'Digit2' });
+  drag([[100, 250], [300, 750]]);
+  key({ key: 'a', code: 'KeyA' });
+  drag([[0, 250], [1000, 750]]);
+  expect(draft().shapes).toEqual([
+    { kind: 'ellipse', color: '#ffcc00', x: 0.1, y: 0, w: 0.2, h: 1 },
+    { kind: 'arrow', color: '#ffcc00', x1: 0, y1: 0, x2: 1, y2: 1 },
+  ]);
+});
+
+it('pen strokes update in place during the drag and are simplified on pointerup', () => {
+  const { dispatch, draft } = setup();
+  fireEvent.click(toggle());
+  key({ key: 'p', code: 'KeyP' });
+  dispatch.mockClear();
+  const live = pane.querySelector('polyline[data-live]')!;
+  fireEvent.pointerDown(layer(), { button: 0, clientX: 100, clientY: 500, pointerId: 1 });
+  fireEvent.pointerMove(layer(), { clientX: 100.5, clientY: 500, pointerId: 1 }); // 0.0005: dropped by simplify
+  fireEvent.pointerMove(layer(), { clientX: 200, clientY: 500, pointerId: 1 });
+  expect(live.getAttribute('points')).toBe('0.1,0.5 0.1005,0.5 0.2,0.5');
+  fireEvent.pointerMove(layer(), { clientX: 300, clientY: 600, pointerId: 1 });
+  expect(live.getAttribute('points')).toBe('0.1,0.5 0.1005,0.5 0.2,0.5 0.3,0.7');
+  expect(dispatch).not.toHaveBeenCalled(); // no store update per move
+  fireEvent.pointerUp(layer(), { clientX: 300, clientY: 600, pointerId: 1 });
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(draft().shapes).toEqual([{ kind: 'pen', color: '#ff3b30', points: [0.1, 0.5, 0.2, 0.5, 0.3, 0.7] }]);
+  expect(live.getAttribute('points')).toBe('');
+  // a tap is a dot, never lost
+  drag([[500, 500]]);
+  expect(draft().shapes[1]).toEqual({ kind: 'pen', color: '#ff3b30', points: [0.5, 0.5, 0.5, 0.5] });
+});
+
+it('undo removes the last shape; Esc with shapes asks before discarding; Esc without shapes just leaves', () => {
+  const { draft } = setup();
+  fireEvent.click(toggle());
+  drag([[100, 300], [200, 400]]);
+  drag([[300, 300], [400, 400]]);
+  key({ key: 'z', code: 'KeyZ', metaKey: true });
+  expect(draft().shapes).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: /undo/i }));
+  expect(draft().shapes).toHaveLength(0);
+  key({ key: 'Escape', code: 'Escape' });
+  expect(draft().on).toBe(false);
+  expect(screen.queryByRole('dialog')).toBeNull();
+
+  fireEvent.click(toggle());
+  drag([[100, 300], [200, 400]]);
+  const ev = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true });
+  act(() => { document.body.dispatchEvent(ev); });
+  expect(ev.defaultPrevented).toBe(true); // the Composer does not also interrupt the agent
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+  expect(draft().on).toBe(true);
+  expect(draft().shapes).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: /leave/i })); // ✕ asks too
+  fireEvent.click(screen.getByRole('button', { name: /discard/i }));
+  expect(draft()).toMatchObject({ on: false, shapes: [] });
+});
+
+it('keys are ignored in a text field and outside the mode; Enter comments with the shapes', () => {
+  const { draft, onAdd, store } = setup();
+  key({ key: 'p', code: 'KeyP' });
+  expect(draft().tool).toBe('rect');
+  fireEvent.click(toggle());
+  const field = document.createElement('textarea');
+  document.body.append(field);
+  fireEvent.keyDown(field, { key: 'p', code: 'KeyP' });
+  fireEvent.keyDown(field, { key: 'Escape', code: 'Escape' });
+  expect(draft()).toMatchObject({ tool: 'rect', on: true });
+  field.remove();
+  key({ key: 'Enter', code: 'Enter' });
+  expect(onAdd).not.toHaveBeenCalled(); // nothing drawn
+  const shape: MediaShape = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.1, h: 0.1 };
+  act(() => { store.dispatch(addShape(TAB, shape)); });
+  key({ key: 'Enter', code: 'Enter' });
+  expect(onAdd).toHaveBeenCalledWith([shape]);
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  expect(onAdd).toHaveBeenCalledTimes(2);
+  expect(draft().shapes).toEqual([shape]); // the caller clears it once the comment exists
+});
+
+it('the draft survives a tab switch (the slice keeps it; the layer remounts with it)', () => {
+  const { r, ui, store } = setup();
+  fireEvent.click(toggle());
+  drag([[100, 300], [200, 400]]);
+  r.unmount();
+  expect(pane.querySelector('svg[data-markup-layer]')).toBeNull();
+  render(ui());
+  expect(selectDraft(store.getState(), TAB).on).toBe(true);
+  expect(layer().querySelectorAll('path[data-shape]')).toHaveLength(1);
+});
+
+it('a hidden tab does not take the keys', () => {
+  const { draft, store } = setup();
+  act(() => { store.dispatch(setMode(TAB, true)); });
+  pane.hidden = true;
+  key({ key: 'p', code: 'KeyP' });
+  expect(draft().tool).toBe('rect');
+});
+
+it('a dropped connection does not hide a drawing in progress', () => {
+  const { store } = setup();
+  fireEvent.click(toggle());
+  drag([[100, 300], [200, 400]]);
+  act(() => { store.dispatch(connState('closed')); }); // protocol is 0 until the next hello
+  expect(layer().querySelectorAll('path[data-shape]')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: /leave/i })).toBeInTheDocument();
+});

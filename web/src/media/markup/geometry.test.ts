@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { contentBox, describeShape, rectFrom, round4, simplify, toRel } from './geometry.ts';
+import { contentBox, describeShape, rectFrom, round4, shapePath, simplify, toRel } from './geometry.ts';
 
 const R = (x: number, y: number, w: number, h: number) =>
   ({ x, y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h }) as DOMRect;
@@ -57,4 +57,17 @@ it('describeShape pen', () => {
   for (let i = 0; i < 38; i++) points.push(0.1 + i * 0.01, i === 5 ? 0.2 : 0.3);
   expect(describeShape({ kind: 'pen', color: C, points }, 1000, 1000))
     .toBe('pen 38 pts, bbox x=0.1 y=0.2 w=0.37 h=0.1 (px 100,200 370×100)');
+});
+
+it('shapePath draws in the 0..1 viewBox; the arrow head is sized in natural px like the rendered frame', () => {
+  expect(shapePath({ kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, 1000, 500)).toBe('M0.1 0.2H0.4V0.6H0.1Z');
+  expect(shapePath({ kind: 'ellipse', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.2, h: 0.4 }, 1000, 500))
+    .toBe('M0.1 0.4A0.1 0.2 0 1 0 0.3 0.4A0.1 0.2 0 1 0 0.1 0.4Z');
+  expect(shapePath({ kind: 'pen', color: '#ff3b30', points: [0.1, 0.1, 0.2, 0.3] }, 1000, 500)).toBe('M0.1 0.1L0.2 0.3');
+  // 1000×500: line width max(3, round(500/250)) = 3, head 12 px; a horizontal arrow's barbs go back 12·cos25° ≈ 10.88 px
+  const d = shapePath({ kind: 'arrow', color: '#ff3b30', x1: 0.1, y1: 0.5, x2: 0.5, y2: 0.5 }, 1000, 500);
+  const nums = d.match(/-?[\d.]+/g)!.map(Number);
+  expect(nums.slice(0, 4)).toEqual([0.1, 0.5, 0.5, 0.5]);
+  expect(nums[6]).toBeCloseTo(0.5 - 10.876 / 1000, 4); // barb x
+  expect(nums[7]).toBeCloseTo(0.5 - 5.071 / 500, 4); // barb y: px → relative by height, not width
 });

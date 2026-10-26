@@ -7,6 +7,8 @@ import { selectComments } from '@/comments/slice.ts';
 import { Markdown } from '@/feed/Markdown.tsx';
 import { refClick } from '@/refs/refs.ts';
 import { useT } from '@/i18n/index.ts';
+import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
+import { selectDraft } from '@/media/markup/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
@@ -94,10 +96,22 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   // the media controller tracks this tab's <video|audio> while it is mounted (pause/PiP rules, the ▶ dot)
   const mediaCtl = useMedia();
   const mediaEl = useRef<HTMLMediaElement | null>(null);
+  // the image or video the markup layer draws over (state: the layer mounts once the element exists)
+  const [markable, setMarkable] = useState<HTMLImageElement | HTMLVideoElement | null>(null);
   const mediaRef = useCallback((el: HTMLMediaElement | null) => {
     mediaEl.current = el;
-    return el ? mediaCtl.register(tabId, el) : undefined;
+    if (el instanceof HTMLVideoElement) setMarkable(el);
+    if (!el) return;
+    const off = mediaCtl.register(tabId, el);
+    return () => {
+      off();
+      setMarkable(null);
+    };
   }, [mediaCtl, tabId]);
+  const imgRef = useCallback((el: HTMLImageElement | null) => setMarkable(el), []);
+  const marking = useAppSelector((s) => selectDraft(s, tabId).on);
+  // markup (Task 6 turns the drawing into a comment and clears the draft)
+  const onMarkAdd = useCallback(() => {}, []);
   // image/media reload: a new cache-busting key; a video/audio resumes where it was (a new src starts at 0)
   const resumeAt = useRef(0);
   const reloadMedia = useCallback(() => {
@@ -109,15 +123,26 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
 
   // a finished turn marks the view stale; the fetch effect below only runs while active, so an inactive view catches up
   // on activation. Media: an image always reloads; a video/audio only while paused (a playing one is not cut off)
+  // While marking up, the media is held as it is (the drawing belongs to this frame); leaving catches up.
   const seenTurn = useRef(turnSeq);
+  const heldReload = useRef(false);
+  const markingRef = useRef(marking);
+  markingRef.current = marking;
   useEffect(() => {
     if (seenTurn.current === turnSeq) return;
     seenTurn.current = turnSeq;
     if (fixed) return;
     if (!media) return setRev((r) => r + 1);
+    if (markingRef.current) return void (heldReload.current = true);
     const el = mediaEl.current;
     if (kind === 'image' || failedRef.current || !el || el.paused) reloadMedia();
   }, [turnSeq, fixed, media, kind, reloadMedia]);
+  useEffect(() => {
+    if (marking || !heldReload.current) return;
+    heldReload.current = false;
+    const el = mediaEl.current;
+    if (kind === 'image' || failedRef.current || !el || el.paused) reloadMedia();
+  }, [marking, kind, reloadMedia]);
   const onMediaMeta = (e: { currentTarget: HTMLMediaElement }) => {
     if (resumeAt.current > 0) e.currentTarget.currentTime = resumeAt.current;
     resumeAt.current = 0;
@@ -191,11 +216,12 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
       // M3-13 relies on data-pane as the pane's scroll container; data-file-path (text/md only) marks the text root
       <div data-pane={tabId} hidden={!active} className={`grid-pane nb-media-pane relative min-h-0 flex-1 overflow-auto${natural ? ' nb-natural' : ''}`}>
         <img
+          ref={imgRef}
           src={mediaUrl}
           alt={path}
           onError={onError}
-          onClick={() => setNatural((v) => !v)}
-          className={`nb-fit ${natural ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
+          onClick={() => marking || setNatural((v) => !v)}
+          className={`nb-fit ${marking ? '' : natural ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
         />
       </div>
     );
@@ -237,7 +263,13 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <button type="button" aria-label={t('reload')} title={t('reload')} onClick={() => (media ? reloadMedia() : setRev((r) => r + 1))} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
-      {body}
+      {(kind === 'image' || kind === 'video') && !failed && !srcGone ? (
+        // the toolbar sits over the pane but outside its scroll, so it stays in the corner in natural size
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {body}
+          {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} />}
+        </div>
+      ) : body}
     </div>
   );
 }

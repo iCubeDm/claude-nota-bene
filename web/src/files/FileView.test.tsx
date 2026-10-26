@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ServerEvent } from '@nota-bene/shared';
+import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { FileView } from './FileView.tsx';
@@ -32,7 +33,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const result = (): ServerEvent => ({ kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as unknown as ServerEvent);
 function setup(path: string, active = true) {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
-  const ui = (a: boolean) => <Provider store={store}><FileView path={path} active={a} /></Provider>;
+  const ui = (a: boolean) => <Provider store={store}><TooltipProvider><FileView path={path} active={a} /></TooltipProvider></Provider>;
   const r = render(ui(active));
   return { store, r, setActive: (a: boolean) => r.rerender(ui(a)) };
 }
@@ -209,4 +210,35 @@ it('after a turn an image always reloads; a video only while paused, and it keep
   v().currentTime = 0; // a new src starts over
   fireEvent.loadedMetadata(v());
   expect(v().currentTime).toBe(12);
+});
+
+const hello = (): ServerEvent => ({ kind: 'hello', protocol: 4 });
+
+it('an image click does not toggle the zoom while marking', () => {
+  const { r, store } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = r.container.querySelector('img')!;
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  const before = img.className;
+  fireEvent.click(img);
+  expect(img.className).toBe(before);
+  expect(r.container.querySelector('[data-pane]')?.className).not.toContain('nb-natural');
+});
+
+it('a turn ending while marking does not reload the media; leaving catches up', () => {
+  const { r, store } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = () => r.container.querySelector('img')!;
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(serverEvent(result())); });
+  expect(img().getAttribute('src')).toBe('/file?path=p.png');
+  fireEvent.click(screen.getByRole('button', { name: /leave/i })); // no shapes: leaves at once
+  expect(img().getAttribute('src')).toBe('/file?path=p.png&r=1');
+});
+
+it('audio has no markup mode', () => {
+  const { r, store } = setup('a.mp3');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  expect(r.container.querySelector('audio')).not.toBeNull();
+  expect(screen.queryByRole('button', { name: /mark up/i })).toBeNull();
 });

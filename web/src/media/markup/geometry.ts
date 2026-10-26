@@ -69,3 +69,36 @@ export function describeShape(s: MediaShape, natW: number, natH: number): string
     }
   }
 }
+
+const HEAD_ANGLE = (25 * Math.PI) / 180;
+const f5 = (v: number): string => String(Math.round(v * 1e5) / 1e5);
+
+/**
+ * SVG path data of a shape in a `viewBox="0 0 1 1"` stretched over the content box. The arrow head is sized in the
+ * media's natural px (W×H) exactly as `drawShapes` sizes it, so the overlay and the rendered frame agree.
+ */
+export function shapePath(s: MediaShape, natW: number, natH: number): string {
+  switch (s.kind) {
+    case 'rect':
+      return `M${f5(s.x)} ${f5(s.y)}H${f5(s.x + s.w)}V${f5(s.y + s.h)}H${f5(s.x)}Z`;
+    case 'ellipse': {
+      const rx = f5(s.w / 2), ry = f5(s.h / 2), cy = f5(s.y + s.h / 2);
+      return `M${f5(s.x)} ${cy}A${rx} ${ry} 0 1 0 ${f5(s.x + s.w)} ${cy}A${rx} ${ry} 0 1 0 ${f5(s.x)} ${cy}Z`;
+    }
+    case 'pen': {
+      let d = `M${f5(s.points[0])} ${f5(s.points[1])}`;
+      for (let i = 2; i + 1 < s.points.length; i += 2) d += `L${f5(s.points[i])} ${f5(s.points[i + 1])}`;
+      return d;
+    }
+    case 'arrow': {
+      const W = natW > 0 ? natW : 1000, H = natH > 0 ? natH : 1000;
+      const lw = Math.max(3, Math.round(Math.min(W, H) / 250));
+      const len = Math.max(12, 4 * lw);
+      const back = Math.atan2((s.y1 - s.y2) * H, (s.x1 - s.x2) * W);
+      const tip = `M${f5(s.x2)} ${f5(s.y2)}`;
+      let d = `M${f5(s.x1)} ${f5(s.y1)}L${f5(s.x2)} ${f5(s.y2)}`;
+      for (const a of [back + HEAD_ANGLE, back - HEAD_ANGLE]) d += `${tip}L${f5(s.x2 + (len * Math.cos(a)) / W)} ${f5(s.y2 + (len * Math.sin(a)) / H)}`;
+      return d;
+    }
+  }
+}

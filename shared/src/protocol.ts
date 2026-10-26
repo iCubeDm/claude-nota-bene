@@ -7,7 +7,8 @@ export const MARK_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff
 export type MarkColor = (typeof MARK_COLORS)[number];
 /** the largest mark image (`/marks`) the server takes */
 export const MARK_MAX_BYTES = 25 * 1024 * 1024;
-const PEN_MAX_VALUES = 20000;
+/** the most values (x and y each count) a pen stroke may carry */
+export const PEN_MAX_VALUES = 20000;
 /** all coordinates are relative to the media's natural size, 0..1 */
 export type MediaShape =
   | { kind: 'rect' | 'ellipse'; color: MarkColor; x: number; y: number; w: number; h: number }
