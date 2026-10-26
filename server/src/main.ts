@@ -118,6 +118,24 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
+  watchLauncher(process.env.NOTA_BENE_LAUNCHER_PID, stop);
+}
+
+/**
+ * Under the launcher: once it is gone (SIGKILLed, or its Claude Code background task killed hard), we are reparented
+ * and process.ppid changes. Nobody would stop us then, so close and exit, with a hard exit if the close hangs.
+ */
+export function watchLauncher(launcherPid: string | undefined, stop: () => void, everyMs = 2000): void {
+  const pid = Number(launcherPid);
+  if (!launcherPid || !Number.isInteger(pid) || pid <= 0) return;
+  const timer = setInterval(() => {
+    if (process.ppid === pid) return;
+    clearInterval(timer);
+    console.error(`Nota Bene: the launcher (pid ${pid}) is gone — stopping`);
+    setTimeout(() => process.exit(0), 3000).unref();
+    stop();
+  }, everyMs);
+  timer.unref();
 }
 
 const self = fileURLToPath(import.meta.url);
