@@ -18,6 +18,7 @@ import { Header } from './shell/Header.tsx';
 import { LeftStrip, RightStrip } from './shell/ToolStrip.tsx';
 import { Toasts } from './shell/Toasts.tsx';
 import { useFavicon } from './shell/Favicon.ts';
+import { RecentFiles } from '@/files/RecentFiles.tsx';
 
 export function App() {
   const dispatch = useAppDispatch();
@@ -64,6 +65,7 @@ export function App() {
       {pending && <CommentPopup pending={pending} onClose={close} />}
       <CommentCardPopover />
       <Toasts />
+      <RecentFiles />
     </TooltipProvider>
   );
 }

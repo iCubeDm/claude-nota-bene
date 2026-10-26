@@ -135,9 +135,9 @@ The hotkey list appears in the `?` help.
 - [x] A "▾" button on the right lists the hidden tabs (and all tabs), with search. Ruling (2026-10-26): "▾" is always shown, not only on overflow (it doubles as a searchable list of all tabs; no layout probe needed).
 
 ### M6-13: Recent files (Cmd/Ctrl+E)
-- [ ] A modal with the recently opened files of this root (persisted, up to 50) and a search field. An empty query shows the recent files; typing searches the whole project through `/complete`.
-- [ ] Keys: ↑↓ Enter Esc.
-- [ ] File-type icons.
+- [x] A modal with the recently opened files of this root (persisted, up to 50) and a search field. An empty query shows the recent files; typing searches the whole project through `/complete`.
+- [x] Keys: ↑↓ Enter Esc. The previous file is preselected, so Cmd+E, Enter flips back (IntelliJ). The Cmd/Ctrl+E listener lives in RecentFiles until M6-14's keymap takes it.
+- [x] File-type icons.
 
 ### M6-14: Hotkeys (R-M6-5)
 - [ ] One keymap module (no scattered listeners) that respects the Esc protocol and text fields: Alt combos work in fields, `/` does not.

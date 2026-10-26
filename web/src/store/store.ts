@@ -10,6 +10,7 @@ import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { activate, enterRoot, readSavedTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
 import { clearRefCache } from '../refs/refs.ts';
 import { loadSources } from '../files/sources.ts';
+import { pushRecent } from '../files/recent.ts';
 import { AUDIO, VIDEO } from '../files/kinds.ts';
 import { browserPip, MediaController, type PipApi } from '../media/mediaController.ts';
 import { filesSlice } from '../files/slice.ts';
@@ -160,6 +161,11 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
       }
     }
     if (st.tabs !== tabs) {
+      // a file tab became active: it is the most recent file of this root (Cmd/Ctrl+E, M6-13)
+      if (restoredRoot && st.tabs.active !== tabs.active) {
+        const f = st.tabs.open.find((x) => x.id === st.tabs.active);
+        if (f?.kind === 'file') pushRecent(restoredRoot, { path: f.path, ...(f.src !== 'here' && { src: f.src }), ...(f.ref && { ref: f.ref }) });
+      }
       tabs = st.tabs;
       // before the root is known there is nothing to key by; the restore merges these tabs in later
       if (restoredRoot) {
