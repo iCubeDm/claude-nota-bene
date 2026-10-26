@@ -29,6 +29,8 @@ In any project, inside Claude Code:
 - `/nb new` - start a fresh session
 - `/nb fork` - carry this conversation over as a separate branch
 
+The window runs as a background task of that Claude Code session: it shows in the task list (its output is the window's log), stop it there, and it stops when the session ends.
+
 Without the skill:
 
 ```sh
@@ -37,6 +39,8 @@ node bin/nota-bene.mjs --find DIR   # port of the live window serving DIR, or ex
 node bin/nota-bene.mjs --last DIR   # DIR's last session id if its transcript exists, or exit 1
 npm start [-- <dir> --port N]     # builds web/dist, serves on 4777, unsupervised
 ```
+
+In a terminal, `node bin/nota-bene.mjs <dir>` runs in the foreground (Ctrl-C stops it); `--detach` starts the window on its own and returns after printing its URL.
 
 One window per folder; live windows use ports 4777-4799, except 4780 and 4790-4795. The launcher rebuilds a stale `web/dist`, opens the browser (unless `--no-open`), and relaunches the server on restart and crashes.
 

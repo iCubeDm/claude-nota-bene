@@ -425,6 +425,25 @@ function dropEntry(port, pid) {
   }
 }
 
+/**
+ * A foreground launcher (the /nb background task) stops when the shell that started it is gone (it was SIGKILLed
+ * without its children): ppid changes, checked every 2 s, and the child is stopped as on SIGTERM. Not for a detached
+ * child (NOTA_BENE_LOCKED: its parent exits by design) or a launcher already reparented at start (ppid 1).
+ */
+function watchParent(onSignal, everyMs = 2000) {
+  const parent = process.ppid;
+  if (process.env.NOTA_BENE_LOCKED === '1' || parent === 1) return;
+  const timer = setInterval(() => {
+    if (process.ppid === parent) return;
+    clearInterval(timer);
+    // the shell's output pipe may be gone with it: a failed write must not crash the shutdown
+    for (const s of [process.stdout, process.stderr]) s.on('error', () => {});
+    say(`the parent process (pid ${parent}) is gone — stopping`);
+    onSignal('SIGTERM');
+  }, everyMs);
+  timer.unref();
+}
+
 async function supervise(o, autoPort, release, state) {
   let port = o.port;
   let dir = o.dir; // follows the window's in-app folder switches (its registry entry), so a relaunch reopens it
@@ -438,6 +457,7 @@ async function supervise(o, autoPort, release, state) {
     else wake?.();
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, onSignal);
+  watchParent(onSignal);
 
   const crashes = [];
   const restarts = [];

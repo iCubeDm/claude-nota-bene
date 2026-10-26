@@ -158,6 +158,8 @@ describe('nota-bene launcher', () => {
     expect(w.launcherPid).toBe(r.p.pid);
     expect(w.pid).not.toBe(r.p.pid);
     expect(await info(4791)).toMatchObject({ root: project, supervised: true });
+    // in the foreground (the /nb background task) the server's URL line reaches the launcher's stdout: the task output
+    expect(r.out().split('\n')[0]).toBe(`Nota Bene: http://127.0.0.1:4791  project: ${project}`);
 
     const found = bin(['--find', project]);
     expect(found.status).toBe(0);
@@ -211,15 +213,51 @@ describe('nota-bene launcher', () => {
     expect(windows()['4794']).toBeUndefined();
   }, 15000);
 
-  it('SIGTERM stops the child, removes the entry and exits 0 without a relaunch', async () => {
+  // what Claude Code sends when the /nb background task is stopped
+  it.each(['SIGTERM', 'SIGINT'] as const)('%s stops the child, removes the entry and exits 0 without a relaunch', async (sig) => {
     const r = launch(['--port', '4795']);
     const w = await waitFor(() => windows()['4795']);
-    r.p.kill('SIGTERM');
+    r.p.kill(sig);
     expect(await r.exited).toBe(0);
     expect(windows()['4795']).toBeUndefined();
     expect(alive(w.pid)).toBe(false);
     await new Promise((res) => setTimeout(res, 1500)); // no relaunch shows up
     expect(await info(4795)).toBeNull();
+  }, 15000);
+
+  it('a SIGKILLed launcher takes its server with it: gone within 5 s, port free (the server watches its ppid)', async () => {
+    const r = launch(['--port', '4794']);
+    const w = await waitFor(() => windows()['4794']);
+    await waitFor(() => info(4794));
+    r.p.kill('SIGKILL');
+    expect(await r.exited).toBeNull();
+    const t0 = Date.now();
+    await waitFor(() => !alive(w.pid), 5000);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(await portFree(4794)).toBe(true);
+    // the stale entry (launcher and server dead) is pruned by the next --find
+    expect(bin(['--find', project]).status).toBe(1);
+    expect(windows()['4794']).toBeUndefined();
+  }, 15000);
+
+  it('a launcher whose parent shell is SIGKILLed stops with its server: gone within 6 s, port free', async () => {
+    // `; true`: the shell stays the launcher's parent instead of exec-ing it
+    const q = (a: string) => `'${a.replace(/'/g, `'\\''`)}'`;
+    const cmd = [process.execPath, BIN, project, '--port', '4793', '--fake', FAKE, '--no-open'].map(q).join(' ');
+    const wrapper = spawn('/bin/sh', ['-c', `${cmd}; true`], { env: env(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    groups.add(wrapper.pid!);
+    let err = '';
+    wrapper.stderr!.on('data', (d) => (err += d));
+    const w = await waitFor(() => windows()['4793']);
+    await waitFor(() => info(4793));
+    expect(w.launcherPid).not.toBe(wrapper.pid);
+    process.kill(wrapper.pid!, 'SIGKILL'); // the shell only, not its group
+    const t0 = Date.now();
+    await waitFor(() => !alive(w.launcherPid!) && !alive(w.pid), 6000);
+    expect(Date.now() - t0).toBeLessThan(6000);
+    expect(await portFree(4793)).toBe(true);
+    expect(windows()['4793']).toBeUndefined(); // stopped as on SIGTERM: unregistered
+    expect(err).toMatch(/the parent process \(pid \d+\) is gone — stopping/);
   }, 15000);
 
   it('without --port takes the first free port of the range, by a real bind test (loopback and wildcard holders)', async () => {

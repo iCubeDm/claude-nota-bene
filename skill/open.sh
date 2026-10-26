@@ -1,15 +1,27 @@
 #!/bin/bash
 # Open Nota Bene (browser chat over Claude Code with inline comments) on the current folder. Called by the /nb skill.
-# Usage: open.sh "<skill arguments>" <calling sessionId>
+# Usage: open.sh [--plan] "<skill arguments>" <calling sessionId>
+#        open.sh --wait <dir> [note]
 #   no arguments — a window already open on the folder is just brought to front; otherwise a new window, where the
 #                  server resumes the folder's last window session (if its transcript still exists), else starts one
 #   new          — always a new session
 #   fork         — carry the calling terminal conversation over: the window resumes it as a fork (new session id),
 #                  so the terminal and the window never append to one transcript
+# --plan (what the skill runs) launches nothing: after the same guards and the same "already open" check it prints
+#   NB-RUN: <the foreground launcher command>     the skill runs it as a Claude Code background task (its output is
+#                                                 the window's log; stopping the task, or ending the session, ends it)
+#   NB-WAIT: <open.sh --wait command>              then waits with it for the window to come up
+#   NB-NAME: Nota Bene · <folder>                  the task's description
+# or one NB: line (an error, a refusal, "already open"). Both commands are quoted with printf %q under LC_ALL=C, so a
+# path with spaces, quotes, $ or non-ASCII is one plain-ASCII word that bash and zsh read back exactly.
+# --wait polls --find every 0.5 s for up to 40 s (NB_WAIT_SECS, test only) and prints "NB: opened URL for DIR<note>."
+# Without --plan the window is started with --detach (terminal use).
 # The launcher is bin/nota-bene.mjs (--find / --last / --detach). It keeps one window per folder (its launch lock),
 # so two /nb at once end with one window; this script finds, words and relays. Runs on bash 3.2 (macOS).
 APP="$(cd -P "$(dirname "$0")/.." && pwd)"   # the skill dir is symlinked from ~/.claude/skills/nb
 BIN="$APP/bin/nota-bene.mjs"
+# this script as it was called (through the ~/.claude/skills/nb link), so NB-WAIT matches the skill's allowed-tools
+SELF="$(cd "$(dirname "$0")" && pwd)/${0##*/}"
 DIR="$(pwd -P)"
 
 # the launcher imports the server's .ts files directly: Node >= 23.6 strips their types
@@ -22,6 +34,22 @@ if ! [[ "$NODE_V" =~ ^([0-9]+)\.([0-9]+) ]] || [ "${BASH_REMATCH[1]}" -lt 23 ] \
   echo "NB: Nota Bene needs Node >= 23.6; found ${NODE_V:-none} $WHERE. Make it the default node for Claude Code's shell (e.g. nvm alias default)."
   exit 1
 fi
+
+# --wait <dir> [note]: the window the background task is starting, once the registry has it (verified by /info)
+if [ "${1:-}" = --wait ]; then
+  WDIR="${2:-}" WNOTE="${3:-}" SECS="${NB_WAIT_SECS:-40}"
+  [[ "$SECS" =~ ^[0-9]+$ ]] || SECS=40
+  WDIR="$(cd -P "$WDIR" 2>/dev/null && pwd)" || { echo "NB: no such folder '${2:-}'."; exit 1; }
+  for ((i = 0; i < SECS * 2; i++)); do
+    PORT="$(node "$BIN" --find "$WDIR" 2>/dev/null)" && [ -n "$PORT" ] && {
+      echo "NB: opened http://127.0.0.1:$PORT for $WDIR$WNOTE."; exit 0; }
+    sleep 0.5
+  done
+  echo "NB: the window did not come up in ${SECS}s — see the background task's output."
+  exit 1
+fi
+PLAN=""
+[ "${1:-}" = --plan ] && { PLAN=1; shift; }
 
 ARG="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" SID="${2:-}"
 case "$ARG" in
@@ -86,6 +114,20 @@ else
 fi
 # test only: the launcher tests run the real bin with the fake agent
 [ -n "${NOTA_BENE_FAKE:-}" ] && ARGS+=(--fake "$NOTA_BENE_FAKE")
+
+if [ -n "$PLAN" ]; then
+  # LC_ALL=C: every non-ASCII byte escaped, never a lone byte of a UTF-8 sequence (q runs in $(...), so it stays there)
+  q() { LC_ALL=C; printf '%q' "$1"; }
+  RUN="node $(q "$BIN") $(q "$DIR")"
+  for a in "${ARGS[@]:1}"; do RUN+=" $(q "$a")"; done   # without the leading --detach: the task runs it in the foreground
+  WAIT="$(q "$SELF") --wait $(q "$DIR")"
+  [ -n "$NOTE" ] && WAIT+=" $(q "$NOTE")"
+  echo "NB-RUN: $RUN"
+  echo "NB-WAIT: $WAIT"
+  NAME="${DIR##*/}"
+  echo "NB-NAME: Nota Bene · ${NAME//$'\n'/ }"
+  exit 0
+fi
 
 # --detach prints one line: "opened URL", or "already-open URL" (a launch on this folder got there first; the bin
 # brought that window to front)
