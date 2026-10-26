@@ -117,6 +117,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   mediaByStore.set(store, media);
   // the ONE place that persists UI state, whoever changed it (toggle, ×, auto-open after adding a comment, tab changes)
   let panelOpen = store.getState().comments.ui.panelOpen;
+  let treeOpen = store.getState().tree.open;
   let tabs = store.getState().tabs;
   let dirs = store.getState().tree.dirs;
   let restoredRoot: string | null = null;
@@ -126,6 +127,10 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
     if (now !== panelOpen) {
       panelOpen = now;
       try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
+    }
+    if (st.tree.open !== treeOpen) {
+      treeOpen = st.tree.open;
+      try { localStorage.setItem('panel:tree', treeOpen ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
     }
     const root = st.feed.session?.root;
     if (root && root !== restoredRoot) {

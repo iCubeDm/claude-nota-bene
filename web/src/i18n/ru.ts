@@ -93,6 +93,8 @@ export const ru = {
   toolOutput: 'Результат',
   // file tree (M3-07)
   files: 'Файлы',
+  toolsLeft: 'Панели слева',
+  toolsRight: 'Панели справа',
   refresh: 'Обновить',
   filterPh: 'Фильтр файлов…',
   // ветки и worktree (M3-16)

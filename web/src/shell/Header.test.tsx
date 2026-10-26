@@ -64,17 +64,9 @@ it('the project name, not the app name, titles the header and the browser tab', 
   expect(document.title).toBe('my-project · Nota Bene');
 });
 
-it('the tree toggle is a labelled button right after the project name, before the path', () => {
-  setLang('en');
+it('the panel toggles moved to the tool strips: the header has neither', () => {
   setup();
-  const btn = screen.getByRole('button', { name: 'File tree' });
-  expect(btn.id).toBe('toggleTree');
-  expect(btn).toHaveAttribute('title', 'File tree');
-  expect(btn.textContent).toBe('Files');
-  const proj = document.getElementById('proj')!;
-  const path = document.getElementById('root-path')!;
-  expect(proj.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(btn.compareDocumentPosition(path) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(document.querySelector('header #toggleTree, header #toggleComments')).toBeNull();
 });
 
 it('document title: session title first when there is one; header shows model · id8, or id8 alone', () => {

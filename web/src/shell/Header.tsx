@@ -1,9 +1,6 @@
 import { useEffect } from 'react';
 import { getLang, setLang, useT } from '@/i18n/index.ts';
-import { selectCommentsUi, selectPending, setPanelOpen } from '@/comments/slice.ts';
-import { selectTree, setTreeOpen } from '@/tree/slice.ts';
-import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
-import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { selectConn, selectSession, useAppSelector } from '@/store/store.ts';
 import { SessionPicker } from '@/controls/SessionPicker.tsx';
 import { GitBranch } from './GitBranch.tsx';
 import { RestartMenu } from './RestartMenu.tsx';
@@ -16,10 +13,6 @@ export function Header() {
   const session = useAppSelector(selectSession);
   const switching = useAppSelector(selectSwitching);
   const restarting = useAppSelector(selectRestarting);
-  const d = useAppDispatch();
-  const panelOpen = useAppSelector(selectCommentsUi).panelOpen;
-  const treeOpen = useAppSelector(selectTree).open;
-  const pendingN = useAppSelector(selectPending).length;
   // the project, not the app, names the window: several windows on different projects must be told apart
   const project = session?.root.split('/').filter(Boolean).pop() ?? 'Nota Bene';
   const title = session?.title ?? null;
@@ -28,19 +21,6 @@ export function Header() {
     <header className="relative z-[6] flex h-12 flex-none items-center gap-3 border-b border-border-soft bg-chrome px-4 text-xs text-muted-foreground backdrop-blur-[24px]">
       <img id="logo" src="/icon.svg" alt="Nota Bene" className="-mr-1 size-6" />
       <b id="proj" className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{project}</b>
-      {/* right after the project name, labelled: an icon-only button after the long path was easy to miss */}
-      <button
-        type="button"
-        id="toggleTree"
-        aria-pressed={treeOpen}
-        aria-label={t('fileTree')}
-        title={t('fileTree')}
-        onClick={() => d(setTreeOpen(!treeOpen))}
-        className={`flex h-7 flex-none items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-muted hover:text-foreground ${treeOpen ? 'bg-primary/15 text-primary' : ''}`}
-      >
-        <Svg size={15}>{ICONS.dir}</Svg>
-        {t('files')}
-      </button>
       <span id="root-path" className="min-w-0 truncate font-mono text-[11px] opacity-70">{session?.root ?? ''}</span>
       <GitBranch />
       <span className="flex-1" />
@@ -49,17 +29,6 @@ export function Header() {
       {/* enabled while busy: the escape hatch for a stuck agent (R-M4-4); only a running switch/restart disables it */}
       <RestartMenu />
       <span id="session" className="font-mono text-[11px]">{[session?.model, session?.id?.slice(0, 8)].filter(Boolean).join(' · ')}</span>
-      {/* moves into the tab strip in M2 */}
-      <button
-        type="button"
-        id="toggleComments"
-        aria-pressed={panelOpen}
-        onClick={() => d(setPanelOpen(!panelOpen))}
-        className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-muted hover:text-foreground ${panelOpen ? 'bg-primary/15 text-primary' : ''}`}
-      >
-        {t('comments')}
-        {pendingN > 0 && <span className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{pendingN}</span>}
-      </button>
       <button
         type="button"
         id="langBtn"

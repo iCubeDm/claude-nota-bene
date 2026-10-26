@@ -95,6 +95,8 @@ export const en: Dict = {
   toolNoOutput: 'no output',
   toolOutput: 'Output',
   // file tree (M3-07)
+  toolsLeft: 'Left tool windows',
+  toolsRight: 'Right tool windows',
   files: 'Files',
   refresh: 'Refresh',
   filterPh: 'Filter files…',

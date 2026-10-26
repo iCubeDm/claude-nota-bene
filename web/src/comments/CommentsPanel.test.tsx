@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { Comment } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
-import { Header } from '@/shell/Header.tsx';
+import { RightStrip } from '@/shell/ToolStrip.tsx';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { CommentPopup } from './CommentPopup.tsx';
 import { CommentsPanel } from './CommentsPanel.tsx';
@@ -24,7 +24,7 @@ function setup(items: Comment[] = [], onSend = () => {}, open = true) {
   render(
     <Provider store={store}>
       <TooltipProvider>
-        <Header />
+        <RightStrip />
         <CommentsPanel onSend={onSend} />
       </TooltipProvider>
     </Provider>,
@@ -83,7 +83,8 @@ it('persisting survives unavailable storage', () => {
 
 it('the badge shows the pending count', () => {
   setup([cm('a'), cm('b'), cm('c', { status: 'sent', sentIn: 'm1' })]);
-  expect(screen.getByRole('button', { name: /Comments/ })).toHaveTextContent('Comments2');
+  expect(screen.getByRole('button', { name: 'Comments · 2' })).toHaveAttribute('id', 'toggleComments');
+  expect(screen.getByTestId('pending-badge')).toHaveTextContent(/^2$/);
   expect(document.getElementById('cTitle')).toHaveTextContent('Comments · 2');
   expect(screen.getByRole('button', { name: 'Send (2)' })).toBeEnabled();
   expect(document.querySelectorAll('[data-comment-id]')).toHaveLength(2);
@@ -93,7 +94,7 @@ it('the empty state is shown with no comments', () => {
   const onSend = vi.fn();
   setup([], onSend);
   expect(screen.getByText(/Select text in the chat/)).toHaveClass('whitespace-pre-line');
-  expect(screen.getByRole('button', { name: 'Comments' })).toHaveTextContent(/^Comments$/);
+  expect(screen.queryByTestId('pending-badge')).toBeNull();
   const send = screen.getByRole('button', { name: 'Send' });
   expect(send).toBeDisabled();
   fireEvent.click(send);
