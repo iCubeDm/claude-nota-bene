@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useStore } from 'react-redux';
 import { isMediaAnchor, type Anchor, type QuickLabelId } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
-import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { toast } from '@/shell/toast.ts';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { labelsFor, labelText } from './labels.ts';
@@ -55,8 +56,8 @@ export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false
   const dispatch = useAppDispatch();
   // the comment set belongs to the session being left: no new comment mid-switch (the server resets it with the session)
   const switching = useAppSelector(selectSwitching);
-  const switchingNow = useRef(switching);
-  switchingNow.current = switching;
+  // read from the store at decision time: after an unmount there are no renders to refresh a ref
+  const store = useStore<RootState>();
   const protocol = useAppSelector((s) => s.controls.protocol);
   const root = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -117,7 +118,7 @@ export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false
         return;
       }
       // a session switch began meanwhile: the comment set belongs to the session left, the comment never came to be
-      if (switchingNow.current) {
+      if (selectSwitching(store.getState())) {
         if (id) await deleteMarks(id); // done before Add is offered again, so a retry cannot race the delete
         setBusy(false);
         return;
@@ -126,10 +127,12 @@ export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false
     if (prepare) setBusy(false); // the save is over (the parent stops holding the popup)
     const all = [...prepared, ...images.map((i) => i.id)];
     if (has) dispatch(addComment({ ...(id && { id }), anchor, text: body, ...(label && { label }), ...(all.length && { images: all }) }));
-    window.getSelection()?.removeAllRanges();
+    // the user has moved on (the tab closed or in the background): their selection and the panel are not ours to touch
+    const seen = alive.current && !hiddenNow.current;
+    if (seen) window.getSelection()?.removeAllRanges();
     if (has) onAdded?.();
     onClose();
-    if (has) dispatch(setPanelOpen(true));
+    if (has && seen) dispatch(setPanelOpen(true));
   };
   const off = uploading || switching || busy;
 

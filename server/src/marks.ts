@@ -65,7 +65,10 @@ const NO_LINKS = new Set(['ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'ENOSYS', 'EXDEV']);
  * content goes to a tmp file first and is hard-linked into place, so a failed write never leaves an empty .gitignore
  * (which would make the marks trackable), and link's EEXIST keeps it once-only, never through a symlink.
  * Without hard links: written in place with O_EXCL (still once-only, still refuses a symlink); a failed write removes
- * the file it created.
+ * the file it created. That path is NOT crash-atomic: a process killed between open and write leaves an empty
+ * .gitignore, which is never rewritten (once-only), so the marks become trackable by git. Accepted: the window is two
+ * syscalls on file systems (exFAT, SMB) that rarely hold a git work tree, the cost is untracked files showing in
+ * `git status` (nothing is lost or leaked), and the alternative (refusing every mark write there) is worse.
  */
 function writeGitignore(nb: string): void {
   const file = path.join(nb, '.gitignore');

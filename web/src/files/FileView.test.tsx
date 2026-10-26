@@ -5,7 +5,7 @@ import type { Comment, ServerEvent } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
-import { addShape, selectDraft } from '@/media/markup/slice.ts';
+import { addShape, selectDraft, setTool } from '@/media/markup/slice.ts';
 import { dismissToast, getToasts } from '@/shell/toast.ts';
 import { FileView } from './FileView.tsx';
 import { jumpToFileComment, selectFileVersion } from './slice.ts';
@@ -356,6 +356,35 @@ it('a tab switch while Add saves: the save finishes and the comment is added; th
   expect(screen.getByPlaceholderText('Comment…')).toBeInTheDocument();
   setActive(false);
   expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
+});
+
+it('while Add saves the drawing, the markup layer takes no stroke and Comment is off; a shape that slips in is kept', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  prepareMediaComment.mockImplementationOnce(async () => { await gate; return { images: ['1'.repeat(64), '2'.repeat(64)], anchor: {} }; });
+  const { r, store } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = r.container.querySelector('img')!;
+  Object.defineProperty(img, 'naturalWidth', { value: 10 });
+  Object.defineProperty(img, 'naturalHeight', { value: 10 });
+  Element.prototype.setPointerCapture ??= () => {};
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:p.png', SHAPE)); store.dispatch(setTool('file:p.png', 'pen')); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  // a pen tap is a shape even on a zero-size box: while saving it must not land
+  const hit = r.container.querySelector('svg[data-markup-layer] rect')!;
+  fireEvent.pointerDown(hit, { button: 0, clientX: 1, clientY: 1, pointerId: 1 });
+  fireEvent.pointerUp(hit, { clientX: 1, clientY: 1, pointerId: 1 });
+  expect(selectDraft(store.getState(), 'file:p.png').shapes).toEqual([SHAPE]);
+  expect(screen.getByRole('button', { name: /^comment/i })).toBeDisabled(); // no second popup over the save
+  const OTHER = { ...SHAPE, x: 0.5, w: 0.2 };
+  act(() => { store.dispatch(addShape('file:p.png', OTHER)); }); // belt and braces: a shape that got in anyway
+  await act(async () => release());
+  await waitFor(() => expect(store.getState().comments.items).toHaveLength(1));
+  expect(store.getState().comments.items[0]!.anchor).toMatchObject({ shapes: [SHAPE] });
+  expect(selectDraft(store.getState(), 'file:p.png')).toMatchObject({ on: true, shapes: [OTHER] }); // not wiped
+  expect(screen.getByRole('button', { name: /^comment/i })).toBeEnabled();
 });
 
 it('a tab switch while Add saves and the save fails: back on the tab the popup is there with the text and the error', async () => {

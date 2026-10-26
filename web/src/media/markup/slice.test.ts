@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { enterRoot } from '../../tabs/slice.ts';
-import { addShape, markupSlice, setMode, type MarkupState } from './slice.ts';
+import { addShape, dropShapes, markupSlice, setMode, type MarkupState } from './slice.ts';
 
 const r = markupSlice.reducer;
 const shape = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.2, h: 0.2 } as const;
@@ -23,4 +23,15 @@ it('the first root merges: a draft made before the root was known stays', () => 
   let s: MarkupState = r(undefined, addShape('file:x.png', shape));
   s = r(s, go('/a', true));
   expect(s.drafts['file:x.png']!.shapes).toEqual([shape]);
+});
+
+it('dropShapes removes only the submitted shapes (by value, once each); nothing left leaves the mode', () => {
+  const other = { ...shape, x: 0.6 };
+  let s: MarkupState = r(undefined, setMode('t', true));
+  s = r(s, addShape('t', shape));
+  s = r(s, addShape('t', other));
+  s = r(s, dropShapes('t', [{ ...shape }]));
+  expect(s.drafts.t).toMatchObject({ on: true, shapes: [other] });
+  s = r(s, dropShapes('t', [other]));
+  expect(s.drafts.t).toMatchObject({ on: false, shapes: [] });
 });

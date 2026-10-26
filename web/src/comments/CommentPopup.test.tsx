@@ -10,6 +10,7 @@ import { switchSession } from '@/controls/slice.ts';
 import { getToasts, resetToasts } from '@/shell/toast.ts';
 import { CommentPopup, type PendingComment } from './CommentPopup.tsx';
 import { labelText, QUICK_LABELS } from './labels.ts';
+import { setPanelOpen } from './slice.ts';
 import type { PendingSelection } from './SelectionButton.tsx';
 
 const pending: PendingSelection = {
@@ -47,6 +48,21 @@ function setup(p: PendingComment = pending, onAdded?: () => void) {
   return { store, sent, onClose, comments };
 }
 const box = () => screen.getByPlaceholderText('Comment…');
+/** Like setup, with the popup's `hidden` prop driven by the test. */
+function setupHidable(p: PendingComment) {
+  const store = makeStore({ url: 'ws://x', connect: (() => ({ send: () => true, close() {} })) as never });
+  const ui = (hidden: boolean) => (
+    <Provider store={store}>
+      <TooltipProvider>
+        <p id="outside">outside</p>
+        <CommentPopup pending={p} onClose={() => {}} hidden={hidden} />
+      </TooltipProvider>
+    </Provider>
+  );
+  const r = render(ui(false));
+  return { store, comments: () => store.getState().comments.items, rerender: (h: boolean) => r.rerender(ui(h)) };
+}
+
 
 it('shows the quote and focuses the textarea', () => {
   setup();
@@ -326,6 +342,57 @@ it('the popup unmounted while Add saves and the save fails: a toast says so and 
   await act(async () => d.reject(new Error('marks 500')));
   expect(comments()).toEqual([]);
   expect(getToasts()).toContainEqual(expect.objectContaining({ title: expect.stringMatching(/Could not save the drawing.*marks 500/), msg: expect.stringContaining('keep me') }));
+});
+
+it('a session switch that starts after the popup unmounted still aborts the save: no comment, /marks deleted', async () => {
+  const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    const d = deferred<{ images: string[] }>();
+    const { comments, store } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    cleanup(); // the tab closed: no more renders, so a render-time ref would never see the switch
+    store.dispatch(switchSession('x', '/r'));
+    await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+    expect(comments()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(`/marks/${MID}`, expect.objectContaining({ method: 'DELETE' }));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('a save that finishes after the user moved on (unmounted) leaves the DOM selection and the panel alone', async () => {
+  const d = deferred<{ images: string[] }>();
+  const { comments, store } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise });
+  store.dispatch(setPanelOpen(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  cleanup();
+  const p = document.createElement('p');
+  p.textContent = 'elsewhere';
+  document.body.append(p);
+  const r = document.createRange();
+  r.selectNodeContents(p);
+  window.getSelection()!.addRange(r);
+  await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+  expect(comments()).toHaveLength(1);
+  expect(window.getSelection()!.rangeCount).toBe(1); // (jsdom reports isCollapsed for any range: count instead)
+  expect(store.getState().comments.ui.panelOpen).toBe(false);
+  p.remove();
+});
+
+it('a save that finishes while the popup is hidden (its tab in the background) leaves the selection and the panel alone', async () => {
+  const d = deferred<{ images: string[] }>();
+  const { comments, store, rerender } = setupHidable({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise });
+  store.dispatch(setPanelOpen(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  rerender(true);
+  const r = document.createRange();
+  r.selectNodeContents(document.getElementById('outside')!);
+  window.getSelection()!.addRange(r);
+  await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+  expect(comments()).toHaveLength(1);
+  expect(window.getSelection()!.rangeCount).toBe(1); // (jsdom reports isCollapsed for any range: count instead)
+  expect(store.getState().comments.ui.panelOpen).toBe(false);
 });
 
 it('the anchor patch from prepare (scale, version, the exact time) lands on the comment', async () => {

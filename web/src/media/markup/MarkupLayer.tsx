@@ -42,9 +42,10 @@ function shapeOf(tool: MarkTool, color: MediaShape['color'], a: Pt, b: Pt, pen: 
 /**
  * `onAdd(shapes, at)`: Comment was asked for; `at` is the client rect around the shapes, or the toolbar's when they are
  * scrolled out of sight (where the comment popup opens). `held`: the popup is open, so the mode's keys are off.
+ * `saving`: the popup's Add is writing the drawing: no new shape, no Comment, no toolbar (the draft is what is saved).
  */
-export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
-  tabId: string; media: Media; fit: 'contain' | 'natural'; onAdd: (shapes: MediaShape[], at: DOMRect) => void; held?: boolean;
+export function MarkupLayer({ tabId, media, fit, onAdd, held = false, saving = false }: {
+  tabId: string; media: Media; fit: 'contain' | 'natural'; onAdd: (shapes: MediaShape[], at: DOMRect) => void; held?: boolean; saving?: boolean;
 }) {
   const t = useT();
   const dispatch = useAppDispatch();
@@ -109,7 +110,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     liveHalo.current?.setAttribute('d', path);
   };
   const onDown = (e: RPointerEvent<SVGSVGElement>) => {
-    if (e.button !== 0 || drag.current) return;
+    if (e.button !== 0 || drag.current || saving) return;
     e.preventDefault(); // no text selection, no image drag
     svg.current?.focus({ preventScroll: true }); // the mode's keys work again after a click in the composer
     (e.target as Element).setPointerCapture?.(e.pointerId); // the hit rect: the svg itself takes no pointer events
@@ -159,7 +160,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
   const shapes = draft.shapes;
   const leave = useCallback(() => (shapes.length ? setAsking(true) : void dispatch(setMode(tabId, false))), [shapes, dispatch, tabId]);
   const comment = useCallback(() => {
-    if (!shapes.length) return;
+    if (!shapes.length || saving) return;
     const b = box();
     const s = shapesBounds(shapes);
     const at = rectBox(b.x + s.x * b.width, b.y + s.y * b.height, s.w * b.width, s.h * b.height);
@@ -170,12 +171,12 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     // the toolbar itself, not its pane-wide wrapper
     const bar = toolbar.current?.firstElementChild;
     onAdd(shapes, seen || !bar ? at : bar.getBoundingClientRect());
-  }, [shapes, onAdd, box, pane]);
+  }, [shapes, onAdd, box, pane, saving]);
 
   // ---- keys: only while on, in the visible tab, with focus on nothing (body) or in this tab's pane or toolbar; never in
   // a text field. Focus in the feed keeps Esc for the agent and Enter for a link. Capture + preventDefault (Esc protocol).
   useEffect(() => {
-    if (!on || asking || held) return;
+    if (!on || asking || held || saving) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || editable(e.target) || media.closest('[hidden]')) return;
       const f = document.activeElement;
@@ -205,7 +206,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [on, asking, held, media, dispatch, tabId, leave, comment, shapes]);
+  }, [on, asking, held, saving, media, dispatch, tabId, leave, comment, shapes]);
 
   const drawn = useMemo(() => shapeEls(shapes, nat[0], nat[1]), [shapes, nat]);
 
@@ -216,6 +217,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
       <div ref={toolbar} data-anchor-skip className="pointer-events-none absolute top-2 right-3 left-3 z-20 flex justify-end">
         <MarkupToolbar
           draft={draft}
+          disabled={saving}
           onEnter={enter}
           onTool={(tool) => dispatch(setTool(tabId, tool))}
           onColor={(c) => dispatch(setColor(tabId, c))}

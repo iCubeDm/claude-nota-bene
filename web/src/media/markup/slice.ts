@@ -33,6 +33,25 @@ export const markupSlice = createSlice({
       prepare: (tabId: string, shape: MediaShape) => ({ payload: { tabId, shape } }),
     },
     undo: (s, a: PayloadAction<string>) => void s.drafts[a.payload]?.shapes.pop(),
+    /**
+     * The comment made of `shapes` was added: those shapes leave the draft (one match each, by value); a stroke drawn
+     * while it was being saved stays. Nothing left: the mode is left too, like `clear`.
+     */
+    dropShapes: {
+      reducer: (s, a: PayloadAction<{ tabId: string; shapes: MediaShape[] }>) => {
+        const d = s.drafts[a.payload.tabId];
+        if (!d) return;
+        const left = [...d.shapes];
+        for (const sh of a.payload.shapes) {
+          const k = JSON.stringify(sh);
+          const i = left.findIndex((x) => JSON.stringify(x) === k);
+          if (i >= 0) left.splice(i, 1);
+        }
+        d.shapes = left;
+        if (!left.length) d.on = false;
+      },
+      prepare: (tabId: string, shapes: MediaShape[]) => ({ payload: { tabId, shapes } }),
+    },
     /** Drops the shapes and leaves the mode; the tool and colour stay for the next drawing. */
     clear: (s, a: PayloadAction<string>) => {
       const d = s.drafts[a.payload];
@@ -52,6 +71,6 @@ export const markupSlice = createSlice({
   }),
 });
 
-export const { setMode, setTool, setColor, addShape, undo, clear } = markupSlice.actions;
+export const { setMode, setTool, setColor, addShape, undo, clear, dropShapes } = markupSlice.actions;
 
 export const selectDraft = (s: RootState, tabId: string): Draft => s.markup.drafts[tabId] ?? EMPTY;

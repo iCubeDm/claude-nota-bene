@@ -45,9 +45,9 @@ function Btn({ label, tip, pressed, disabled, onClick, className = '', children 
 
 const shell = 'pointer-events-auto flex max-w-full flex-wrap items-center justify-end gap-0.5 rounded-lg border border-border bg-chrome/90 p-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.35)] backdrop-blur';
 
-/** The media tab's top-right overlay: the "Mark up" toggle, or, while marking, tools, colours, undo, Comment, ✕. */
-export function MarkupToolbar({ draft, onEnter, onTool, onColor, onUndo, onComment, onLeave }: {
-  draft: Draft; onEnter: () => void; onTool: (t: MarkTool) => void; onColor: (c: MarkColor) => void;
+/** The media tab's top-right overlay: the "Mark up" toggle, or, while marking, tools, colours, undo, Comment, ✕ (all off while `disabled`: a drawing is being saved). */
+export function MarkupToolbar({ draft, disabled = false, onEnter, onTool, onColor, onUndo, onComment, onLeave }: {
+  draft: Draft; disabled?: boolean; onEnter: () => void; onTool: (t: MarkTool) => void; onColor: (c: MarkColor) => void;
   onUndo: () => void; onComment: () => void; onLeave: () => void;
 }) {
   const t = useT();
@@ -64,24 +64,24 @@ export function MarkupToolbar({ draft, onEnter, onTool, onColor, onUndo, onComme
   return (
     <div role="toolbar" aria-label={t('markTools')} className={shell}>
       {TOOLS.map((tool) => (
-        <Btn key={tool} label={t(TOOL_TIP[tool])} pressed={draft.tool === tool} onClick={() => onTool(tool)}>
+        <Btn key={tool} label={t(TOOL_TIP[tool])} pressed={draft.tool === tool} disabled={disabled} onClick={() => onTool(tool)}>
           <Icon>{TOOL_ICONS[tool]}</Icon>
         </Btn>
       ))}
       <span className="mx-1 h-4 w-px bg-border" />
       {MARK_COLORS.map((c, i) => (
-        <Btn key={c} label={t('markColor', i + 1)} pressed={draft.color === c} onClick={() => onColor(c)}>
+        <Btn key={c} label={t('markColor', i + 1)} pressed={draft.color === c} disabled={disabled} onClick={() => onColor(c)}>
           <span className={`block size-3.5 rounded-full border border-black/40 ${draft.color === c ? 'ring-2 ring-nb-accent ring-offset-1 ring-offset-chrome' : ''}`} style={{ background: c }} />
         </Btn>
       ))}
       <span className="mx-1 h-4 w-px bg-border" />
-      <Btn label={t('markUndo', isMac())} disabled={!has} onClick={onUndo}>
+      <Btn label={t('markUndo', isMac())} disabled={!has || disabled} onClick={onUndo}>
         <Icon><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></Icon>
       </Btn>
-      <Btn label={t('markCommentTip')} disabled={!has} onClick={onComment} className="px-2 text-xs font-medium text-nb-accent hover:text-nb-accent">
+      <Btn label={t('markCommentTip')} disabled={!has || disabled} onClick={onComment} className="px-2 text-xs font-medium text-nb-accent hover:text-nb-accent">
         {t('markComment')}
       </Btn>
-      <Btn label={t('markLeave')} onClick={onLeave}>
+      <Btn label={t('markLeave')} disabled={disabled} onClick={onLeave}>
         <Icon><path d="M6 6l12 12M18 6 6 18" /></Icon>
       </Btn>
     </div>

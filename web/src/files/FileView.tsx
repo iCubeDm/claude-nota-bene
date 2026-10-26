@@ -15,7 +15,7 @@ import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
 import { MediaMarks } from '@/media/markup/MediaMarks.tsx';
 import { seekAndPause } from '@/media/mediaController.ts';
 import { prepareMediaComment } from '@/media/markup/createMediaComment.ts';
-import { clear, selectDraft } from '@/media/markup/slice.ts';
+import { dropShapes, selectDraft } from '@/media/markup/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
@@ -164,11 +164,14 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     setMarkPopup({ anchor, rect: at, id, prepare: () => prepareMediaComment(id, el, anchor, { version: v }) });
   }, [markable, path, ref, t]);
   const closeMarkPopup = useCallback(() => setMarkPopup(null), []);
-  const markAdded = useCallback(() => void dispatch(clear(tabId)), [dispatch, tabId]);
+  // only the shapes that went into the comment leave the draft (a stroke drawn meanwhile is not the comment's)
+  const markAdded = useCallback((shapes: MediaShape[]) => void dispatch(dropShapes(tabId, shapes)), [dispatch, tabId]);
   // the popup belongs to a visible drawing: hiding the tab or leaving the mode closes it (the draft stays). Not while
   // its Add is saving: that finishes (the popup waits hidden; a failure is shown there, and as a toast)
+  // state too: while saving, the markup layer takes no drawing, no Comment and no keys
+  const [saving, setSaving] = useState(false);
   const popupBusy = useRef(false);
-  const onPopupBusy = useCallback((b: boolean) => void (popupBusy.current = b), []);
+  const onPopupBusy = useCallback((b: boolean) => void ((popupBusy.current = b), setSaving(b)), []);
   useEffect(() => {
     if ((!active || !marking) && !popupBusy.current) setMarkPopup(null);
   }, [active, marking]);
@@ -346,11 +349,19 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <div className="relative flex min-h-0 flex-1 flex-col">
           {body}
           {markable && <MediaMarks tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} path={path} refName={ref} />}
-          {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} held={!!markPopup} />}
+          {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} held={!!markPopup} saving={saving} />}
           {/* portalled with its own layer: above the markup toolbar, which it may open next to */}
           {markPopup && createPortal(
             <div className="relative z-30" hidden={!active}>
-              <CommentPopup pending={markPopup} onClose={closeMarkPopup} onAdded={markAdded} onBusy={onPopupBusy} hidden={!active} />
+              {/* keyed: a new drawing's popup is a new popup, never the old one (and its save) re-rendered */}
+              <CommentPopup
+                key={markPopup.id}
+                pending={markPopup}
+                onClose={closeMarkPopup}
+                onAdded={() => markAdded(isMediaAnchor(markPopup.anchor) ? markPopup.anchor.shapes : [])}
+                onBusy={onPopupBusy}
+                hidden={!active}
+              />
             </div>,
             document.body,
           )}
