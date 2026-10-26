@@ -23,6 +23,7 @@ export function ModePill() {
     <DropdownMenu>
       <Tooltip>
         <TooltipTrigger asChild>
+          <span className="inline-flex">
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -34,6 +35,7 @@ export function ModePill() {
               {t(`mode_${mode}`)}
             </button>
           </DropdownMenuTrigger>
+          </span>
         </TooltipTrigger>
         <TooltipContent className="whitespace-pre-line">{t('modeTip')}</TooltipContent>
       </Tooltip>

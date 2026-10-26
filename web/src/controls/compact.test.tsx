@@ -121,3 +121,20 @@ it('a Clear refused because the agent turned busy after the dialog opened shows 
   expect(commands()).toEqual([]);
   expect(await screen.findByRole('status')).toHaveTextContent('Could not clear: agent is working…');
 });
+
+it.each([[/Compact context/], [/Clear context/]])('the tooltip of the disabled %s button still shows on hover (the span wrapper takes the pointer)', async (name) => {
+  const { emit } = setup();
+  emit({ kind: 'user', id: 'u1', text: 'hi', ts: 1 });
+  const btn = screen.getByRole('button', { name });
+  expect(btn).toBeDisabled();
+  expect(btn.parentElement!.tagName).toBe('SPAN');
+  await userEvent.hover(btn.parentElement!);
+  expect(await screen.findByRole('tooltip')).toBeInTheDocument();
+});
+
+it('compact and clear carry the prototype icons', () => {
+  setup();
+  const d = (name: RegExp) => [...screen.getByRole('button', { name }).querySelectorAll('path')].map((p) => p.getAttribute('d'));
+  expect(d(/Compact context/)).toEqual(['M4 14h6v6', 'M20 10h-6V4', 'm14 10 7-7', 'm3 21 7-7']);
+  expect(d(/Clear context/)).toEqual(['m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21', 'M22 21H7', 'm5 11 9 9']);
+});

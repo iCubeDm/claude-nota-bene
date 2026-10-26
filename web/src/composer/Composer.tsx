@@ -180,6 +180,7 @@ export function Composer() {
         </span>
         <Tooltip>
           <TooltipTrigger asChild>
+            <span className="inline-flex">
             <Button
               type="button"
               variant="ghost"
@@ -192,6 +193,7 @@ export function Composer() {
                 <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
               </svg>
             </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent className="whitespace-pre-line">{t('stopTip')}</TooltipContent>
         </Tooltip>
