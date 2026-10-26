@@ -8,7 +8,7 @@ A browser IDE over Claude Code: the chat with the agent, inline margin comments 
 - `prototype/` — retired archive (2026-10-26, M5), kept as a reference and no longer changed. See `prototype/CLAUDE.md`.
 - `docs/` — notes, specs, plans, the draft feedback to Anthropic.
 
-The local root compat symlinks (`server.mjs`, `public`, `ide.sh`, ...) are removed at the M5 switch-over (see M5-10).
+The local root compat symlinks (`server.mjs`, `public`, `ide.sh`, `skill`, `.sessions.json`) were removed at the M5 switch-over on 2026-10-26; `~/.claude/skills/nb` points at `skill/`.
 
 ## Rebuild (root)
 
