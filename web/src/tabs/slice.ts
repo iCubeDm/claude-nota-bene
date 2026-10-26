@@ -7,9 +7,11 @@ export type Tab = { id: 'chat'; kind: 'chat' } | FileTab;
 /**
  * open[0] is always the chat. `root`: the project the file tabs belong to (null until the first session event).
  * `rootGen`: bumped on every root change after the first, so views keyed by it remount (the same path in another root
- * is another file).
+ * is another file). `closed`: the file tabs closed in this page's life, last closed last (Alt+Shift+T reopens; M6-14).
  */
-export type TabsState = { open: Tab[]; active: Tab['id']; root: string | null; rootGen: number };
+export type TabsState = { open: Tab[]; active: Tab['id']; root: string | null; rootGen: number; closed: FileArg[] };
+/** How many closed tabs Alt+Shift+T can bring back. */
+export const CLOSED_MAX = 30;
 /** A file to open: a path in this folder, or a path in another source. */
 export type FileArg = string | { path: string; src?: string; ref?: string };
 
@@ -41,7 +43,7 @@ const idx = (s: TabsState, id: string) => s.open.findIndex((t) => t.id === id);
 
 export const tabsSlice = createSlice({
   name: 'tabs',
-  initialState: (): TabsState => ({ open: [CHAT], active: 'chat', root: null, rootGen: 0 }),
+  initialState: (): TabsState => ({ open: [CHAT], active: 'chat', root: null, rootGen: 0, closed: [] }),
   reducers: {
     openFile: (s, a: PayloadAction<FileArg>) => {
       const tab = fileTab(a.payload);
@@ -54,23 +56,35 @@ export const tabsSlice = createSlice({
     closeTab: (s, a: PayloadAction<Tab['id']>) => {
       const i = idx(s, a.payload);
       if (i <= 0) return; // unknown, or the chat
-      s.open.splice(i, 1);
+      remember(s, s.open.splice(i, 1));
       if (s.active === a.payload) s.active = s.open[i - 1].id;
     },
     closeOthers: (s, a: PayloadAction<Tab['id']>) => {
       const keep = s.open.find((t) => t.id === a.payload);
+      remember(s, s.open.filter((t) => t !== keep));
       s.open = keep && keep.kind !== 'chat' ? [CHAT, keep] : [CHAT];
       if (idx(s, s.active) < 0) s.active = s.open[s.open.length - 1].id;
     },
     closeRight: (s, a: PayloadAction<Tab['id']>) => {
       const i = idx(s, a.payload);
       if (i < 0) return;
-      s.open.splice(i + 1);
+      remember(s, s.open.splice(i + 1));
       if (idx(s, s.active) < 0) s.active = s.open[i].id;
     },
     closeAll: (s) => {
+      remember(s, s.open);
       s.open = [CHAT];
       s.active = 'chat';
+    },
+    /** The last closed file tab opens again and becomes active (one already open again is skipped). */
+    reopenClosed: (s) => {
+      for (let f = s.closed.pop(); f; f = s.closed.pop()) {
+        const tab = fileTab(f);
+        if (idx(s, tab.id) >= 0) continue;
+        s.open.push(tab);
+        s.active = tab.id;
+        return;
+      }
     },
     /** Merge previously saved tabs in front of what is already open; the saved active tab wins if it exists. */
     restoreTabs: (s, a: PayloadAction<SavedTabs>) => restore(s, a.payload, true),
@@ -82,12 +96,18 @@ export const tabsSlice = createSlice({
       s.root = a.payload.root;
       if (!first) {
         s.rootGen++;
+        s.closed = []; // another root's files
         s.open = [CHAT];
         s.active = 'chat';
       }
       if (a.payload.tabs) restore(s, a.payload.tabs, first);
     }),
 });
+
+function remember(s: TabsState, tabs: Tab[]): void {
+  for (const t of tabs) if (t.kind === 'file') s.closed.push({ path: t.path, src: t.src, ...(t.ref && { ref: t.ref }) });
+  if (s.closed.length > CLOSED_MAX) s.closed.splice(0, s.closed.length - CLOSED_MAX);
+}
 
 function restore(s: TabsState, saved: SavedTabs, merge: boolean): void {
   const have = new Set(merge ? s.open.map((t) => t.id) : ['chat']);
@@ -96,7 +116,7 @@ function restore(s: TabsState, saved: SavedTabs, merge: boolean): void {
   if (idx(s, saved.active) >= 0) s.active = saved.active as Tab['id'];
 }
 
-export const { openFile, activate, closeTab, closeOthers, closeRight, closeAll, restoreTabs } = tabsSlice.actions;
+export const { openFile, activate, closeTab, closeOthers, closeRight, closeAll, reopenClosed, restoreTabs } = tabsSlice.actions;
 
 export const selectTabs = (s: RootState): TabsState => s.tabs;
 export const selectActiveTab = (s: RootState): Tab => s.tabs.open.find((t) => t.id === s.tabs.active) ?? CHAT;

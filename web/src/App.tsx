@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useStore } from 'react-redux';
 import { sendBatch } from './comments/send.ts';
-import { useAppDispatch, useAppSelector } from './store/store.ts';
+import { useAppDispatch, useAppSelector, type AppStore } from './store/store.ts';
 import { selectTabs } from './tabs/slice.ts';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { CommentCardPopover } from './comments/CommentCard.tsx';
@@ -19,9 +20,12 @@ import { LeftStrip, RightStrip } from './shell/ToolStrip.tsx';
 import { Toasts } from './shell/Toasts.tsx';
 import { useFavicon } from './shell/Favicon.ts';
 import { RecentFiles } from '@/files/RecentFiles.tsx';
+import { installKeymap } from './shell/keymap.ts';
 
 export function App() {
   const dispatch = useAppDispatch();
+  const store = useStore() as AppStore;
+  useEffect(() => installKeymap(store), [store]);
   useFavicon();
   useActivity();
   const sendPanel = useCallback(() => void dispatch(sendBatch(false)), [dispatch]);

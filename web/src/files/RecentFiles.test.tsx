@@ -23,7 +23,8 @@ function setup() {
   return store;
 }
 const items = () => [...document.querySelectorAll<HTMLElement>('[data-recent]')].map((b) => b.dataset.recent);
-const ctrlE = () => fireEvent.keyDown(window, { key: 'e', code: 'KeyE', ctrlKey: true });
+// Ctrl+E itself is the keymap's (shell/keymap.test.tsx); here the modal opens as the keymap opens it
+const ctrlE = () => act(() => recentModal.open());
 
 it('every activated file tab is recorded per root, newest first, once each, at most 50 (M6-13)', () => {
   const store = setup();
@@ -40,7 +41,7 @@ it('every activated file tab is recorded per root, newest first, once each, at m
   expect(readRecent('/other')).toEqual([]);
 });
 
-it('Ctrl+E opens the list with the previous file selected; Enter flips back; Esc closes (M6-13)', async () => {
+it('opening shows the list with the previous file selected; Enter flips back; Esc closes (M6-13)', async () => {
   const store = setup();
   act(() => { store.dispatch(openFile('src/a.ts')); store.dispatch(openFile('docs/b.md')); });
   ctrlE();

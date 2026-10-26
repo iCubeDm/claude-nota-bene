@@ -42,19 +42,6 @@ export function RecentFiles() {
     // `active` is read once per opening, not followed
   }, [open, root]);
 
-  // Cmd/Ctrl+E; moves into the keymap module with M6-14
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.code === 'KeyE') {
-        e.preventDefault();
-        if (recentModal.get()) recentModal.close();
-        else recentModal.open();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   const needle = q.trim().toLowerCase();
   useEffect(() => {
     if (!open || !needle) return void setFound([]);

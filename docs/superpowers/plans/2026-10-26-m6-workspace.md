@@ -140,9 +140,10 @@ The hotkey list appears in the `?` help.
 - [x] File-type icons.
 
 ### M6-14: Hotkeys (R-M6-5)
-- [ ] One keymap module (no scattered listeners) that respects the Esc protocol and text fields: Alt combos work in fields, `/` does not.
-- [ ] The `?` help lists every hotkey.
-- [ ] Tests for each binding.
+- [x] One keymap module (no scattered listeners) that respects the Esc protocol and text fields: Alt combos work in fields, `/` does not.
+- [x] The `?` help lists every hotkey.
+- [x] Tests for each binding.
+- Rulings (2026-10-26): Alt+←/→ do not fire inside a text field (a Mac field's word jump); Alt+9 is the last tab, as in Chrome; Esc focuses the composer without consuming the key (it still stops a busy agent); the help is the composer's ? tooltip, generated from the keymap.
 
 ## Package C — settings
 

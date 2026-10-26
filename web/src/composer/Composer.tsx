@@ -14,6 +14,7 @@ import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
 import { addImage, removeImage, selectDraft, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from './slice.ts';
 import { interrupt, selectBusy, selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { BINDINGS, keysLabel } from '@/shell/keymap.ts';
 
 export function Composer() {
   const t = useT();
@@ -223,7 +224,7 @@ export function Composer() {
               </svg>
             </Button>
           </TooltipTrigger>
-          <TooltipContent className="whitespace-pre-line">{t('keysTip')}</TooltipContent>
+          <TooltipContent className="whitespace-pre-line">{`${t('keysTip')}\n\n${t('hkTitle')}\n${BINDINGS.map((b) => `${keysLabel(b)} — ${t(b.id)}`).join('\n')}`}</TooltipContent>
         </Tooltip>
         <ModePill />
         <Tooltip>
