@@ -131,6 +131,11 @@ export const en: Dict = {
   imgLabel: (k: number) => `[image ${k}]`,
   imgLabelC: (k: number, ci: number) => `[image ${k} · for comment ${ci}]`,
   imgRef: (ks: number[]) => `📎 images: ${ks.join(', ')}`,
+  // a media comment (markup on an image / video frame): the frame and the layer are labelled, pasted ones follow bare
+  imgRefMedia: (ks: number[]) => `📎 images: ${ks.map((k, i) => (i === 0 ? `${k} (frame with marks)` : i === 1 ? `${k} (marks only, transparent)` : String(k))).join(', ')}`,
+  filesLine: (files: string[]) => `   files: ${files.join(', ')}`,
+  scaledSfx: (f: number) => ` (scaled ×${f})`,
+  markStale: '   (marked on an earlier version of the file; the frame shows it)',
   onlyImages: 'Only images can be attached',
   uploadWait: 'Wait for the image to finish uploading',
   attachHere: 'Attach an image (or paste / drop here)',

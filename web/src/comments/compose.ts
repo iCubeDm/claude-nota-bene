@@ -1,5 +1,6 @@
 import { isMediaAnchor, type Comment } from '@nota-bene/shared';
 import { tIn, type Lang } from '../i18n/index.ts';
+import { describeShape } from '../media/markup/geometry.ts';
 
 /**
  * The text sent to the agent: the general message, then the numbered comment list (prototype format).
@@ -17,14 +18,26 @@ export function composeBatch(
   instructionOf: (c: Comment) => string | undefined,
   /** refs[i] = the global numbers of comment i's images; adds the `imgRef` line under that comment */
   refs: number[][] = [],
+  /** media comments only: the file has changed since the mark was drawn (known current version differs) */
+  staleOf: (c: Comment) => boolean = () => false,
 ): string {
   if (!items.length) return general;
   const blocks = items.map((c, i) => {
-    // placeholder: a media comment carries no quote yet (its batch text arrives with media handling)
-    const quote = isMediaAnchor(c.anchor) ? '' : c.anchor.quote.split('\n').map((l) => '> ' + l).join('\n');
+    const a = c.anchor;
+    const quote = isMediaAnchor(a)
+      ? a.shapes.map((s) => '> ' + describeShape(s, a.width, a.height)).join('\n')
+      : a.quote.split('\n').map((l) => '> ' + l).join('\n');
+    let tail = '';
+    if (isMediaAnchor(a)) {
+      const sfx = a.scale ? tIn(lang, 'scaledSfx', a.scale) : '';
+      const dir = `.nota-bene/marks/${c.id}`;
+      if (refs[i]?.length) tail += '\n' + tIn(lang, 'imgRefMedia', refs[i]);
+      tail += '\n' + tIn(lang, 'filesLine', [`${dir}/frame.jpg${sfx}`, `${dir}/layer.png${sfx}`]);
+      if (staleOf(c)) tail += '\n' + tIn(lang, 'markStale');
+    } else if (refs[i]?.length) tail = '\n' + tIn(lang, 'imgRef', refs[i]);
     const body = [labelOf(c), c.text.trim()].filter(Boolean).join(' ');
     const instr = instructionOf(c);
-    return `${i + 1}. [${whereOf(c)}]\n${quote}\n→ ${body}${instr ? `\n   ${instr}` : ''}${refs[i]?.length ? '\n' + tIn(lang, 'imgRef', refs[i]) : ''}`;
+    return `${i + 1}. [${whereOf(c)}]\n${quote}\n→ ${body}${instr ? `\n   ${instr}` : ''}${tail}`;
   });
   return `${general ? general + '\n\n' : ''}${tIn(lang, 'batchHead')}\n\n${blocks.join('\n\n')}`;
 }

@@ -1,4 +1,4 @@
-import type { AnchorSource, Comment, ImageRef } from '@nota-bene/shared';
+import { isMediaAnchor, type AnchorSource, type Comment, type ImageRef } from '@nota-bene/shared';
 import { mediaTypeOf } from '../attachments/image.ts';
 import { getLang, t, tIn } from '../i18n/index.ts';
 import { selectReplyLabel, sendMessage, type AppThunk } from '../store/store.ts';
@@ -6,6 +6,8 @@ import { composeBatch } from './compose.ts';
 import { instructionOf, labelOf } from './labels.ts';
 import { clearImages, draftSent, selectDraft, selectImages, selectUploading, setDraft } from '../composer/slice.ts';
 import { markSending, selectPending } from './slice.ts';
+import { selectFileVersion } from '../files/slice.ts';
+import { mediaTime } from '../media/markup/geometry.ts';
 import { activate } from '../tabs/slice.ts';
 
 export type SendResult = 'empty' | 'sent' | 'offline' | 'switching';
@@ -16,6 +18,8 @@ export const whereOfFile = (src: Extract<AnchorSource, { kind: 'file' }>): strin
 /** Where a comment's fragment lives, for the batch line: the reply label, "my message", or the file. */
 export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0]): string {
   const src = c.anchor.source;
+  const a = c.anchor;
+  if (isMediaAnchor(a)) return `${whereOfFile(a.source)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${a.width}×${a.height}`;
   if (src.kind === 'file') return whereOfFile(src);
   return (st && selectReplyLabel(st, src.id)) ?? t('srcChat');
 }
@@ -45,6 +49,13 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
     body, pending, lang, (c) => labelOf(c, lang),
     (c) => whereOf(c, st),
     instructionOf, refs,
+    // "changed": only when the current version is known (a tab has it loaded) and differs from the one drawn on
+    (c) => {
+      const a = c.anchor;
+      if (!isMediaAnchor(a) || a.version === undefined) return false;
+      const cur = selectFileVersion(st, a.source.path, a.source.ref);
+      return cur !== undefined && cur !== a.version;
+    },
   );
   const ids = pending.map((c) => c.id);
   const id = crypto.randomUUID();
