@@ -79,7 +79,21 @@ export function stateLine(): string {
 /** Exit code for a failed listen (port taken): the launcher retries its first start on another port. */
 export const LISTEN_FAILED = 98;
 
+/**
+ * The launcher's env vars are ours only if that launcher is our parent right now. Anything started from a shell inside
+ * a window (e2e, npm start, npm run dev, an agent's own test server) inherits them from the window's server; trusting
+ * them would make it watch someone else's launcher and stop at once, and claim to be supervised. Drop them then.
+ */
+export function dropInheritedLauncherEnv(env: NodeJS.ProcessEnv, ppid: number): boolean {
+  const pid = Number(env.NOTA_BENE_LAUNCHER_PID);
+  if (env.NOTA_BENE_LAUNCHER_PID === undefined || pid === ppid) return false;
+  delete env.NOTA_BENE_LAUNCHER_PID;
+  delete env.NOTA_BENE_SUPERVISED;
+  return true;
+}
+
 async function main(): Promise<void> {
+  dropInheritedLauncherEnv(process.env, process.ppid);
   let args: ReturnType<typeof parseArgs>;
   try {
     args = parseArgs(process.argv.slice(2), invocationCwd(process.env, process.cwd()));

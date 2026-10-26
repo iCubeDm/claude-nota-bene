@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { invocationCwd, launchTarget, parseArgs, stateLine } from './main.ts';
+import { dropInheritedLauncherEnv, invocationCwd, launchTarget, parseArgs, stateLine } from './main.ts';
 import { saveSession } from './state.ts';
 
 const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-')));
@@ -102,5 +102,23 @@ describe('invocationCwd', () => {
 describe('stateLine', () => {
   it('names the state dir taken from NOTA_BENE_HOME', () => {
     expect(stateLine()).toBe(`state: ${home}`);
+  });
+});
+
+describe('dropInheritedLauncherEnv', () => {
+  it('keeps the launcher env when the launcher is our parent', () => {
+    const env = { NOTA_BENE_LAUNCHER_PID: '100', NOTA_BENE_SUPERVISED: '1' };
+    expect(dropInheritedLauncherEnv(env, 100)).toBe(false);
+    expect(env).toEqual({ NOTA_BENE_LAUNCHER_PID: '100', NOTA_BENE_SUPERVISED: '1' });
+  });
+  it('drops env inherited from a window (a server started from a shell inside it)', () => {
+    const env: NodeJS.ProcessEnv = { NOTA_BENE_LAUNCHER_PID: '100', NOTA_BENE_SUPERVISED: '1', OTHER: 'x' };
+    expect(dropInheritedLauncherEnv(env, 555)).toBe(true);
+    expect(env).toEqual({ OTHER: 'x' });
+  });
+  it('does nothing without a launcher pid', () => {
+    const env: NodeJS.ProcessEnv = { NOTA_BENE_SUPERVISED: '1' };
+    expect(dropInheritedLauncherEnv(env, 1)).toBe(false);
+    expect(env).toEqual({ NOTA_BENE_SUPERVISED: '1' });
   });
 });
