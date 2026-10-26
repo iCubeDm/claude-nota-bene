@@ -250,7 +250,11 @@ test('compact adds its boundary line; clear asks first, empties the feed, gets a
   const compact = page.getByRole('button', { name: en.compactTip });
   const clear = page.getByRole('button', { name: en.clearTip });
   await compact.click();
-  await expect(page.locator('[data-kind="marker"]').filter({ hasText: /context compacted · was 12k tokens/ })).toBeVisible();
+  // the fake compacts for 1.5 s: the live line with its bar shows, then gives way to the boundary line with the time
+  await expect(page.locator('[data-kind="compacting"]')).toContainText('compacting the context');
+  await expect(page.locator('[data-kind="compacting"]').getByRole('progressbar')).toBeVisible();
+  await expect(page.locator('[data-kind="marker"]').filter({ hasText: /context compacted · was 12k tokens · took 0:02/ })).toBeVisible();
+  await expect(page.locator('[data-kind="compacting"]')).toHaveCount(0);
   await expect(compact).toBeEnabled(); // /compact is a turn: the buttons come back when it ends
 
   const before = (await page.locator('#session').textContent())?.trim();

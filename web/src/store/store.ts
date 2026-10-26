@@ -17,7 +17,17 @@ import { readSavedDirs, treeKey, treeSlice } from '../tree/slice.ts';
 import { statsSlice } from '../stats/slice.ts';
 import { tasksSlice } from '../tasks/slice.ts';
 import { toast } from '../shell/toast.ts';
+import { recordCompactMs } from '../feed/compactTiming.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
+
+/** A live compaction's duration feeds the estimate of the next one (a replay is history: it would count twice). */
+const compactTimingMiddleware: Middleware = () => (next) => (action) => {
+  if (serverEvent.match(action) && action.payload.kind === 'sdk') {
+    const m = action.payload.m as { type?: string; subtype?: string; compact_metadata?: { duration_ms?: number } };
+    if (m.type === 'system' && m.subtype === 'compact_boundary' && m.compact_metadata?.duration_ms) recordCompactMs(m.compact_metadata.duration_ms);
+  }
+  return next(action);
+};
 
 /** A server error is a toast (R-M4-5), never a feed item. A middleware, not a reducer: reducers have no side effects. */
 const toastMiddleware: Middleware = () => (next) => (action) => {
@@ -101,7 +111,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   });
   const store = configureStore({
     reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, refusedMiddleware, mediaMiddleware(media)),
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
   mediaByStore.set(store, media);

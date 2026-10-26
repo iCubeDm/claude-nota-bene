@@ -28,6 +28,8 @@ export type FakeTurn = {
   model?: string;
   /** `compact_metadata.pre_tokens` of the boundary a `/compact` emits (read from the first turn that sets it; default 12000) */
   compactPreTokens?: number;
+  /** how long a `/compact` runs between its `status: compacting` and `status: null` frames (first turn that sets it; default 0) */
+  compactMs?: number;
   /** runs for a prompt containing this text, whatever turn the sequence is at, and does not use up the sequence */
   match?: string;
   /** raw SDK frames sent right after init (session_id is filled in); `{ sleepMs }` only waits (the turn stays busy) */
@@ -177,9 +179,18 @@ class FakeSession implements AgentSession {
   private async *command(name: 'compact' | 'clear', sendUuid: string): AsyncGenerator<SDKMessage> {
     const n = ++this.turnNo;
     if (name === 'compact') {
+      // as the real CLI does (probed 2026-10-26): status compacting, status null + compact_result, then the boundary
+      const ms = this.turns.find((t) => t.compactMs !== undefined)?.compactMs ?? 0;
+      yield sdk({ type: 'system', subtype: 'status', status: 'compacting', session_id: this.sessionId, uuid: `fake-cs-${n}` });
+      if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+      if (this.closed) return;
+      yield sdk({ type: 'system', subtype: 'status', status: null, compact_result: 'success', session_id: this.sessionId, uuid: `fake-ce-${n}` });
       yield sdk({
         type: 'system', subtype: 'compact_boundary', session_id: this.sessionId, uuid: `fake-cb-${n}`,
-        compact_metadata: { trigger: 'manual', pre_tokens: this.turns.find((t) => t.compactPreTokens !== undefined)?.compactPreTokens ?? 12000 },
+        compact_metadata: {
+          trigger: 'manual', pre_tokens: this.turns.find((t) => t.compactPreTokens !== undefined)?.compactPreTokens ?? 12000,
+          duration_ms: Math.max(ms, 1),
+        },
       });
       yield sdk({
         type: 'result', subtype: 'success', session_id: this.sessionId, uuid: `fake-r-${n}`, duration_ms: 0, is_error: false,

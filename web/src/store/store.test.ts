@@ -68,3 +68,15 @@ it('selectReplyLabel numbers final assistant items and names user messages', asy
   expect(selectReplyLabel(st, 'a2:0')).toBe('reply #2');
   expect(selectReplyLabel(st, 'nope')).toBeNull();
 });
+
+it('a live compaction records its duration for the next estimate; a replayed one does not', () => {
+  localStorage.clear();
+  const f = fake();
+  makeStore({ url: 'ws://x/ws', connect: f.connect });
+  const cb = { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 1, duration_ms: 42000 } } as never;
+  f.ev({ kind: 'replay', events: [{ kind: 'sdk', ts: 1, m: cb }] });
+  expect(localStorage.getItem('nb.compactMs')).toBeNull();
+  f.ev({ kind: 'sdk', ts: 2, m: cb });
+  expect(JSON.parse(localStorage.getItem('nb.compactMs')!)).toEqual([42000]);
+  localStorage.clear();
+});
