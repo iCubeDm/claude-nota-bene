@@ -30,7 +30,7 @@ export type SessionListEntry = {
 export type SessionInfo = { customTitle?: string; summary?: string; firstPrompt?: string; cwd?: string };
 
 export interface AgentBackend {
-  start(o: { cwd: string; resume?: string; permissionMode: Mode; ask: PermissionAsk }): AgentSession;
+  start(o: { cwd: string; resume?: string; /** with resume: branch into a new session id (SDK forkSession) */ fork?: boolean; permissionMode: Mode; ask: PermissionAsk }): AgentSession;
   /** `attachments` receives the images found in the transcript; the events carry ImageRefs only. */
   /** Every project's sessions, newest first (sdk: listSessions({ limit: 300 })). */
   listSessions(): Promise<SessionListEntry[]>;

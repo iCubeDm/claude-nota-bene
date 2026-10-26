@@ -6,6 +6,7 @@ import { Composer } from '@/composer/Composer.tsx';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
+import { switchSession } from '@/controls/slice.ts';
 import { CommentPopup } from './CommentPopup.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
 
@@ -156,4 +157,19 @@ it('a pasted image is saved on the comment (images-only is enough)', async () =>
   fireEvent.click(screen.getByRole('button', { name: 'Add' }));
   expect(comments()[0]).toMatchObject({ text: '', images: ['e'.repeat(64)] });
   expect(onClose).toHaveBeenCalled();
+});
+
+it('while switching: Add and the quick labels are disabled with the switching tooltip, Cmd+Enter adds nothing', () => {
+  const { store, comments, onClose } = setup();
+  act(() => void store.dispatch(switchSession('x', '/r')));
+  const add = screen.getByRole('button', { name: 'Add' });
+  expect(add).toBeDisabled();
+  expect(add).toHaveAttribute('title', 'switching…');
+  const chips = screen.getAllByRole('button').filter((b) => b.closest('.flex-wrap'));
+  expect(chips.length).toBeGreaterThan(0);
+  for (const chip of chips) { expect(chip).toBeDisabled(); expect(chip).toHaveAttribute('title', 'switching…'); }
+  fireEvent.change(box(), { target: { value: 'x' } });
+  fireEvent.keyDown(box(), { key: 'Enter', metaKey: true });
+  expect(comments()).toEqual([]);
+  expect(onClose).not.toHaveBeenCalled();
 });

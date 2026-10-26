@@ -8,6 +8,7 @@ import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
 import { nextMode, pickMode, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
 import { MentionPicker } from './MentionPicker.tsx';
+import { Meters } from '@/stats/Meters.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
 import { addImage, removeImage, selectDraft, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from './slice.ts';
@@ -195,7 +196,7 @@ export function Composer() {
           <TooltipContent className="whitespace-pre-line">{t('stopTip')}</TooltipContent>
         </Tooltip>
       </div>
-      <div className="flex min-h-[30px] items-center gap-2 pb-2">
+      <div data-tools-row className="flex min-h-[30px] items-center gap-2 pb-2">
         <input
           ref={fileIn}
           type="file"
@@ -208,18 +209,6 @@ export function Composer() {
             e.target.value = '';
           }}
         />
-        <ModePill />
-        <CompactClear />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon-sm" aria-label={t('attach')} onClick={() => fileIn.current?.click()}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
-              </svg>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent className="whitespace-pre-line">{t('attach')}</TooltipContent>
-        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button type="button" variant="ghost" size="icon-sm" aria-label={t('keysTip')}>
@@ -232,6 +221,20 @@ export function Composer() {
           </TooltipTrigger>
           <TooltipContent className="whitespace-pre-line">{t('keysTip')}</TooltipContent>
         </Tooltip>
+        <ModePill />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={t('attach')} onClick={() => fileIn.current?.click()}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5" />
+              </svg>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="whitespace-pre-line">{t('attach')}</TooltipContent>
+        </Tooltip>
+        <span className="grow" />
+        <Meters />
+        <CompactClear />
       </div>
     </div>
   );

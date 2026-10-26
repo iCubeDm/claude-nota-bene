@@ -98,11 +98,12 @@ class FakeSession implements AgentSession {
   private readonly modes: Mode[];
   private sessionId: string; // a /clear replaces it
 
-  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string) {
+  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string, fork?: boolean) {
     this.turns = turns;
     this.modes = modes;
     this.ask = ask;
-    this.sessionId = resume ?? DEFAULT_SESSION_ID; // a resumed CLI session keeps its id
+    // a resumed CLI session keeps its id; a fork gets a new one
+    this.sessionId = resume && fork ? `${resume}-fork-${++forkCount}` : (resume ?? DEFAULT_SESSION_ID);
     this.messages = { [Symbol.asyncIterator]: () => this.run() };
   }
 
@@ -186,13 +187,17 @@ class FakeSession implements AgentSession {
       });
       return;
     }
-    // /clear: a new conversation, announced by its reset and an init; the CLI sends no result for it
+    // /clear: a new conversation, announced by its reset and an init, then a result, as the real CLI does
     this.sessionId = randomUUID();
     yield sdk({
       type: 'conversation_reset', new_conversation_id: this.sessionId, session_id: this.sessionId, uuid: `fake-cr-${n}`,
       trigger: 'clear', user_message_uuid: sendUuid,
     });
     yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}` });
+    yield sdk({
+      type: 'result', subtype: 'success', session_id: this.sessionId, uuid: `fake-r-${n}`, duration_ms: 0, is_error: false,
+      result: '', terminal_reason: 'completed', queued_turn_count: 0, user_message_uuid: sendUuid, user_message_uuids: [sendUuid],
+    });
   }
 
   private async *turn(t: FakeTurn, sendUuid: string): AsyncGenerator<SDKMessage> {
@@ -282,7 +287,9 @@ class FakeSession implements AgentSession {
   }
 }
 
-type Started = { cwd: string; permissionMode: Mode; resume?: string };
+let forkCount = 0;
+
+type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: boolean };
 
 /**
  * `startModes` records the mode each agent started with, `setModes` every setPermissionMode call, `starts` every
@@ -310,8 +317,8 @@ export function fakeBackend(
     starts,
     start: (s) => {
       startModes.push(s.permissionMode);
-      starts.push({ cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}) });
-      return new FakeSession(turns, s.ask, setModes, s.resume);
+      starts.push({ cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}), ...(s.fork ? { fork: true } : {}) });
+      return new FakeSession(turns, s.ask, setModes, s.resume, s.fork);
     },
     listSessions: async () => sessions.map((x) => {
       const cwd = cwdOf(x);

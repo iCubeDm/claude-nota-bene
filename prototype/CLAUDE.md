@@ -1,3 +1,5 @@
+Retired on 2026-10-26 (M5). Archive and reference only — do not change. The app is the repo root.
+
 # Nota Bene — prototype
 
 Throwaway spike: optimized for learning what is convenient, not for polish or tests. It stays the feature reference for the React rebuild at the repo root.

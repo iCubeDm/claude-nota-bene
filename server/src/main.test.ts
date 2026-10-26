@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { invocationCwd, parseArgs } from './main.ts';
+import { invocationCwd, launchTarget, parseArgs, stateLine } from './main.ts';
+import { saveSession } from './state.ts';
 
 const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-')));
 // --continue reads the session registry: keep it in a temp NOTA_BENE_HOME, never the real ~/.nota-bene
@@ -21,6 +22,8 @@ describe('parseArgs', () => {
       dir: cwd,
       port: 4777,
       resume: undefined,
+      fork: false,
+      new: false,
       continue: false,
       fake: undefined,
       allowOrigins: [],
@@ -48,9 +51,56 @@ describe('parseArgs', () => {
   });
 });
 
+describe('launch options', () => {
+  it('parses --fork and --new, and rejects --fork without --resume and --new with --resume', () => {
+    expect(parseArgs(['--resume', 'a', '--fork'], cwd)).toMatchObject({ resume: 'a', fork: true });
+    expect(parseArgs(['--new'], cwd)).toMatchObject({ new: true });
+    expect(() => parseArgs(['--fork'], cwd)).toThrow(/--fork needs --resume/);
+    expect(() => parseArgs(['--new', '--resume', 'a'], cwd)).toThrow(/--new/);
+  });
+
+  describe('launchTarget', () => {
+    const projects = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-projects-'));
+    fs.mkdirSync(path.join(projects, 'p1'));
+    fs.writeFileSync(path.join(projects, 'p1', 'saved-id.jsonl'), '{}\n');
+    afterAll(() => fs.rmSync(projects, { recursive: true, force: true }));
+    const args = (extra: string[] = []) => parseArgs(extra, cwd);
+
+    it('default resumes the saved session when its transcript exists', () => {
+      saveSession(cwd, 'saved-id');
+      expect(launchTarget(args(), projects)).toEqual({ resume: 'saved-id' });
+      expect(launchTarget(args(['--continue']), projects)).toEqual({ resume: 'saved-id' });
+    });
+
+    it('default starts new when the transcript is gone, or nothing is saved', () => {
+      saveSession(cwd, 'gone-id');
+      expect(launchTarget(args(), projects)).toEqual({});
+      saveSession(cwd, null);
+      expect(launchTarget(args(), projects)).toEqual({});
+    });
+
+    it('--new ignores the saved session', () => {
+      saveSession(cwd, 'saved-id');
+      expect(launchTarget(args(['--new']), projects)).toEqual({});
+    });
+
+    it('--resume wins over the saved session, and --fork rides along', () => {
+      saveSession(cwd, 'saved-id');
+      expect(launchTarget(args(['--resume', 'other']), projects)).toEqual({ resume: 'other' });
+      expect(launchTarget(args(['--resume', 'other', '--fork']), projects)).toEqual({ resume: 'other', fork: true });
+    });
+  });
+});
+
 describe('invocationCwd', () => {
   it('prefers npm INIT_CWD, else cwd', () => {
     expect(invocationCwd({ INIT_CWD: '/x' }, '/y')).toBe('/x');
     expect(invocationCwd({}, '/y')).toBe('/y');
+  });
+});
+
+describe('stateLine', () => {
+  it('names the state dir taken from NOTA_BENE_HOME', () => {
+    expect(stateLine()).toBe(`state: ${home}`);
   });
 });

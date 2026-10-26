@@ -1,20 +1,60 @@
-<p align="center"><img src="prototype/public/icon-512.png" width="128" alt="Nota Bene"></p>
+<p align="center"><img src="web/public/icon-512.png" width="128" alt="Nota Bene"></p>
 
 # Nota Bene
 
-A browser IDE for [Claude Code](https://claude.com/claude-code), built on the Claude Agent SDK. Same agent, same settings, skills and plugins — with a review-first interface:
+A browser IDE for [Claude Code](https://claude.com/claude-code), built on the Claude Agent SDK. Same agent, same settings, skills and plugins, with a review-first interface: select any fragment of a reply or a file, leave a margin note, send all notes to the agent as one batch. Mermaid/SVG, images, video and audio render in the chat; a file tree and viewer cover the project.
 
-- **Margin comments.** Select any fragment of a reply or a file, leave a note, send all notes to the agent as one batch.
-- **Media instead of ASCII.** Mermaid and SVG diagrams, images, video and audio right in the chat; a built-in viewer for project files.
-- **Claude Code parity.** Mid-turn messages, `@` file mentions, image paste, prompt suggestions, permission modes and plan approval, context and plan-limit meters, `/compact`, `/clear`, resuming any Claude Code session.
+## Requirements
 
-Status: a working prototype in [`prototype/`](prototype/) (plain Node + one HTML file); a React + TypeScript rebuild is being planned at the root.
-
-## Run the prototype
+- Node >= 23.6 (the server runs `.ts` directly)
+- Claude Code, logged in
 
 ```sh
-cd prototype && npm install
-./ide.sh /path/to/your/project        # opens http://127.0.0.1:4777
+npm install
 ```
 
-Or from Claude Code: link `prototype/skill` as `~/.claude/skills/nb` and run `/nb` in any project.
+## Install the `/nb` skill
+
+```sh
+ln -sfn "$PWD/skill" ~/.claude/skills/nb
+```
+
+This replaces an existing `~/.claude/skills/nb` link (for example one pointing at the prototype).
+
+## Usage
+
+In any project, inside Claude Code:
+
+- `/nb` - open the window for this folder, resuming its last session (or start one)
+- `/nb new` - start a fresh session
+- `/nb fork` - carry this conversation over as a separate branch
+
+Without the skill:
+
+```sh
+node bin/nota-bene.mjs [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
+node bin/nota-bene.mjs --find DIR   # port of the live window serving DIR, or exit 1
+node bin/nota-bene.mjs --last DIR   # DIR's last session id if its transcript exists, or exit 1
+npm start [-- <dir> --port N]     # builds web/dist, serves on 4777, unsupervised
+```
+
+One window per folder; live windows use ports 4777-4799, except 4780 and 4790-4795. The launcher rebuilds a stale `web/dist`, opens the browser (unless `--no-open`), and relaunches the server on restart and crashes.
+
+## Dev mode
+
+```sh
+npm run dev      # server :4780 + Vite :5173, state in ~/.nota-bene-dev
+```
+
+## Tests
+
+```sh
+npm test         # unit (vitest)
+npm run e2e      # Playwright, ports 4791-4795 (tests only ever use 4790-4795)
+```
+
+## State
+
+`~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo: `sessions.json`, `prefs.json`, `comments/`, `attachments/`, `windows/`, `locks/`.
+
+`prototype/` is the retired first version, kept as an archive and reference.

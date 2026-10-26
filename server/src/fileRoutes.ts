@@ -188,13 +188,12 @@ export function fileRoutes(o: {
   };
 
   /**
-   * A branch blob: whole (no Range), the same safety headers, a content type from the path; HEAD gives the length (413
-   * above the cap, like GET). No Range means branch media cannot seek: Chrome still plays it, Safari refuses video
-   * without range support. Worktree media is served by serveFs and keeps Range.
+   * A branch blob: the buffer (read whole, capped) sliced by Range like serveFs (206, 416), the same safety headers, a
+   * content type from the path; HEAD gives the length (413 above the cap, like GET). Safari needs Range to play video.
    */
   const serveBlob = async (req: IncomingMessage, res: ServerResponse, root: string, src: Source) => {
     const rel = queryPath(req);
-    const head = { 'content-type': typeOf(rel), ...SAFETY };
+    const head = { 'content-type': typeOf(rel), 'accept-ranges': 'bytes', ...SAFETY };
     if (req.method === 'HEAD') {
       const size = await blobSize(root, src, rel);
       if (size === null) return plain(res, 404, 'not found');
@@ -204,6 +203,17 @@ export function fileRoutes(o: {
     }
     const buf = await readFile(root, src, rel);
     if (buf === null) return plain(res, 404, 'not found');
+    const range = parseRange(req.headers.range, buf.length);
+    if (range === 'unsatisfiable') {
+      res.writeHead(416, { 'content-range': `bytes */${buf.length}` });
+      res.end();
+      return;
+    }
+    if (range) {
+      res.writeHead(206, { ...head, 'content-range': `bytes ${range.start}-${range.end}/${buf.length}`, 'content-length': range.end - range.start + 1 });
+      res.end(buf.subarray(range.start, range.end + 1));
+      return;
+    }
     res.writeHead(200, { ...head, 'content-length': buf.length });
     res.end(buf);
   };

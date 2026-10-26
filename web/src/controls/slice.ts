@@ -1,5 +1,7 @@
 import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
 import { MODES, type Mode } from '@nota-bene/shared';
+import { t } from '../i18n/index.ts';
+import { toast } from '../shell/toast.ts';
 import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
 
 /**
@@ -35,6 +37,8 @@ export const controlsSlice = createSlice({
     /** M4-07 calls this when the plan card is approved: the CLI then drops to `default`, and we go back to where we were. */
     planApproved: (s) => void (s.restoreAfterPlan = s.modeBeforePlan),
     restoreCleared: (s) => void (s.restoreAfterPlan = null),
+    /** the full-restart wait gave up (error answer or no reconnect): release the UI */
+    switchCleared: (s) => void ((s.switching = null), (s.restarting = false)),
     switchStarted: (s, a: PayloadAction<boolean | undefined>) => void ((s.switching = 'asked'), (s.restarting = a.payload === true)),
   },
   extraReducers: (b) => {
@@ -71,7 +75,7 @@ export const controlsSlice = createSlice({
 });
 
 export const { planApproved } = controlsSlice.actions;
-const { restoreCleared, switchStarted } = controlsSlice.actions;
+const { restoreCleared, switchStarted, switchCleared } = controlsSlice.actions;
 
 export const selectMode = (s: RootState): Mode | null => s.controls.mode;
 export const selectSuggestion = (s: RootState): string => s.controls.suggestion;
@@ -109,10 +113,12 @@ controlsListener.startListening({
 });
 
 /** compact / clear. Refused while busy or switching (the server would answer `busy` too); the confirmation for clear is the caller's. */
-export const runCommand = (name: 'compact' | 'clear'): AppThunk => (_d, getState, { send }) => {
+export type CommandResult = 'sent' | 'busy' | 'switching' | 'offline';
+export const runCommand = (name: 'compact' | 'clear'): AppThunk<CommandResult> => (_d, getState, { send }) => {
   const st = getState();
-  if (st.feed.busy || st.controls.switching) return;
-  send({ type: 'command', name });
+  if (st.controls.switching) return 'switching';
+  if (st.feed.busy) return 'busy';
+  return send({ type: 'command', name }) ? 'sent' : 'offline';
 };
 
 /**
@@ -138,6 +144,39 @@ export const switchSession = (id: string | null, dir: string): AppThunk<SwitchRe
 export const restartAgent = (): AppThunk<boolean> => (dispatch, getState, { send }) => {
   const st = getState();
   if (st.controls.switching || st.conn.state !== 'open' || !send({ type: 'restart' })) return false;
+  clearTimeout(serverRestartTimer);
   dispatch(switchStarted(true));
+  return true;
+};
+
+/** How long a full restart may wait for the socket to come back before the UI is released. */
+export const SERVER_RESTART_TIMEOUT_MS = 30_000;
+let serverRestartTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * ↻ menu, "restart the server" (R-M5-1): POST /restart-server; the process exits (75), the launcher relaunches it on the
+ * same port and the socket reconnects by itself. It rides the `restarting` switch phases. The phase must NOT end on the
+ * connection close (the old socket closes before the new server is up); it ends on the reconnect's replay carrying the
+ * session, or, if the server never returns (no supervisor, crash loop), after 30 s with a `restartFail` toast.
+ */
+export const restartServer = (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
+  const st = getState();
+  if (st.controls.switching) return false;
+  dispatch(switchStarted(true));
+  clearTimeout(serverRestartTimer);
+  const giveUp = (msg: string) => {
+    clearTimeout(serverRestartTimer);
+    if (!getState().controls.restarting) return;
+    dispatch(switchCleared());
+    toast(t('restartFail'), msg);
+  };
+  try {
+    const r = await fetch('/restart-server', { method: 'POST' });
+    if (!r.ok) { giveUp((await r.text().catch(() => '')) || String(r.status)); return false; }
+  } catch (e) {
+    giveUp(e instanceof Error ? e.message : String(e));
+    return false;
+  }
+  if (getState().controls.restarting) serverRestartTimer = setTimeout(() => giveUp(''), SERVER_RESTART_TIMEOUT_MS);
   return true;
 };

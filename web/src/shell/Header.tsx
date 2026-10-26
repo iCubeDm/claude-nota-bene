@@ -5,7 +5,8 @@ import { selectTree, setTreeOpen } from '@/tree/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { SessionPicker } from '@/controls/SessionPicker.tsx';
-import { restartAgent, selectRestarting, selectSwitching } from '@/controls/slice.ts';
+import { RestartMenu } from './RestartMenu.tsx';
+import { selectRestarting, selectSwitching } from '@/controls/slice.ts';
 
 export function Header() {
   const t = useT();
@@ -43,16 +44,7 @@ export function Header() {
       <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : switching ? t(restarting ? 'restarting' : 'switching') : ''}</span>
       <SessionPicker />
       {/* enabled while busy: the escape hatch for a stuck agent (R-M4-4); only a running switch/restart disables it */}
-      <button
-        type="button"
-        id="restartBtn"
-        title={t('restartTip')}
-        disabled={switching}
-        onClick={() => d(restartAgent())}
-        className="cursor-pointer rounded-md border border-border-soft px-2 py-0.5 text-[11px] font-medium hover:text-foreground disabled:cursor-default disabled:opacity-50"
-      >
-        {t('restart')}
-      </button>
+      <RestartMenu />
       <span id="session" className="font-mono text-[11px]">{[session?.model, session?.id?.slice(0, 8)].filter(Boolean).join(' · ')}</span>
       {/* moves into the tab strip in M2 */}
       <button

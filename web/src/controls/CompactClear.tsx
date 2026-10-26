@@ -5,6 +5,7 @@ import { useT } from '@/i18n/index.ts';
 import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ConfirmDialog } from './ConfirmDialog.tsx';
 import { runCommand, selectSwitching } from './slice.ts';
+import { REFUSED, useNote } from './useNote.ts';
 
 const ICON = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
 
@@ -15,6 +16,7 @@ export function CompactClear() {
   // off mid-switch too: the server would refuse them as `busy`, and they belong to the session being left
   const busy = useAppSelector((s) => selectBusy(s) || selectSwitching(s));
   const [asking, setAsking] = useState(false);
+  const [note, showNote] = useNote();
   return (
     <>
       <Tooltip>
@@ -33,12 +35,18 @@ export function CompactClear() {
         </TooltipTrigger>
         <TooltipContent className="max-w-[300px] whitespace-pre-line">{t('clearTip')}</TooltipContent>
       </Tooltip>
+      {note && <span role="status" className="flex-none text-[11px] text-warn">{note}</span>}
       {asking && (
         <ConfirmDialog
           title={t('clearTitle')}
           body={t('clearQ')}
           confirm={t('clearBtn')}
-          onConfirm={() => { setAsking(false); dispatch(runCommand('clear')); }}
+          onConfirm={() => {
+            setAsking(false);
+            // the agent can turn busy while the dialog is open (another window sent): say so, as the session picker does
+            const r = dispatch(runCommand('clear'));
+            if (r !== 'sent') showNote(t('clearFail') + t(REFUSED[r]));
+          }}
           onCancel={() => setAsking(false)}
         />
       )}

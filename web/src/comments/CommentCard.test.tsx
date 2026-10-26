@@ -5,6 +5,7 @@ import type { Comment } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
+import { switchSession } from '@/controls/slice.ts';
 import { CommentCard, CommentCardPopover } from './CommentCard.tsx';
 
 beforeEach(() => setLang('ru'));
@@ -18,7 +19,7 @@ const comment = (o: Partial<Comment> = {}): Comment => ({
 
 function setup(c: Comment = comment(), dom = true, inFeed = true) {
   const sent: unknown[] = [];
-  const store = makeStore({ url: 'ws://x', connect: () => ({ send: (m: unknown) => (sent.push(m), true), close() {} }) });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: (m: unknown) => (sent.push(m), true), close() {} })) as never });
   if (inFeed) act(() => void store.dispatch(serverEvent({ kind: 'user', id: 'a1', text: 'hello brave world', ts: 0, historic: true })));
   act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [c] })));
   const view = render(
@@ -227,4 +228,15 @@ it('popover re-clamps into the viewport when the card resizes while editing', ()
     if (desc) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', desc);
     else Reflect.deleteProperty(HTMLElement.prototype, 'offsetHeight');
   }
+});
+
+it('while switching, edit and delete are disabled with the switching tooltip and do nothing', () => {
+  const { store } = setup();
+  act(() => void store.dispatch(switchSession('x', '/r')));
+  const ed = screen.getByRole('button', { name: 'Редактировать' });
+  const del = screen.getByRole('button', { name: 'Удалить' });
+  for (const b of [ed, del]) { expect(b).toBeDisabled(); expect(b).toHaveAttribute('title', 'переключение…'); }
+  fireEvent.click(del);
+  expect(store.getState().comments.items).toHaveLength(1);
+  expect(document.querySelector('[contenteditable]')).toBeNull();
 });

@@ -14,6 +14,7 @@ import { httpHandler, isAllowedHost } from './http.ts';
 import { SwitchError, createSessionManager } from './session.ts';
 import { listSessionsView } from './sessions.ts';
 import { stateDir } from './state.ts';
+import { registerWindow } from './windows.ts';
 
 // Process-wide handlers are registered once; each running server's hub is in this set.
 const hubs = new Set<EventHub>();
@@ -35,6 +36,9 @@ export async function startServer(o: {
   port: number;
   backend: AgentBackend;
   resume?: string;
+  fork?: boolean;
+  /** called by POST /restart-server (tests stub it) */
+  exit?: (code: number) => void;
   webDist: string;
   allowedOrigins?: string[];
 }): Promise<{ url: string; close(): Promise<void> }> {
@@ -49,6 +53,7 @@ export async function startServer(o: {
       backend: o.backend,
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
+      ...(o.resume && o.fork ? { fork: true } : {}),
     });
     const store = new CommentStore({ dir: path.join(stateDir(), 'comments') });
     // comments are live state, not history: never stored in the replay, a new socket gets the set directly
@@ -64,6 +69,9 @@ export async function startServer(o: {
       if (!restart) store.set(null, []);
       broadcastComments(store.get(id));
     });
+    // supervised = our launcher is still our parent: an orphan (launcher killed) must not offer a restart nobody catches
+    const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1'
+      && process.ppid === Number(process.env.NOTA_BENE_LAUNCHER_PID);
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -95,11 +103,30 @@ export async function startServer(o: {
         ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
         ...attachmentRoutes(attachments, hub),
         '/sessions': sessionsRoute,
+        '/restart-server': (req, res) => {
+          if (req.method !== 'POST') {
+            res.writeHead(405, { allow: 'POST', 'content-type': 'text/plain; charset=utf-8' });
+            res.end('method not allowed');
+            return;
+          }
+          if (!supervised()) {
+            res.writeHead(409, { 'content-type': 'text/plain; charset=utf-8' });
+            res.end('not supervised');
+            return;
+          }
+          // answer first: the exit must not cut the reply; 75 tells the launcher to relaunch with --continue
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+          res.end('{"ok":true}', () => {
+            void Promise.race([close(), new Promise<void>((r) => setTimeout(r, 2000))]).then(() => {
+              setTimeout(() => (o.exit ?? process.exit)(75), 100);
+            });
+          });
+        },
       },
       webDist: o.webDist,
       info: () => {
         const { id, root, title, model } = manager.info();
-        return { root, session: id, title, model };
+        return { root, session: id, title, model, supervised: supervised() };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);
@@ -113,9 +140,13 @@ export async function startServer(o: {
         else done(false, 403, 'forbidden');
       },
     });
+    // the wss re-emits the http server's errors; unhandled, a listen error (EADDRINUSE) would throw out of the
+    // server's emit before the listen promise below could reject. The listen promise reports it
+    wss.on('error', () => {});
 
     wss.on('connection', (ws) => {
       const detach = hub.attach({ send: (d) => ws.send(d) });
+      manager.clientAttached();
       try {
         ws.send(JSON.stringify({ kind: 'comments', items: currentComments() }));
       } catch (e) {
@@ -142,8 +173,9 @@ export async function startServer(o: {
         switch (msg.type) {
           case 'send':
             if (manager.switching()) {
-              // before markSent: a refused send must not flip its comments to sent
-              reportError(hub, 'busy', new Error('the session is switching; the message was not sent'));
+              // before markSent: a refused send must not flip its comments to sent. Only the asking socket hears
+              // of it (not stored, not broadcast)
+              ws.send(JSON.stringify({ kind: 'send-refused', id: msg.id, reason: 'switching' }));
               break;
             }
             if (msg.commentIds?.length) {
@@ -192,15 +224,30 @@ export async function startServer(o: {
       }));
     });
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(o.port, '127.0.0.1', () => {
-        server.off('error', reject);
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(o.port, '127.0.0.1', () => {
+          server.off('error', reject);
+          resolve();
+        });
       });
-    });
+    } catch (e) {
+      manager.close();
+      wss.close();
+      throw e; // syscall 'listen': main exits with 98, the launcher's "port taken" code
+    }
 
     const port = (server.address() as AddressInfo).port;
+    // a supervised window keeps its registry entry's root current, so a relaunch reopens the folder it switched to
+    manager.onSwitch((_id, { restart }) => {
+      if (restart || !supervised()) return;
+      try {
+        registerWindow(port, root(), process.pid, process.ppid);
+      } catch (e) {
+        reportError(hub, 'windows', e);
+      }
+    });
     allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
     allowedOrigins.push(`http://127.0.0.1:${port}`, `http://localhost:${port}`);
 

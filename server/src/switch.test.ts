@@ -373,6 +373,28 @@ describe('fix round 1', () => {
     expect(store.get(SB)).toEqual([comment('b1')]);
   });
 
+  it('a send during a switch gets send-refused on the asking socket only, never stored', async () => {
+    const backend = backendFor();
+    const history = backend.history;
+    backend.history = async (...a) => { await new Promise((r) => setTimeout(r, 200)); return history(...a); };
+    const s = await boot({ backend, resume: SA });
+    const c = await connect(s.url);
+    const other = await connect(s.url);
+    await until(() => lastOf(c, 'comments') !== undefined && lastOf(other, 'comments') !== undefined);
+    const mark = c.events.length;
+    c.ws.send(JSON.stringify({ type: 'switch', id: SB, dir: B }));
+    await until(() => c.events.slice(mark).some((e) => e.kind === 'replay')); // torn down, history still loading
+    c.ws.send(JSON.stringify({ type: 'send', id: 'u9', text: 'too early' }));
+    await until(() => c.events.some((e) => e.kind === 'send-refused'));
+    expect(c.events.find((e) => e.kind === 'send-refused')).toEqual({ kind: 'send-refused', id: 'u9', reason: 'switching' });
+    expect(errors(c)).toEqual([]);
+    await until(() => switched(c, SB));
+    expect(other.events.some((e) => e.kind === 'send-refused')).toBe(false);
+    const late = await connect(s.url);
+    await until(() => late.events.length > 0);
+    expect(JSON.stringify(late.events[0])).not.toContain('send-refused');
+  });
+
   it('a restart racing a switch: exactly one runs, the other is refused as a switch error', async () => {
     const s = await boot({ resume: SA });
     const c = await connect(s.url);

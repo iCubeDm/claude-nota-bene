@@ -168,6 +168,30 @@ describe('StatsService', () => {
     svc.stop();
   });
 
+  it('the 5-minute tick does nothing while no client is attached; the next attach refreshes at once when stale', async () => {
+    const { session, contextUsage } = stub();
+    let clients = 0;
+    const svc = new StatsService({ session: () => session, emit: () => {}, hasClients: () => clients > 0 });
+    svc.start();
+    await vi.advanceTimersByTimeAsync(1_500 + 5 * 60_000);
+    expect(contextUsage).toHaveBeenCalledTimes(0); // both ticks skipped
+    clients = 1;
+    svc.onAttach(); // never refreshed: stale
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contextUsage).toHaveBeenCalledTimes(1);
+    svc.onAttach(); // fresh now: no second pass
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contextUsage).toHaveBeenCalledTimes(1);
+    clients = 0;
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(contextUsage).toHaveBeenCalledTimes(1);
+    clients = 1;
+    svc.onAttach(); // older than 5 minutes
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contextUsage).toHaveBeenCalledTimes(2);
+    svc.stop();
+  });
+
   it('a refresh that finishes after stop() publishes nothing', async () => {
     let release: () => void = () => {};
     const { session } = stub({ context: () => new Promise((r) => { release = () => r({ used: 1, max: 2, pct: 50 }); }) });

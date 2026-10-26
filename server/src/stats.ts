@@ -67,8 +67,15 @@ const EMPTY: Stats = { context: null, limits: null, cost: null };
 
 type Msg = { type?: string; subtype?: string; rate_limit_info?: { rateLimitType?: string; utilization?: number; resetsAt?: number } };
 
+type StatsOptions = {
+  session: () => AgentSession | null; emit: (s: Stats) => void; onError?: (e: unknown) => void; now?: () => number;
+  /** the 5-minute tick is skipped while this is false (nobody is looking); default: always true */
+  hasClients?: () => boolean;
+};
+
 export class StatsService {
-  private readonly o: { session: () => AgentSession | null; emit: (s: Stats) => void; onError?: (e: unknown) => void; now?: () => number };
+  private readonly o: StatsOptions;
+  private lastRefreshAt = -Infinity;
   private stats: Stats = EMPTY;
   private lastEmitted = JSON.stringify(EMPTY);
   private lastLimitsAt = -Infinity;
@@ -79,7 +86,7 @@ export class StatsService {
   private every: NodeJS.Timeout | null = null;
   private generation = 0;
 
-  constructor(o: { session: () => AgentSession | null; emit: (s: Stats) => void; onError?: (e: unknown) => void; now?: () => number }) {
+  constructor(o: StatsOptions) {
     this.o = o;
   }
 
@@ -129,11 +136,17 @@ export class StatsService {
 
   start(): void {
     if (this.first || this.every) return;
-    const tick = () => void this.refresh({ limits: true }); // the 5-minute tick also resets the throttle
+    // the 5-minute tick also resets the throttle; with no socket attached it does nothing (onAttach catches up)
+    const tick = () => { if (this.o.hasClients?.() ?? true) void this.refresh({ limits: true }); };
     this.first = setTimeout(tick, FIRST_TICK_MS);
     this.every = setInterval(tick, TICK_MS);
     this.first.unref();
     this.every.unref();
+  }
+
+  /** A socket attached: refresh at once when the last refresh is older than the tick (the ticks skipped meanwhile). */
+  onAttach(): void {
+    if (this.now() - this.lastRefreshAt >= TICK_MS) void this.refresh({ limits: true });
   }
 
   stop(): void {
@@ -151,6 +164,7 @@ export class StatsService {
     const gen = this.generation;
     const session = this.o.session();
     if (!session) return;
+    this.lastRefreshAt = this.now();
     const wantLimits = !this.limitsUnavailable && (forceLimits || this.now() - this.lastLimitsAt >= LIMITS_THROTTLE_MS);
     if (wantLimits) this.lastLimitsAt = this.now(); // a failure also waits out the throttle
     const [ctx, usage] = await Promise.all([

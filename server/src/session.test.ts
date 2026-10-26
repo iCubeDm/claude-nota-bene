@@ -741,17 +741,107 @@ describe('switch', () => {
     fs.rmSync(dirA, { recursive: true, force: true });
   });
 
+  it('the result a real /clear sends is live only: a reload never shows it; the next turn\'s result is stored', async () => {
+    const backend = fakeBackend([{ text: 'x' }]);
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj' });
+    s.command('clear');
+    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => !s.busy());
+    const replayOf = () => {
+      let r: ServerEvent[] = [];
+      hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') r = e.events; } });
+      return r;
+    };
+    expect(replayOf().filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result')).toEqual([]);
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 2);
+    expect(replayOf().filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result')).toHaveLength(1);
+    s.close();
+  });
+
+  it('a reset that did not follow a /clear command keeps its result stored', async () => {
+    const backend = fakeBackend([{ text: 'x', frames: [{ type: 'conversation_reset', new_conversation_id: '44444444-4444-4444-8444-444444444444' }] }]);
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj' });
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sdkOf(events, 'result').length === 1);
+    let stored = 0;
+    hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') stored = e.events.filter((x) => x.kind === 'sdk' && (x.m as { type: string }).type === 'result').length; } });
+    expect(stored).toBe(1);
+    s.close();
+  });
+
   it('a send during a switch is refused, not delivered to either agent', async () => {
     const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-b-')));
     const backend = fakeBackend([{ text: 'x' }], { sessions: [{ id: 'b', cwd: dirB }] });
     const { hub, events } = setup(backend);
     const s = await createSessionManager({ hub, backend, cwd: '/proj' });
     const p = s.switch({ id: null, dir: dirB });
-    s.send({ id: 'u1', text: 'too early' });
+    expect(s.send({ id: 'u1', text: 'too early' })).toBe('switching');
     await p;
-    expect(events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'busy' });
+    expect(events.find((e) => e.kind === 'server-error')).toBeUndefined(); // the server answers the asking socket only
     expect(events.some((e) => e.kind === 'user')).toBe(false);
     s.close();
     fs.rmSync(dirB, { recursive: true, force: true });
+  });
+
+  it('a history read that hangs times out: reported as a switch error, empty replay, switching released', async () => {
+    const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-h-')));
+    const sid = '55555555-5555-4555-8555-555555555555';
+    const backend = fakeBackend([{ text: 'x' }], { sessions: [{ id: sid, cwd: dirB, history: [{ role: 'user', text: 'old' }] }] });
+    backend.history = () => new Promise(() => {});
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj', historyTimeoutMs: 30 });
+    await s.switch({ id: sid, dir: dirB });
+    expect(s.switching()).toBe(false);
+    expect(events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'switch', message: expect.stringContaining('transcript read timed out') });
+    expect(events.some((e) => e.kind === 'resumed')).toBe(true);
+    expect(events.some((e) => e.kind === 'user')).toBe(false);
+    s.close();
+    fs.rmSync(dirB, { recursive: true, force: true });
+  });
+
+  describe('fork', () => {
+    it('starts the agent with fork: true and saves only the new id', async () => {
+      const backend = fakeBackend([{ text: 'hi' }]);
+      const { events, hub } = setup(backend);
+      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
+      expect(backend.starts[0]).toMatchObject({ resume: 'src-id', fork: true });
+      expect(lastSession(home)).toBeUndefined(); // the source is never written
+      const ids: string[] = [];
+      m.onSessionId((id) => ids.push(id));
+      m.send({ id: 'u1', text: 'go' });
+      await until(() => sdkOf(events, 'result').length === 1);
+      const forked = m.info().id!;
+      expect(forked).not.toBe('src-id');
+      expect(lastSession(home)).toBe(forked);
+      expect(ids).toEqual([forked]);
+      m.close();
+    });
+
+    it('a restart before the first turn still forks and still does not save the source', async () => {
+      const backend = fakeBackend([{ text: 'hi' }]);
+      const { hub } = setup(backend);
+      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
+      await m.restart();
+      expect(backend.starts.map((x) => x.fork)).toEqual([true, true]);
+      expect(lastSession(home)).toBeUndefined();
+      m.close();
+    });
+
+    it('after the fork has its id, a restart resumes that id without fork', async () => {
+      const backend = fakeBackend([{ text: 'hi' }]);
+      const { events, hub } = setup(backend);
+      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
+      m.send({ id: 'u1', text: 'go' });
+      await until(() => sdkOf(events, 'result').length === 1);
+      const forked = m.info().id!;
+      await m.restart();
+      expect(backend.starts[1]).toEqual(expect.objectContaining({ resume: forked }));
+      expect(backend.starts[1]!.fork).toBeUndefined();
+      expect(lastSession(home)).toBe(forked);
+      m.close();
+    });
   });
 });

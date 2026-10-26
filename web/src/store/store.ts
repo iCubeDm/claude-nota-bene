@@ -4,6 +4,7 @@ import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
+import { refusedMiddleware } from '../composer/refused.ts';
 import { controlsListener, controlsSlice } from '../controls/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
 import { activate, enterRoot, readSavedTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
@@ -100,7 +101,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   });
   const store = configureStore({
     reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, mediaMiddleware(media)),
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
   mediaByStore.set(store, media);
@@ -178,12 +179,12 @@ export const selectTurnSeq = (s: RootState): number => s.feed.turnSeq;
 export const selectSession = (s: RootState) => s.feed.session;
 
 export const sendMessage =
-  (text: string, force: boolean, commentIds?: string[], images?: ImageRef[]): AppThunk<boolean> =>
+  (text: string, force: boolean, commentIds?: string[], images?: ImageRef[], id: string = crypto.randomUUID()): AppThunk<boolean> =>
   (_d, getState, { send }) => {
     const st = getState();
     if (selectConn(st) !== 'open') return false;
     return send({
-      type: 'send', id: crypto.randomUUID(), text, force: force && selectBusy(st),
+      type: 'send', id, text, force: force && selectBusy(st),
       ...(commentIds?.length ? { commentIds } : {}),
       ...(images?.length ? { images } : {}),
     });

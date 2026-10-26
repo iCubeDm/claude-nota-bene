@@ -5,6 +5,7 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { Composer } from '@/composer/Composer.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
+import { switchSession } from '@/controls/slice.ts';
 import { Provider } from 'react-redux';
 import { SelectionButton, type PendingSelection } from './SelectionButton.tsx';
 
@@ -313,4 +314,22 @@ it('a mouseup inside a dialog does not re-show the button', async () => {
   expect(screen.queryByRole('button')).toBeNull();
   await up(q('a1')); // control: outside the dialog it shows
   expect(screen.getByRole('button', { name: '💬 Comment' })).toBeInTheDocument();
+});
+
+it('a selection made while switching shows no button', async () => {
+  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: () => true, close() {} })) as never });
+  store.dispatch(switchSession('x', '/r'));
+  const view = render(
+    <Provider store={store}>
+      <main data-chat-pane>
+        <div id="items" dangerouslySetInnerHTML={{ __html: A }} />
+        <SelectionButton onComment={vi.fn()} />
+      </main>
+    </Provider>,
+  );
+  const el = view.container.querySelector('[data-item-id="a1"]')!;
+  const t = el.querySelector('p')!.firstChild!;
+  select(t, 6, t, 11);
+  await up(el);
+  expect(screen.queryByRole('button')).toBeNull();
 });

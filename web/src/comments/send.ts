@@ -4,7 +4,7 @@ import { getLang, t, tIn } from '../i18n/index.ts';
 import { selectReplyLabel, sendMessage, type AppThunk } from '../store/store.ts';
 import { composeBatch } from './compose.ts';
 import { instructionOf, labelOf } from './labels.ts';
-import { clearImages, selectDraft, selectImages, selectUploading, setDraft } from '../composer/slice.ts';
+import { clearImages, draftSent, selectDraft, selectImages, selectUploading, setDraft } from '../composer/slice.ts';
 import { markSending, selectPending } from './slice.ts';
 import { activate } from '../tabs/slice.ts';
 
@@ -47,7 +47,9 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
     instructionOf, refs,
   );
   const ids = pending.map((c) => c.id);
-  if (!d(sendMessage(text, force, ids, images))) return 'offline';
+  const id = crypto.randomUUID();
+  if (!d(sendMessage(text, force, ids, images, id))) return 'offline';
+  d(draftSent({ id, text: body, images: own, commentIds: ids })); // until the echo: a refusal puts it back
   d(markSending(ids));
   d(setDraft(''));
   d(clearImages());

@@ -1,12 +1,21 @@
 import fs from 'node:fs';
 import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import { AttachmentStore } from '../attachments.ts';
 import { stripUserFrameImages, transcriptToEvents } from './transcript.ts';
 
-const store = (dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-tr-'))) => new AttachmentStore({ dir });
+const dirs: string[] = [];
+const tmpDir = () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-tr-'));
+  dirs.push(d);
+  return d;
+};
+afterAll(() => {
+  for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+});
+const store = (dir = tmpDir()) => new AttachmentStore({ dir });
 
 const msgs = JSON.parse(
   fs.readFileSync(new URL('../../test/fixtures/transcript.json', import.meta.url), 'utf8'),
@@ -58,7 +67,7 @@ describe('transcriptToEvents', () => {
   });
 
   it('an inline image becomes an ImageRef, stored once, with its label removed from the text', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-tr-'));
+    const dir = tmpDir();
     const png = Buffer.from('not really a png');
     const m = [{
       type: 'user', uuid: 'ui', parent_tool_use_id: null,

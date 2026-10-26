@@ -49,15 +49,31 @@ export function readPrefs(): Prefs {
   }
 }
 
+/** The raw prefs object for a read-modify-write. A corrupt file is copied to prefs.json.corrupt before it is replaced. */
+function loadRaw(): Record<string, unknown> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file(), 'utf8');
+  } catch {
+    return {};
+  }
+  try {
+    const data: unknown = JSON.parse(text);
+    if (data && typeof data === 'object' && !Array.isArray(data)) return data as Record<string, unknown>;
+  } catch {
+    // fall through to the backup
+  }
+  try {
+    fs.copyFileSync(file(), `${file()}.corrupt`);
+  } catch {
+    // best effort
+  }
+  return {};
+}
+
 export function setModePref(dir: string, mode: Mode): void {
   // merge into the raw object: unknown top-level keys and other projects' entries survive the save
-  let raw: Record<string, unknown> = {};
-  try {
-    const data: unknown = JSON.parse(fs.readFileSync(file(), 'utf8'));
-    if (data && typeof data === 'object' && !Array.isArray(data)) raw = data as Record<string, unknown>;
-  } catch {
-    // missing or corrupt: start from an empty object
-  }
+  const raw = loadRaw();
   const modes = raw.modes && typeof raw.modes === 'object' && !Array.isArray(raw.modes) ? (raw.modes as Record<string, unknown>) : {};
   modes[prefsKey(dir)] = mode;
   raw.modes = modes;
@@ -65,4 +81,23 @@ export function setModePref(dir: string, mode: Mode): void {
   const tmp = `${f}.tmp${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
   fs.renameSync(tmp, f);
+}
+
+/** Read-modify-write of the raw prefs object: unknown keys survive. Atomic like setModePref. */
+export function updateRawPrefs(fn: (raw: Record<string, unknown>) => void): void {
+  const raw = loadRaw();
+  fn(raw);
+  const f = file();
+  const tmp = `${f}.tmp${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
+  fs.renameSync(tmp, f);
+}
+
+export function prototypeImported(): boolean {
+  try {
+    const data = JSON.parse(fs.readFileSync(file(), 'utf8')) as { importedPrototype?: unknown } | null;
+    return data?.importedPrototype === true;
+  } catch {
+    return false;
+  }
 }

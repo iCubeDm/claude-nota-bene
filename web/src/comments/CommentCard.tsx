@@ -5,6 +5,7 @@ import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
+import { selectSwitching } from '@/controls/slice.ts';
 import { jumpToFileComment, selectFileLoad } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
 import { activate } from '@/tabs/slice.ts';
@@ -26,7 +27,7 @@ const fileRoot = (path: string, ref?: string): HTMLElement | null =>
 /** `noTitle`: the button already sits in a Radix Tooltip, so a native title would show a second one. */
 function IconButton({ label, className = '', noTitle = false, children, ...rest }: { label: string; className?: string; noTitle?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button type="button" title={noTitle ? undefined : label} aria-label={label} className={`${BTN} ${className}`} {...rest}>
+    <button type="button" title={noTitle ? undefined : label} aria-label={label} className={`${BTN} ${className} disabled:cursor-default disabled:opacity-30 disabled:hover:text-muted-foreground`} {...rest}>
       {children}
     </button>
   );
@@ -51,6 +52,8 @@ function sourceState(s: RootState, src: Comment['anchor']['source'] | undefined)
 export function CommentCard({ id, index, popover = false }: { id: string; index: number; popover?: boolean }) {
   const t = useT();
   const dispatch = useAppDispatch();
+  // the comment set belongs to the session being left: edit and delete wait for the new one
+  const switching = useAppSelector(selectSwitching);
   const c = useAppSelector(selectComments).find((x) => x.id === id);
   // a string compared by value: the card re-renders when its source item's text changes, not on every feed delta
   const srcState = useAppSelector((s) => sourceState(s, c?.anchor.source));
@@ -169,10 +172,10 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
               </>
             ) : (
               <>
-                <IconButton label={t('edit')} onClick={start}>
+                <IconButton label={t('edit')} disabled={switching} title={switching ? t('switching') : undefined} onClick={start}>
                   <svg {...svg} strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
                 </IconButton>
-                <IconButton label={t('del')} className="hover:text-destructive" onClick={() => dispatch(removeComment(c.id))}>
+                <IconButton label={t('del')} className="hover:text-destructive" disabled={switching} title={switching ? t('switching') : undefined} onClick={() => dispatch(removeComment(c.id))}>
                   <svg {...svg} strokeWidth="2"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /></svg>
                 </IconButton>
               </>

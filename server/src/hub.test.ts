@@ -25,6 +25,16 @@ describe('EventHub', () => {
     expect(JSON.parse(s.frames[1]!)).toEqual(user('c'));
   });
 
+  it('clients() counts attached sockets and drops a detached one', () => {
+    const hub = new EventHub();
+    expect(hub.clients()).toBe(0);
+    const off = hub.attach(sock());
+    hub.attach(sock());
+    expect(hub.clients()).toBe(2);
+    off();
+    expect(hub.clients()).toBe(1);
+  });
+
   it('store:false events reach live sockets but not the replay', () => {
     const hub = new EventHub();
     const live = sock();

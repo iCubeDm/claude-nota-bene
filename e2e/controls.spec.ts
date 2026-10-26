@@ -57,6 +57,48 @@ async function setMode(page: Page, t: ReturnType<typeof track>, mode: Mode) {
 
 const modeSends = (t: ReturnType<typeof track>, from = 0) => t.sent.slice(from).filter((f) => f.type === 'mode');
 
+/**
+ * Idempotent clean-up: every test leaves the shared server as the next one expects it, even when it failed half way.
+ * Each step first checks whether there is anything to do, so a clean server costs one page load and no changes.
+ */
+test.afterEach(async ({ page }) => {
+  const t = track(page);
+  await open(page);
+  // the Alpha session first (comments and permissions belong to the session)
+  const root = page.locator('#root-path');
+  await expect(page.locator('#conn')).toHaveText(''); // a switch still running finishes first
+  if (/\/other$/.test((await root.textContent()) ?? '')) {
+    await page.locator('#sessBtn').click();
+    await page.locator('[data-sess-item]').filter({ hasText: 'Alpha session' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: en.switchBtn }).click();
+    await expect(root).not.toHaveText(/\/other$/);
+    await expect(page.locator('#conn')).toHaveText('');
+  }
+  // a turn still running (a failed test): stop it so the permission and the mode below can settle
+  if (await page.getByText(en.working).isVisible()) {
+    await page.getByRole('button', { name: en.stopTip }).click();
+    await expect(page.getByText(en.working)).toBeHidden();
+  }
+  // an open permission ask: deny it
+  const open_ = page.locator('[data-kind="permission"]').filter({ has: page.getByRole('button', { name: en.deny }) });
+  while ((await open_.count()) > 0) {
+    const before = await open_.count();
+    await open_.first().getByRole('button', { name: en.deny }).click();
+    await expect(open_).toHaveCount(before - 1);
+  }
+  // pending comments: delete them so no later test sends them as a batch
+  const cards = page.locator('#comments [data-comment-id]');
+  if ((await cards.count()) > 0) {
+    if ((await page.locator('#comments').getAttribute('data-open')) !== 'true') await page.locator('#toggleComments').click();
+    while ((await cards.count()) > 0) {
+      const before = await cards.count();
+      await cards.first().getByRole('button', { name: en.del }).click();
+      await expect(cards).toHaveCount(before - 1);
+    }
+  }
+  await setMode(page, t, 'default');
+});
+
 test('Shift+Tab cycles the modes in order and the other window follows the server echo @controls', async ({ page, context }) => {
   const t = track(page);
   await open(page);

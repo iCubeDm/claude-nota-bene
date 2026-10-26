@@ -126,4 +126,80 @@ describe('server', () => {
     await until(() => seen.length === 1);
     expect(seen[0]).toBe(true); // a plain allow: the adapter echoes the ORIGINAL input
   });
+
+  const prevSup = process.env.NOTA_BENE_SUPERVISED;
+  const prevLauncher = process.env.NOTA_BENE_LAUNCHER_PID;
+  const restoreSup = () => {
+    if (prevSup === undefined) delete process.env.NOTA_BENE_SUPERVISED; else process.env.NOTA_BENE_SUPERVISED = prevSup;
+    if (prevLauncher === undefined) delete process.env.NOTA_BENE_LAUNCHER_PID; else process.env.NOTA_BENE_LAUNCHER_PID = prevLauncher;
+  };
+  // supervised = the env says so AND the launcher named in it is still our parent
+  const supervise = (launcher = process.ppid) => {
+    process.env.NOTA_BENE_SUPERVISED = '1';
+    process.env.NOTA_BENE_LAUNCHER_PID = String(launcher);
+  };
+
+  it('/info.supervised follows NOTA_BENE_SUPERVISED, and only while the launcher is the parent', async () => {
+    const s = await boot();
+    const sup = async () => ((await (await fetch(`${s.url}/info`)).json()) as { supervised: boolean }).supervised;
+    try {
+      delete process.env.NOTA_BENE_SUPERVISED;
+      expect(await sup()).toBe(false);
+      supervise();
+      expect(await sup()).toBe(true);
+      supervise(process.ppid + 100000); // an orphan: its launcher is gone, init/launchd adopted it
+      expect(await sup()).toBe(false);
+    } finally {
+      restoreSup();
+    }
+  });
+
+  it('a taken port rejects startServer with the listen error (instead of hanging)', async () => {
+    const s = await boot();
+    const port = Number(new URL(s.url).port);
+    const err = await startServer({ cwd: '/proj', port, backend: fakeBackend([]), webDist: dist }).then(
+      () => null,
+      (e: NodeJS.ErrnoException) => e,
+    );
+    expect(err).toMatchObject({ code: 'EADDRINUSE', syscall: 'listen' });
+  });
+
+  describe('POST /restart-server', () => {
+    afterEach(restoreSup);
+    const post = (url: string, origin?: string) =>
+      fetch(`${url}/restart-server`, { method: 'POST', ...(origin ? { headers: { origin } } : {}) });
+
+    it('409 when not supervised, and never exits', async () => {
+      delete process.env.NOTA_BENE_SUPERVISED;
+      const codes: number[] = [];
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
+      closers.push(s.close);
+      expect((await post(s.url, s.url)).status).toBe(409);
+      await new Promise((r) => setTimeout(r, 250));
+      expect(codes).toEqual([]);
+    });
+
+    it('403 for a foreign Origin (and for none), even when supervised', async () => {
+      supervise();
+      const codes: number[] = [];
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
+      closers.push(s.close);
+      expect((await post(s.url, 'http://evil.example')).status).toBe(403);
+      expect((await post(s.url)).status).toBe(403);
+      await new Promise((r) => setTimeout(r, 250));
+      expect(codes).toEqual([]);
+    });
+
+    it('supervised: answers 200, then exits with 75', async () => {
+      supervise();
+      const codes: number[] = [];
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
+      closers.push(s.close);
+      const r = await post(s.url, s.url);
+      expect(r.status).toBe(200);
+      expect(codes).toEqual([]); // the reply came first
+      await until(() => codes.length === 1);
+      expect(codes).toEqual([75]);
+    });
+  });
 });

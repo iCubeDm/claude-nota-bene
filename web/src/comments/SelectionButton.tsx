@@ -4,6 +4,7 @@ import { makeAnchor } from '@/anchors/resolve.ts';
 import { offsetsOf, textOf } from '@/anchors/text.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
+import { selectSwitching } from '@/controls/slice.ts';
 import { useAppSelector } from '@/store/store.ts';
 
 /** What the popup (M1-10) needs: where the text is anchored and where to put the popup. */
@@ -83,10 +84,15 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
   const dismissed = useRef(false); // Esc / click: the DOM selection stays, so scroll must not bring the button back
   shown.current = sel !== null;
   const btn = useRef<HTMLButtonElement>(null);
+  const switchingNow = useRef(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   // a tab switch hides the pane the selection is in: the button goes with it
   const activeTab = useAppSelector((s) => s.tabs.active);
   useEffect(() => setSel(null), [activeTab]);
+  // mid-switch the comment set belongs to the session being left: no way to start a comment
+  const switching = useAppSelector(selectSwitching);
+  switchingNow.current = switching;
+  useEffect(() => { if (switching) setSel(null); }, [switching]);
 
   useEffect(() => {
     const onUp = (e: MouseEvent) => {
@@ -95,7 +101,7 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
       if ((e.target as Element | null)?.closest?.('[role="dialog"]')) return;
       dismissed.current = false;
       // the browser updates the selection after mouseup, so read it one tick later
-      setTimeout(() => setSel(readSelection()));
+      setTimeout(() => setSel(switchingNow.current ? null : readSelection()));
     };
     const hide = () => setSel(null);
     // capture phase + preventDefault: Esc that dismisses the button must not also interrupt the agent (Composer skips defaultPrevented)

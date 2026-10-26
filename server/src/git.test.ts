@@ -176,15 +176,27 @@ describe('routes with src', () => {
     expect((await req('GET', `/file?${q({ src: 'ref:feature/x', path: '../x' })}`)).status).toBe(403);
     expect((await req('GET', `/tree?${q({ src: 'ref:feature/x', path: '..' })}`)).status).toBe(403);
   });
-  it('a branch: the blob whole (no Range), safety headers, HEAD gives the length, missing is 404', async () => {
+  it('a branch: the blob with Range (206), safety headers, HEAD gives the length, missing is 404', async () => {
     const p = `/file?${q({ src: 'ref:team/notes', path: 'Заметки #1.md' })}`;
     const f = await req('GET', p, { range: 'bytes=0-1' });
-    expect(f.status).toBe(200);
-    expect(f.body).toBe('ру');
+    expect(f.status).toBe(206);
+    expect(f.headers['content-range']).toBe(`bytes 0-1/${Buffer.byteLength('ру')}`);
+    expect(f.headers['content-length']).toBe('2');
+    expect(f.body).toBe('\u0440'); // the first two bytes are one Cyrillic letter
     expect(f.headers['content-type']).toContain('text/plain');
     expect(f.headers['x-content-type-options']).toBe('nosniff');
     expect(f.headers['content-security-policy']).toContain('sandbox');
-    expect(f.headers['accept-ranges']).toBeUndefined();
+    expect(f.headers['accept-ranges']).toBe('bytes');
+    const whole = await req('GET', p);
+    expect(whole.status).toBe(200);
+    expect(whole.body).toBe('ру');
+    expect(whole.headers['accept-ranges']).toBe('bytes');
+    const tail = await req('GET', p, { range: 'bytes=-2' });
+    expect(tail.status).toBe(206);
+    expect(tail.headers['content-range']).toBe(`bytes 2-3/4`);
+    const past = await req('GET', p, { range: 'bytes=4-' });
+    expect(past.status).toBe(416);
+    expect(past.headers['content-range']).toBe('bytes */4');
     const h = await req('HEAD', p);
     expect(h.status).toBe(200);
     expect(h.headers['content-length']).toBe(String(Buffer.byteLength('ру')));
