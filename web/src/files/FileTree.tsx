@@ -9,6 +9,7 @@ import { selectTurnSeq, useAppDispatch, useAppSelector, type RootState } from '@
 import { useStore } from 'react-redux';
 import { fileKey, isFixed, loadSources, useSources } from './sources.ts';
 import { SourcePicker } from './SourcePicker.tsx';
+import { PanelResizer, usePanelWidth } from '@/shell/PanelResizer.tsx';
 
 type Loaded = TreeEntry[] | 'gone' | 'error';
 
@@ -23,6 +24,8 @@ async function loadDir(rel: string, src: string): Promise<Loaded> {
     return 'error';
   }
 }
+
+const TREE_MIN = 200;
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
@@ -42,6 +45,7 @@ export function FileTree() {
 
   const [entries, setEntries] = useState<Record<string, TreeEntry[]>>({});
   const [filter, setFilter] = useState('');
+  const size = usePanelWidth('panel:tree:width', 300, TREE_MIN);
   const [loading, setLoading] = useState(0);
   const [failed, setFailed] = useState(false);
   const requested = useRef(new Set<string>());
@@ -185,8 +189,10 @@ export function FileTree() {
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); d(setTreeOpen(false)); }
       }}
-      className="flex w-[300px] flex-none flex-col border-r border-border-soft bg-chrome"
+      style={{ width: size.width, maxWidth: '45vw' }}
+      className="relative flex flex-none flex-col border-r border-border-soft bg-chrome"
     >
+      <PanelResizer edge="right" width={size.width} onWidth={size.set} onReset={size.reset} min={TREE_MIN} label={t('resizeFiles')} />
       <div className="flex h-10 flex-none items-center justify-between border-b border-border-soft pr-2 pl-3.5 text-[13px] font-medium text-foreground">
         {t('files')}
         <button type="button" aria-label={t('refresh')} title={t('refresh')} onClick={() => { void refresh(); void loadSources(true); }}

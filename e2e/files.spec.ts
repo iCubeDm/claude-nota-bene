@@ -435,3 +435,21 @@ test('the @ picker with 30 hits stays inside the viewport and never scrolls the 
   await composer(page).press('Escape');
   await expect(list).toHaveCount(0);
 });
+
+test('the docked panels are resized by dragging their edge, and keep the width after a reload @files', async ({ page }) => {
+  await start(page);
+  const sheet = page.locator('#tree-sheet');
+  if (await sheet.isHidden()) await page.locator('#toggleTree').click();
+  const before = (await sheet.boundingBox())!.width;
+  const edge = (await page.locator('[data-resizer="right"]').boundingBox())!;
+  await page.mouse.move(edge.x + edge.width / 2, edge.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + edge.width / 2 + 100, edge.y + 200, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await sheet.boundingBox())!.width).toBeCloseTo(before + 100, 0);
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await expect.poll(async () => (await sheet.boundingBox())!.width).toBeCloseTo(before + 100, 0);
+  await page.locator('[data-resizer="right"]').dblclick(); // back to the default, for the other tests
+  await expect.poll(async () => (await sheet.boundingBox())!.width).toBeCloseTo(300, 0);
+});

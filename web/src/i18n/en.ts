@@ -96,6 +96,9 @@ export const en: Dict = {
   toolOutput: 'Output',
   // file tree (M3-07)
   toolsLeft: 'Left tool windows',
+  resizeFiles: 'Files panel width',
+  resizeComments: 'Comments panel width',
+  resizeTip: 'Drag to resize · double-click for the default width',
   toolsRight: 'Right tool windows',
   files: 'Files',
   refresh: 'Refresh',

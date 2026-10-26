@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { selectUploading } from '@/composer/slice.ts';
 import { selectSwitching } from '@/controls/slice.ts';
 import { CommentCard } from './CommentCard.tsx';
+import { PanelResizer, usePanelWidth } from '@/shell/PanelResizer.tsx';
 import { selectCommentsUi, selectPending, setPanelOpen } from './slice.ts';
 
 /** The right tool window, docked next to its strip: open, it narrows the middle column (R-M6-3). */
@@ -17,6 +18,7 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
   const uploading = useAppSelector(selectUploading) > 0;
   const switching = useAppSelector(selectSwitching);
   const aside = useRef<HTMLElement>(null);
+  const size = usePanelWidth('panel:comments:width', 320, 240);
   // a closing panel becomes invisible: do not leave focus inside it, hand it back to the header toggle
   useEffect(() => {
     if (!open && aside.current?.contains(document.activeElement)) document.getElementById('toggleComments')?.focus();
@@ -27,8 +29,10 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
       id="comments"
       data-open={open}
       hidden={!open}
-      className="flex min-h-0 w-80 flex-none flex-col border-l border-border bg-side"
+      style={{ width: size.width, maxWidth: '45vw' }}
+      className="relative flex min-h-0 flex-none flex-col border-l border-border bg-side"
     >
+      <PanelResizer edge="left" width={size.width} onWidth={size.set} onReset={size.reset} min={240} label={t('resizeComments')} />
       <div className="flex h-[41px] flex-none items-center justify-between border-b border-border-soft pr-2 pl-3.5 text-[13px] font-medium">
         <span id="cTitle">{n ? t('commentsN', n) : t('comments')}</span>
         <button

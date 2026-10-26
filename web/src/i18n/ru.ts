@@ -94,6 +94,9 @@ export const ru = {
   // file tree (M3-07)
   files: 'Файлы',
   toolsLeft: 'Панели слева',
+  resizeFiles: 'Ширина панели «Файлы»',
+  resizeComments: 'Ширина панели комментариев',
+  resizeTip: 'Потяните, чтобы изменить ширину · двойной щелчок — по умолчанию',
   toolsRight: 'Панели справа',
   refresh: 'Обновить',
   filterPh: 'Фильтр файлов…',
