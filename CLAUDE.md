@@ -48,7 +48,7 @@ If the project root is this directory, the chat window you are talking through i
 Rebuild window:
 
 - Changes to `web/` take effect after `npm run build -w web` and a page reload (tell the user to reload). "Restart the server" (exit 75) does NOT rebuild `web/dist`; only a new launcher run does (it rebuilds a stale one).
-- Changes to `server/` (or `shared/`) need a server restart: ask the user to open the ↻ menu and pick "Restart the server"; the session resumes automatically. **Do not kill, restart or curl your own window's server** — that kills your own turn. Finish the turn first.
+- Changes to `server/` (or `shared/`) need a server restart: ask the user to open the ▾ menu next to "↻ Agent" and pick "Restart the server"; the session resumes automatically. **Do not kill, restart or curl your own window's server** — that kills your own turn. Finish the turn first.
 - Before asking for "Restart the server", check the edit: run `npx tsc -b`, then start the server once on 4790 with a temp project and temp `NOTA_BENE_HOME` (`node server/src/main.ts <tmpdir> --port 4790`), see it answer `/info`, and stop it. A broken server edit crash-loops under the launcher, which gives up after 5 crashes — the window does not come back and the user has to relaunch it.
 - Test server changes on a separate port (4790) with a temp project dir and temp `NOTA_BENE_HOME`, never on a live window's port.
 

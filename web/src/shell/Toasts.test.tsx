@@ -98,7 +98,7 @@ it('a server error no longer lands in the feed', () => {
 
 it('restart sends once, shows restarting… until the next session, and is disabled meanwhile', () => {
   const { sent, ev } = setup();
-  const btn = screen.getByRole('button', { name: /Server/ });
+  const btn = screen.getByRole('button', { name: /Agent/ });
   expect(btn).toHaveAttribute('title', 'Restart the agent and continue the same session');
   fireEvent.click(btn);
   expect(sent.filter((m) => m.type === 'restart')).toHaveLength(1);
@@ -116,13 +116,13 @@ it('restart stays enabled while the agent is busy', () => {
   const { ev, sent } = setup();
   ev({ kind: 'sdk', m: { type: 'system', subtype: 'init' } } as never);
   ev({ kind: 'user', id: 'u', text: 'hi', ts: 1 } as never);
-  fireEvent.click(screen.getByRole('button', { name: /Server/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Agent/ }));
   expect(sent.some((m) => m.type === 'restart')).toBe(true);
 });
 
 it('a refused restart (server-error where switch) clears restarting and toasts', () => {
   const { ev } = setup();
-  fireEvent.click(screen.getByRole('button', { name: /Server/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Agent/ }));
   ev(err('switch', 'a switch is in progress'));
   expect(document.getElementById('conn')).toHaveTextContent('');
   expect(items()[0]).toHaveTextContent('Server error · switch');
