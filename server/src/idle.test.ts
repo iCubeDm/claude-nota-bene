@@ -76,6 +76,16 @@ describe('IdleCompactor', () => {
     for (const m of [off, small, unknown, manual]) expect(m.compact).not.toHaveBeenCalled();
   });
 
+  it('switched off when it fired, then on again: this quiet stretch still counts', () => {
+    const { c, st, compact, fired } = make({ enabled: false });
+    c.turnEnded();
+    vi.advanceTimersByTime(1000);
+    st.enabled = true;
+    vi.advanceTimersByTime(1000);
+    expect(fired).toEqual(['off', 'started']);
+    expect(compact).toHaveBeenCalledTimes(1);
+  });
+
   it('busy (a permission waits): tries again, until the cache goes cold', () => {
     const { c, st, compact, fired } = make({ busy: true });
     c.turnEnded();

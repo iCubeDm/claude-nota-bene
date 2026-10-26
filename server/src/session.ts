@@ -162,12 +162,14 @@ export async function createSessionManager(o: {
   const idle = new IdleCompactor({
     config: idleCfg,
     enabled: () => { const st = idleState(); return st.on && !st.blocked; },
-    busy: () => switching || closed || waiting.size > 0 || pending.size > 0,
+    // no agent (it died): starting one only to compact, with nobody watching, is not ours to do
+    busy: () => switching || closed || agent === null || waiting.size > 0 || pending.size > 0,
     contextUsed: () => stats.current().context?.used ?? null,
     compact: () => runCommand('compact', true),
     onFire: (why) => console.log(`[idle] ${why}`),
   });
   let compactedInTurn = false;
+  const commandIds = new Set<string>(); // /compact and /clear sends whose result has not come yet
   const idListeners: ((id: string, prev: string | null) => void)[] = [];
   const switchListeners: ((id: string | null, o: { restart: boolean }) => void)[] = [];
 
@@ -224,7 +226,11 @@ export async function createSessionManager(o: {
         if (type === 'system' && subtype === 'compact_boundary') { compactedInTurn = true; idle.disarm(); }
         if (type === 'result') {
           scheduleTitle();
-          if (!compactedInTurn) idle.turnEnded();
+          // a command's result (a /compact that failed or was stopped, a /clear) never arms: a failed idle compaction
+          // would otherwise retry every idle stretch, keeping its own cache warm forever
+          const ids = Array.isArray(f.user_message_uuids) ? f.user_message_uuids : typeof f.user_message_uuid === 'string' ? [f.user_message_uuid] : [];
+          const ofCommand = ids.some((x) => commandIds.delete(x as string));
+          if (!compactedInTurn && !ofCommand) idle.turnEnded();
           compactedInTurn = false;
         }
       }
@@ -469,6 +475,7 @@ export async function createSessionManager(o: {
       stats.stop();
       idle.disarm(); // the new session gets compacted only after a turn of its own
       compactedInTurn = false;
+      commandIds.clear();
       gen++;
       const old = agent;
       const oldLoop = loop;
@@ -531,6 +538,7 @@ export async function createSessionManager(o: {
       const a = ensureAgent();
       hub.emit({ kind: 'user', id, text, ...(isIdle ? { idle: true } : {}) }); // before the agent sees it, as in the prototype
       waiting.add(id);
+      commandIds.add(id);
       clearSent = name === 'clear';
       clearResultDue = false;
       a.send({ uuid: id, text, priority: 'next' });

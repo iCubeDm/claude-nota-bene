@@ -218,6 +218,28 @@ describe('idle compaction', () => {
     expect(idleUsers(a)).toHaveLength(0);
   });
 
+  it('a failed idle compaction is not retried at every quiet stretch (its result does not arm)', async () => {
+    const s = await bootIdle([{ ...big, compactError: 'overloaded' }]);
+    const a = await connect(s.url);
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => idleUsers(a).length === 1);
+    await until(() => results(a).length === 2);
+    expect(a.events.some((e) => sdkType(e)?.subtype === 'compact_boundary')).toBe(false);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(idleUsers(a)).toHaveLength(1);
+  });
+
+  it('a manual /compact or /clear result does not arm it either', async () => {
+    const s = await bootIdle([{ ...big, compactError: 'nope' }]);
+    const a = await connect(s.url);
+    a.send({ type: 'command', name: 'compact' });
+    await until(() => results(a).length === 1);
+    a.send({ type: 'command', name: 'clear' });
+    await until(() => results(a).length === 2);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(idleUsers(a)).toHaveLength(0);
+  });
+
   it('a small context is left alone', async () => {
     const s = await bootIdle([{ text: 'hello', context: { used: 5000, max: 1_000_000, pct: 1 } }]);
     const a = await connect(s.url);

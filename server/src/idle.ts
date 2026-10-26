@@ -107,15 +107,17 @@ export class IdleCompactor {
   private fire(): void {
     this.timer = null;
     const why = this.decide();
-    if (why === 'busy') this.schedule(); // a turn runs: its end arms again anyway, this only covers a stuck permission
+    // busy (a stuck permission, a dead agent) or switched off: look again later, so turning it back on still counts
+    // this stretch; the cache check ends it either way
+    if (why === 'busy' || why === 'off') this.schedule();
     else this.disarm();
     if (why === 'started') this.o.compact();
     this.o.onFire?.(why);
   }
 
   private decide(): IdleWhy {
-    if (this.turnEnd === null || !this.o.enabled()) return 'off';
-    if (this.now() - this.turnEnd > this.o.config.cacheMs) return 'cold';
+    if (this.turnEnd === null || this.now() - this.turnEnd > this.o.config.cacheMs) return 'cold';
+    if (!this.o.enabled()) return 'off';
     if (this.o.busy()) return 'busy';
     if ((this.o.contextUsed() ?? 0) < this.o.config.minTokens) return 'small';
     return 'started';
