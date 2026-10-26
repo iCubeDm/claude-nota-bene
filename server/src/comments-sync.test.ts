@@ -198,3 +198,49 @@ describe('comment sync', () => {
     expect(a.events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'comments' });
   });
 });
+
+describe('mark files follow their comment', () => {
+  it('a media comment dropped from the set loses its folder in the project; a kept one and the merge stand', async () => {
+    const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-csync-proj-')));
+    closers.push(async () => fs.rmSync(proj, { recursive: true, force: true }));
+    const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist });
+    closers.push(s.close);
+    const A = '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
+    const B = '1f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
+    const media = (id: string) => c(id, {
+      anchor: { kind: 'media', source: { kind: 'file', path: 'a.png' }, width: 4, height: 4, shapes: [{ kind: 'rect', color: '#ff3b30', x: 0, y: 0, w: 1, h: 1 }] },
+    } as Partial<Comment>);
+    const cl = await connect(s.url);
+    cl.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [media(A), media(B)] }));
+    await until(() => lastComments(cl)?.length === 2);
+    for (const id of [A, B]) {
+      fs.mkdirSync(path.join(proj, '.nota-bene', 'marks', id), { recursive: true });
+      fs.writeFileSync(path.join(proj, '.nota-bene', 'marks', id, 'frame.jpg'), 'x');
+    }
+    cl.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [media(B)] }));
+    await until(() => lastComments(cl)?.length === 1);
+    await until(() => !fs.existsSync(path.join(proj, '.nota-bene', 'marks', A)));
+    expect(fs.existsSync(path.join(proj, '.nota-bene', 'marks', B, 'frame.jpg'))).toBe(true);
+  });
+
+  it('a failing removal is reported and the merge still stands', async () => {
+    const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-csync-proj-')));
+    const out = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-csync-out-')));
+    closers.push(async () => { fs.rmSync(proj, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); });
+    fs.mkdirSync(path.join(out, 'marks', '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab'), { recursive: true });
+    fs.symlinkSync(out, path.join(proj, '.nota-bene'));
+    const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist });
+    closers.push(s.close);
+    const A = '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
+    const media = c(A, {
+      anchor: { kind: 'media', source: { kind: 'file', path: 'a.png' }, width: 4, height: 4, shapes: [{ kind: 'rect', color: '#ff3b30', x: 0, y: 0, w: 1, h: 1 }] },
+    } as Partial<Comment>);
+    const cl = await connect(s.url);
+    cl.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [media] }));
+    await until(() => lastComments(cl)?.length === 1);
+    cl.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [] }));
+    await until(() => lastComments(cl)?.length === 0);
+    await until(() => cl.events.some((e) => e.kind === 'server-error' && e.where === 'marks'));
+    expect(fs.existsSync(path.join(out, 'marks', A))).toBe(true); // never followed the symlink
+  });
+});

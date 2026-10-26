@@ -31,6 +31,8 @@ function statFile(p: string): fs.Stats | null {
   }
 }
 
+const PREFIX_ROUTES = ['/attach/', '/marks/'];
+
 export function isAllowedHost(host: string | undefined, allowed: readonly string[]): boolean {
   return host !== undefined && allowed.includes(host.toLowerCase());
 }
@@ -73,8 +75,9 @@ export function httpHandler(o: {
       const qi = raw.indexOf('?');
       const rawPath = qi === -1 ? raw : raw.slice(0, qi);
 
-      // /attach/<id> is dynamic: matched by prefix
-      const route = o.extra?.[rawPath.startsWith('/attach/') ? '/attach/' : rawPath];
+      // /attach/<id> and /marks/<id>[/<name>] are dynamic: matched by prefix
+      const prefix = PREFIX_ROUTES.find((p) => rawPath.startsWith(p));
+      const route = o.extra?.[prefix ?? rawPath];
       if (route) {
         route(req, res);
         return;

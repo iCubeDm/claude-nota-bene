@@ -118,6 +118,21 @@ describe('/file', () => {
     expect(r.headers['content-length']).toBe('10');
     expect(r.body).toBe('');
   });
+  it('/file sends a weak ETag that changes when the file changes', async () => {
+    const f = path.join(root, 'etag.txt');
+    fs.writeFileSync(f, 'one');
+    fs.utimesSync(f, 1_000_000, 1_000_000);
+    const a = await req('GET', '/file?path=etag.txt');
+    const st = fs.statSync(f);
+    expect(a.headers.etag).toBe(`W/"${st.size}-${st.mtimeMs}"`);
+    expect((await req('HEAD', '/file?path=etag.txt')).headers.etag).toBe(a.headers.etag);
+    expect((await req('GET', '/file?path=etag.txt', { range: 'bytes=0-0' })).headers.etag).toBe(a.headers.etag);
+    fs.writeFileSync(f, 'two');
+    fs.utimesSync(f, 2_000_000, 2_000_000);
+    const b = await req('HEAD', '/file?path=etag.txt');
+    expect(b.headers.etag).toMatch(/^W\/"\d+-[\d.]+"$/);
+    expect(b.headers.etag).not.toBe(a.headers.etag);
+  });
   it('outside the root is 403 (decoded once)', async () => {
     expect((await req('GET', '/file?path=..%2Fx')).status).toBe(403);
     expect((await req('GET', '/file?path=%2Fetc%2Fpasswd')).status).toBe(403);

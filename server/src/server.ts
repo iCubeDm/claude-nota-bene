@@ -7,6 +7,7 @@ import type { Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { AttachmentStore, attachmentRoutes } from './attachments.ts';
+import { MarkFiles, markRoutes } from './marks.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
 import { complete, fileRoutes } from './fileRoutes.ts';
@@ -82,6 +83,7 @@ export async function startServer(o: {
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
     const root = () => manager.info().root;
+    const marks = new MarkFiles({ root });
     const sessionsRoute: http.RequestListener = (req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         res.writeHead(405, { allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8' });
@@ -108,6 +110,7 @@ export async function startServer(o: {
       extra: {
         ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
         ...attachmentRoutes(attachments, hub),
+        ...markRoutes(marks, hub),
         '/sessions': sessionsRoute,
         '/restart-server': (req, res) => {
           if (req.method !== 'POST') {
@@ -211,10 +214,23 @@ export async function startServer(o: {
               reportError(hub, 'comments', new Error('stale session'));
               break;
             }
-            try {
-              broadcastComments(store.merge(manager.info().id, msg.items));
-            } catch (e) {
-              reportError(hub, 'comments', e); // nothing stored, nothing broadcast; the socket stays up
+            {
+              const id = manager.info().id;
+              let prev: Comment[];
+              let merged: Comment[];
+              try {
+                prev = store.get(id);
+                merged = store.merge(id, msg.items);
+                broadcastComments(merged);
+              } catch (e) {
+                reportError(hub, 'comments', e); // nothing stored, nothing broadcast; the socket stays up
+                break;
+              }
+              try {
+                marks.sync(prev, merged); // a deleted media comment takes its frame/layer files along
+              } catch (e) {
+                reportError(hub, 'marks', e); // the merge stands
+              }
             }
             break;
           case 'mode':

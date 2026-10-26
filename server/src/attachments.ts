@@ -71,7 +71,7 @@ function plain(res: ServerResponse, status: number, body: string, headers: Recor
 }
 
 /** Reads the body, stopping as soon as more than `max` bytes have arrived (null = too large). */
-function readCapped(req: IncomingMessage, max: number): Promise<Buffer | null> {
+export function readCapped(req: IncomingMessage, max: number): Promise<Buffer | null> {
   return new Promise((resolve, reject) => {
     const declared = Number(req.headers['content-length']);
     if (Number.isFinite(declared) && declared > max) return resolve(null);
@@ -99,6 +99,13 @@ function readCapped(req: IncomingMessage, max: number): Promise<Buffer | null> {
   });
 }
 
+/** 413 after readCapped gave up: nothing is buffered any more; drain the rest briefly, then drop the connection only if the body is still unfinished (no `connection: close`: it resets the client mid-upload before it can read the 413) */
+export function refuseTooLarge(req: IncomingMessage, res: ServerResponse, body: string): void {
+  req.resume();
+  setTimeout(() => { if (!req.complete) req.destroy(); }, 2000).unref();
+  plain(res, 413, body);
+}
+
 export function attachmentRoutes(store: AttachmentStore, hub?: EventHub): Record<string, RequestListener> {
   const fail = (req: IncomingMessage, res: ServerResponse, e: unknown) => {
     if (hub) reportError(hub, req.url ?? '/attach', e);
@@ -114,12 +121,7 @@ export function attachmentRoutes(store: AttachmentStore, hub?: EventHub): Record
       void (async () => {
         try {
           const bytes = await readCapped(req, MAX_ATTACHMENT_BYTES);
-          if (bytes === null) {
-            // nothing is buffered any more; drain the rest briefly, then drop the connection only if the body is still unfinished (no `connection: close`: it resets the client mid-upload before it can read the 413)
-            req.resume();
-            setTimeout(() => { if (!req.complete) req.destroy(); }, 2000).unref();
-            return plain(res, 413, 'attachment too large');
-          }
+          if (bytes === null) return refuseTooLarge(req, res, 'attachment too large');
           const id = store.put(bytes, type);
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ id, mediaType: type }));

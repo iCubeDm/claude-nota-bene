@@ -155,7 +155,8 @@ export function fileRoutes(o: {
     fs.promises.stat(abs).then(
       (st) => {
         if (!st.isFile()) return plain(res, 404, 'not found');
-        const head = { 'content-type': typeOf(abs), 'accept-ranges': 'bytes', ...SAFETY };
+        // weak: size + mtime is a version, not a content hash (the media markup records it, R3)
+        const head = { 'content-type': typeOf(abs), 'accept-ranges': 'bytes', etag: `W/"${st.size}-${st.mtimeMs}"`, ...SAFETY };
         const range = parseRange(req.headers.range, st.size);
         if (range === 'unsatisfiable') {
           res.writeHead(416, { 'content-range': `bytes */${st.size}` });
