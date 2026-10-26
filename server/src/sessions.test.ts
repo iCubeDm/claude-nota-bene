@@ -13,6 +13,22 @@ const jsonl = (project: string, id: string, body: string) => {
   fs.writeFileSync(path.join(dir, project, `${id}.jsonl`), body);
 };
 
+describe('listSessionsView cwd', () => {
+  it('normalises every cwd with the native realpath, keeping the raw value when it does not exist', async () => {
+    const real = fs.realpathSync(dir);
+    const link = path.join(real, 'link');
+    fs.symlinkSync(real, link);
+    const backend = {
+      listSessions: async () => [
+        { sessionId: 'a', cwd: link, lastModified: 1, fileSize: 1 },
+        { sessionId: 'b', cwd: '/nb-no-such-dir/x', lastModified: 2, fileSize: 1 },
+      ],
+    } as never;
+    const view = await listSessionsView({ backend, current: null, root: real, projectsDir: dir });
+    expect(view.sessions.map((s) => s.cwd)).toEqual([real, '/nb-no-such-dir/x']);
+  });
+});
+
 describe('titleOf', () => {
   it('skips a slash command and returns the summary', () => {
     expect(titleOf({ customTitle: '/clear', summary: 'Fix the parser', firstPrompt: 'hi' })).toBe('Fix the parser');

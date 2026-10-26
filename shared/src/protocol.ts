@@ -66,7 +66,9 @@ export type ServerEvent =
   | { kind: 'mode'; mode: Mode }
   /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */
   | { kind: 'resumed'; id: string }
-  | { kind: 'server-error'; where: string; message: string };
+  | { kind: 'server-error'; where: string; message: string }
+  /** to the asking socket only, never stored: a `send` the server did not take (the web side clears its pending state) */
+  | { kind: 'send-refused'; id: string; reason: 'busy' | 'switching' };
 
 type Obj = Record<string, unknown>;
 

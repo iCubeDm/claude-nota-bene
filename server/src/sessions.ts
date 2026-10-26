@@ -85,6 +85,15 @@ export type SessionsView = {
   sessions: { id: string; title: string; at: number; size: number; cwd: string }[];
 };
 
+/** The native realpath (case, firmlinks, symlinks), the raw value when it cannot be resolved. */
+function realOr(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
 /** GET /sessions: every project's sessions; the ones without a cwd are dropped (they cannot be resumed in the right folder). */
 export async function listSessionsView(o: {
   backend: Pick<AgentBackend, 'listSessions'>;
@@ -97,7 +106,7 @@ export async function listSessionsView(o: {
   for (const x of list) {
     const cwd = x.cwd || cwdOf(x.sessionId, o.projectsDir);
     if (!cwd) continue;
-    sessions.push({ id: x.sessionId, title: titleOf(x) ?? '', at: x.lastModified, size: x.fileSize ?? 0, cwd });
+    sessions.push({ id: x.sessionId, title: titleOf(x) ?? '', at: x.lastModified, size: x.fileSize ?? 0, cwd: realOr(cwd) });
   }
   return { current: o.current, root: o.root, sessions };
 }

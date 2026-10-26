@@ -153,7 +153,7 @@ describe('compact and clear', () => {
     await until(() => results(a).length === 2);
   });
 
-  it('busy ends after a /clear that sends no result', async () => {
+  it('busy ends after a /clear', async () => {
     const s = await boot();
     const a = await connect(s.url);
     a.send({ type: 'command', name: 'clear' });

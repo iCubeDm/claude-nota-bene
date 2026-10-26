@@ -146,6 +146,7 @@ export async function startServer(o: {
 
     wss.on('connection', (ws) => {
       const detach = hub.attach({ send: (d) => ws.send(d) });
+      manager.clientAttached();
       try {
         ws.send(JSON.stringify({ kind: 'comments', items: currentComments() }));
       } catch (e) {
@@ -172,8 +173,9 @@ export async function startServer(o: {
         switch (msg.type) {
           case 'send':
             if (manager.switching()) {
-              // before markSent: a refused send must not flip its comments to sent
-              reportError(hub, 'busy', new Error('the session is switching; the message was not sent'));
+              // before markSent: a refused send must not flip its comments to sent. Only the asking socket hears
+              // of it (not stored, not broadcast)
+              ws.send(JSON.stringify({ kind: 'send-refused', id: msg.id, reason: 'switching' }));
               break;
             }
             if (msg.commentIds?.length) {

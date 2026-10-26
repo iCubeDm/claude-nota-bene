@@ -27,8 +27,11 @@ export class SwitchError extends Error {
   }
 }
 
+class TimeoutError extends Error {}
+
 export type SessionManager = {
-  send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): void;
+  /** Returns 'switching' for a send refused during a switch (nothing sent or emitted; the server tells the asking socket), else null. */
+  send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): 'switching' | null;
   interrupt(): void;
   answer(permissionId: string, allow: boolean): void;
   mode(): Mode;
@@ -61,6 +64,8 @@ export type SessionManager = {
   fileSuggestions(query: string): Promise<string[]>;
   /** Context, plan limits and cost as last measured (what a new socket gets). */
   stats(): Stats;
+  /** A socket attached: the stats catch up when the skipped 5-minute ticks left them stale. */
+  clientAttached(): void;
   /** Stops the stats timers and closes the agent. Idempotent. */
   close(): void;
   /** Called whenever the session id changes to a real id (first init, or a different id after resume/restart). */
@@ -77,6 +82,7 @@ const isReset = (f: Msg) => f.type === 'conversation_reset' || (f.type === 'syst
 const SESSION_ID = /^[0-9a-f-]{36}$/i;
 const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after close() must not hold the switch
 const INTERRUPT_TIMEOUT_MS = 2000; // a busy restart's interrupt; a stuck CLI must not hold the restart
+const HISTORY_TIMEOUT_MS = 20_000; // a transcript read that hangs must not hold `switching`
 const TITLE_THROTTLE_MS = 10_000;
 const TITLE_TIMEOUT_MS = 5000;
 
@@ -96,6 +102,8 @@ export async function createSessionManager(o: {
   closeTimeoutMs?: number;
   /** how long a busy restart waits for its interrupt (tests shorten it) */
   interruptTimeoutMs?: number;
+  /** how long a switch waits for the transcript read (tests shorten it) */
+  historyTimeoutMs?: number;
 }): Promise<SessionManager> {
   const { hub, backend } = o;
   const attachments = o.attachments ?? new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
@@ -117,6 +125,10 @@ export async function createSessionManager(o: {
   // when that is no longer current, so nothing of the old session reaches the new one's sockets.
   let gen = 0;
   let switching = false;
+  // a /clear command was sent (its reset not seen yet) / its reset was seen (its result not seen yet). The real CLI
+  // follows the reset with a result; it is live only, so a reload never shows a stray "done 0s" after the clear
+  let clearSent = false;
+  let clearResultDue = false;
   let closed = false; // close() is final: a switch that ends after it must not start an agent
   let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
   const pending = new Map<string, (allow: boolean) => void>();
@@ -126,6 +138,7 @@ export async function createSessionManager(o: {
   const stats = new StatsService({
     session: () => agent,
     emit: (s) => hub.emit({ kind: 'stats', stats: s }, { store: false }),
+    hasClients: () => hub.clients() > 0,
     onError: (e) => reportError(hub, 'stats', e),
   });
   const idListeners: ((id: string, prev: string | null) => void)[] = [];
@@ -160,7 +173,8 @@ export async function createSessionManager(o: {
           onReset(m, f);
           continue;
         }
-        hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) });
+        hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) }, f.type === 'result' && clearResultDue ? { store: false } : {});
+        if (f.type === 'result') clearResultDue = false;
         stats.onSdk(m);
         const { type, subtype, session_id, permissionMode } = f;
         // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
@@ -193,7 +207,9 @@ export async function createSessionManager(o: {
    * never adopts the unsent set. The reset frame itself is live only: the web renders its line from it.
    */
   function onReset(m: SDKMessage, f: Msg & { new_conversation_id?: unknown }): void {
-    waiting.clear(); // the CLI answers a /clear with no result
+    waiting.clear(); // the CLI's result for a /clear follows the reset; waiting must not depend on it
+    clearResultDue = clearSent;
+    clearSent = false;
     hub.reset();
     lastSession = '';
     title = null;
@@ -325,10 +341,25 @@ export async function createSessionManager(o: {
     lastSession = ''; // the history that held the last one is gone: always announce
     if (id) {
       let history: ServerEvent[] = [];
+      let timer: NodeJS.Timeout | undefined;
       try {
-        history = await backend.history(id, root, attachments, (e) => reportError(hub, 'attach', e));
+        const read = backend.history(id, root, attachments, (e) => reportError(hub, 'attach', e));
+        read.catch(() => {}); // a read that loses the race may still reject later: no news
+        history = await Promise.race([
+          read,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new TimeoutError('transcript read timed out')), o.historyTimeoutMs ?? HISTORY_TIMEOUT_MS);
+          }),
+        ]);
       } catch (e) {
-        reportError(hub, 'history', e); // an unreadable transcript must not stop the server: start with an empty feed
+        if (e instanceof TimeoutError) {
+          reportError(hub, 'switch', e); // the client ends its "switching" state on a switch error
+          history = [];
+        } else {
+          reportError(hub, 'history', e); // an unreadable transcript must not stop the server: start with an empty feed
+        }
+      } finally {
+        clearTimeout(timer);
       }
       hub.reset(history);
       hub.emit({ kind: 'resumed', id });
@@ -414,6 +445,7 @@ export async function createSessionManager(o: {
       titleTimer = null;
       titleAt = -Infinity;
       waiting.clear();
+      clearSent = clearResultDue = false;
       chain = Promise.resolve();
       // 2. the new session's state
       const same = id === sessionId && real === realOr(root);
@@ -453,10 +485,8 @@ export async function createSessionManager(o: {
 
   return {
     send({ id, text, force, images }) {
-      if (switching) {
-        reportError(hub, 'busy', new Error('the session is switching; the message was not sent'));
-        return;
-      }
+      if (switching) return 'switching';
+      clearSent = clearResultDue = false; // a real turn follows: its result is a normal one
       ensureAgent();
       // resolve refs first: an unknown id is reported, the text and the other images still go out
       const refs: ImageRef[] = [];
@@ -489,6 +519,7 @@ export async function createSessionManager(o: {
           emitErrorResult(e, id); // the user event is already out: answer it or the feed waits forever
         }
       });
+      return null;
     },
     command(name) {
       if (switching || waiting.size > 0 || pending.size > 0) {
@@ -502,6 +533,8 @@ export async function createSessionManager(o: {
         const a = ensureAgent();
         hub.emit({ kind: 'user', id, text }); // before the agent sees it, as in the prototype
         waiting.add(id);
+        clearSent = name === 'clear';
+        clearResultDue = false;
         a.send({ uuid: id, text, priority: 'next' });
       } catch (e) {
         if (g !== gen) return;
@@ -548,6 +581,7 @@ export async function createSessionManager(o: {
     },
     fileSuggestions: (query) => (agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
     stats: () => stats.current(),
+    clientAttached: () => stats.onAttach(),
     close() {
       closed = true;
       gen++;

@@ -229,6 +229,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'comments': // handled by the comments store, not the feed
     case 'stats': // handled by the stats store (M4)
     case 'mode':
+    case 'send-refused': // handled in M5-08 (the web side of the refusal)
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
     default: {

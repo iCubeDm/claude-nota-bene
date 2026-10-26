@@ -187,13 +187,17 @@ class FakeSession implements AgentSession {
       });
       return;
     }
-    // /clear: a new conversation, announced by its reset and an init; the CLI sends no result for it
+    // /clear: a new conversation, announced by its reset and an init, then a result, as the real CLI does
     this.sessionId = randomUUID();
     yield sdk({
       type: 'conversation_reset', new_conversation_id: this.sessionId, session_id: this.sessionId, uuid: `fake-cr-${n}`,
       trigger: 'clear', user_message_uuid: sendUuid,
     });
     yield sdk({ type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}` });
+    yield sdk({
+      type: 'result', subtype: 'success', session_id: this.sessionId, uuid: `fake-r-${n}`, duration_ms: 0, is_error: false,
+      result: '', terminal_reason: 'completed', queued_turn_count: 0, user_message_uuid: sendUuid, user_message_uuids: [sendUuid],
+    });
   }
 
   private async *turn(t: FakeTurn, sendUuid: string): AsyncGenerator<SDKMessage> {
