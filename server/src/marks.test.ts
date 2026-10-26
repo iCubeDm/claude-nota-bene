@@ -3,7 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Comment } from '@nota-bene/shared';
 import { MARK_MAX_BYTES } from '@nota-bene/shared';
 import { EventHub } from './hub.ts';
@@ -139,6 +139,46 @@ describe('MarkFiles', () => {
     expect(fs.readdirSync(out)).toEqual(['keep']);
   });
 
+  it('.gitignore is atomic: a failed write leaves none (the next write creates it), and no tmp is left', () => {
+    const m = new MarkFiles({ root: () => root });
+    const real = fs.writeFileSync;
+    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation((...a: Parameters<typeof fs.writeFileSync>) => {
+      if (String(a[0]).includes('.gitignore.tmp')) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      return real(...a);
+    });
+    try {
+      expect(() => m.write(ID, 'frame.jpg', JPEG)).toThrow('disk full');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(fs.readdirSync(path.join(root, '.nota-bene'))).toEqual([]);
+    m.write(ID, 'frame.jpg', JPEG);
+    expect(fs.readFileSync(path.join(root, '.nota-bene', '.gitignore'), 'utf8')).toBe('*\n');
+    expect(fs.readdirSync(path.join(root, '.nota-bene')).sort()).toEqual(['.gitignore', 'marks']);
+  });
+
+  it('a .gitignore symlink is never followed', () => {
+    const out = path.join(dir, 'target');
+    fs.mkdirSync(path.join(root, '.nota-bene'));
+    fs.symlinkSync(out, path.join(root, '.nota-bene', '.gitignore'));
+    new MarkFiles({ root: () => root }).write(ID, 'frame.jpg', JPEG);
+    expect(fs.existsSync(out)).toBe(false);
+  });
+
+  it('refuses when the project\'s .nota-bene is the state folder (root = $HOME)', () => {
+    const state = path.join(root, '.nota-bene');
+    fs.mkdirSync(state);
+    fs.writeFileSync(path.join(state, 'sessions.json'), '{}');
+    const m = new MarkFiles({ root: () => root, stateDir: () => state });
+    expect(() => m.write(ID, 'frame.jpg', JPEG)).toThrow(/state folder/);
+    expect(fs.readdirSync(state)).toEqual(['sessions.json']);
+    fs.mkdirSync(path.join(state, 'marks', ID), { recursive: true });
+    expect(() => m.remove(ID)).toThrow(/state folder/);
+    expect(fs.existsSync(path.join(state, 'marks', ID))).toBe(true);
+    // a state folder elsewhere is fine
+    new MarkFiles({ root: () => root, stateDir: () => path.join(dir, 'state') }).remove(ID);
+  });
+
   it('reads the root per call', () => {
     let r = root;
     const m = new MarkFiles({ root: () => r });
@@ -154,13 +194,15 @@ describe('MarkFiles', () => {
 describe('mark routes', () => {
   let server: http.Server;
   let base: string;
+  let sentIds: Set<string>;
   beforeEach(async () => {
+    sentIds = new Set();
     const hosts: string[] = [];
     const origins: string[] = [];
     const hub = new EventHub();
     server = http.createServer(httpHandler({
       hub, webDist: dir, info: () => ({}), allowedHosts: hosts, allowedOrigins: origins,
-      extra: markRoutes(new MarkFiles({ root: () => root }), hub),
+      extra: markRoutes(new MarkFiles({ root: () => root }), hub, { isSent: (id) => sentIds.has(id) }),
     }));
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
     const port = (server.address() as AddressInfo).port;
@@ -206,11 +248,25 @@ describe('mark routes', () => {
     expect((await post(`/marks/${ID}/frame.jpg`, big, 'image/jpeg')).status).toBe(413);
   });
 
-  it('a symlinked .nota-bene gives 500 and nothing outside', async () => {
+  it('a symlinked .nota-bene gives 500 with a fixed body (no paths) and nothing outside', async () => {
     const out = path.join(dir, 'outside');
     fs.mkdirSync(out);
     fs.symlinkSync(out, path.join(root, '.nota-bene'));
-    expect((await post(`/marks/${ID}/frame.jpg`, JPEG, 'image/jpeg')).status).toBe(500);
+    const r = await post(`/marks/${ID}/frame.jpg`, JPEG, 'image/jpeg');
+    expect(r.status).toBe(500);
+    expect(await r.text()).toBe('cannot write mark');
     expect(fs.readdirSync(out)).toEqual([]);
+    const d = await fetch(`${base}/marks/${ID}`, { method: 'DELETE', headers: { origin: base } });
+    expect(d.status).toBe(500);
+    expect(await d.text()).toBe('cannot remove mark');
+  });
+
+  it('a sent comment keeps its files: DELETE and POST answer 409', async () => {
+    expect((await post(`/marks/${ID}/frame.jpg`, JPEG, 'image/jpeg')).status).toBe(204);
+    sentIds.add(ID);
+    const d = await fetch(`${base}/marks/${ID}`, { method: 'DELETE', headers: { origin: base } });
+    expect(d.status).toBe(409);
+    expect((await post(`/marks/${ID}/frame.jpg`, Buffer.concat([JPEG, Buffer.from([7])]), 'image/jpeg')).status).toBe(409);
+    expect(fs.readFileSync(path.join(marksDir(), ID, 'frame.jpg'))).toEqual(JPEG);
   });
 });

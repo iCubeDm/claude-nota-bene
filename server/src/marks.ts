@@ -57,11 +57,45 @@ function realDir(p: string): boolean {
   return true;
 }
 
+/**
+ * `.nota-bene/.gitignore` = "*\n", only when missing; the user's own root .gitignore is never touched. Atomic: the
+ * content goes to a tmp file first and is hard-linked into place, so a failed write never leaves an empty .gitignore
+ * (which would make the marks trackable), and link's EEXIST keeps it once-only, never through a symlink.
+ */
+function writeGitignore(nb: string): void {
+  const file = path.join(nb, '.gitignore');
+  const tmp = path.join(nb, `.gitignore.tmp${process.pid}-${Math.random().toString(36).slice(2)}`);
+  try {
+    fs.writeFileSync(tmp, '*\n', { flag: 'wx' });
+    fs.linkSync(tmp, file);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
 export class MarkFiles {
   private readonly root: () => string;
+  private readonly stateDir: (() => string) | undefined;
 
-  constructor(o: { root: () => string }) {
+  /** `stateDir`: the server's own state folder; a project whose `.nota-bene` IS it (root = $HOME) is refused. */
+  constructor(o: { root: () => string; stateDir?: () => string }) {
     this.root = o.root;
+    this.stateDir = o.stateDir;
+  }
+
+  /** Throws when the (existing, real) `.nota-bene` folder is the server's state folder. */
+  private notStateDir(nb: string): void {
+    if (!this.stateDir) return;
+    let state: string;
+    try {
+      state = fs.realpathSync(this.stateDir());
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw e;
+    }
+    if (fs.realpathSync(nb) === state) throw new Error(`the project's .nota-bene is the state folder: ${nb}`);
   }
 
   /** Writes `frame.jpg` | `layer.png` for comment `id` (creates `.nota-bene/.gitignore` = "*\n" if missing). Throws on a bad id/name/type, a symlinked dir, or bytes > MARK_MAX_BYTES. */
@@ -77,12 +111,8 @@ export class MarkFiles {
     if (!fs.statSync(root).isDirectory()) throw new Error(`project root is not a directory: ${root}`);
     const nb = path.join(root, '.nota-bene');
     ensureDir(nb);
-    try {
-      // 'wx': only if missing, and never through a symlink (O_EXCL); the user's own .gitignore is never touched
-      fs.writeFileSync(path.join(nb, '.gitignore'), '*\n', { flag: 'wx' });
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    }
+    this.notStateDir(nb);
+    writeGitignore(nb);
     const marks = path.join(nb, 'marks');
     ensureDir(marks);
     const dir = path.join(marks, id);
@@ -110,7 +140,9 @@ export class MarkFiles {
     const marks = path.join(nb, 'marks');
     const dir = path.join(marks, id);
     // every level is lstat-ed: a symlinked .nota-bene or marks must not make us delete elsewhere
-    if (!realDir(nb) || !realDir(marks) || !realDir(dir)) return;
+    if (!realDir(nb)) return;
+    this.notStateDir(nb);
+    if (!realDir(marks) || !realDir(dir)) return;
     fs.rmSync(dir, { recursive: true, force: true }); // rm -r unlinks symlinks inside, never follows them
   }
 
@@ -141,13 +173,20 @@ function plain(res: ServerResponse, status: number, body: string, headers: Recor
  * both 204. Host and Origin are checked by httpHandler (any non-GET needs an allowed Origin). The path is not decoded:
  * an encoded id fails MARK_ID.
  */
-export function markRoutes(marks: MarkFiles, hub?: EventHub): Record<string, RequestListener> {
-  const fail = (req: IncomingMessage, res: ServerResponse, e: unknown) => {
+export function markRoutes(
+  marks: MarkFiles,
+  hub?: EventHub,
+  o: { isSent?: (id: string) => boolean } = {},
+): Record<string, RequestListener> {
+  // the details (absolute paths) go to the log and the toast, never into the response body
+  const fail = (res: ServerResponse, e: unknown, body: string) => {
     if (e instanceof MarkError) return plain(res, e.status, e.message);
     if (hub) reportError(hub, '/marks', e);
-    if (!res.headersSent) plain(res, 500, e instanceof Error ? e.message : String(e));
+    if (!res.headersSent) plain(res, 500, body);
     else res.destroy();
   };
+  /** A sent comment keeps its files (as in CommentStore.merge): a late cancel or upload must not change them. */
+  const sent = (id: string): boolean => o.isSent?.(id) ?? false;
   return {
     // http.ts matches this key by prefix
     '/marks/': (req, res) => {
@@ -157,9 +196,10 @@ export function markRoutes(marks: MarkFiles, hub?: EventHub): Record<string, Req
         if (req.method !== 'DELETE') return plain(res, 405, 'method not allowed', { allow: 'DELETE' });
         if (!MARK_ID.test(id!)) return plain(res, 404, 'not found');
         try {
+          if (sent(id!)) return plain(res, 409, 'the comment is sent');
           marks.remove(id!);
         } catch (e) {
-          return fail(req, res, e);
+          return fail(res, e, 'cannot remove mark');
         }
         res.writeHead(204);
         res.end();
@@ -174,11 +214,13 @@ export function markRoutes(marks: MarkFiles, hub?: EventHub): Record<string, Req
         try {
           const bytes = await readCapped(req, MARK_MAX_BYTES);
           if (bytes === null) return refuseTooLarge(req, res, 'mark too large');
+          // checked after the body: the send may land while it uploads
+          if (sent(id!)) return plain(res, 409, 'the comment is sent');
           marks.write(id!, name, bytes);
           res.writeHead(204);
           res.end();
         } catch (e) {
-          fail(req, res, e);
+          fail(res, e, 'cannot write mark');
         }
       })();
     },

@@ -83,7 +83,7 @@ export async function startServer(o: {
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
     const root = () => manager.info().root;
-    const marks = new MarkFiles({ root });
+    const marks = new MarkFiles({ root, stateDir });
     const sessionsRoute: http.RequestListener = (req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         res.writeHead(405, { allow: 'GET, HEAD', 'content-type': 'text/plain; charset=utf-8' });
@@ -110,7 +110,9 @@ export async function startServer(o: {
       extra: {
         ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
         ...attachmentRoutes(attachments, hub),
-        ...markRoutes(marks, hub),
+        ...markRoutes(marks, hub, {
+          isSent: (id) => store.get(manager.info().id).some((c) => c.id === id && c.status === 'sent'),
+        }),
         '/sessions': sessionsRoute,
         '/restart-server': (req, res) => {
           if (req.method !== 'POST') {

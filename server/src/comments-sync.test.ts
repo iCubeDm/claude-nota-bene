@@ -244,3 +244,33 @@ describe('mark files follow their comment', () => {
     expect(fs.existsSync(path.join(out, 'marks', A))).toBe(true); // never followed the symlink
   });
 });
+
+describe('sent comments keep their mark files', () => {
+  it('a SENT media comment omitted from an incoming set keeps its folder, and DELETE /marks answers 409 for it', async () => {
+    const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-csync-proj-')));
+    closers.push(async () => fs.rmSync(proj, { recursive: true, force: true }));
+    const A = '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab'; // sent
+    const B = '1f8b2c4e-1a2b-4c3d-9e8f-0123456789ab'; // pending
+    const media = (id: string, extra: Partial<Comment> = {}) => c(id, {
+      anchor: { kind: 'media', source: { kind: 'file', path: 'a.png' }, width: 4, height: 4, shapes: [{ kind: 'rect', color: '#ff3b30', x: 0, y: 0, w: 1, h: 1 }] },
+      ...extra,
+    } as Partial<Comment>);
+    store().set('sess-m', [media(A, { status: 'sent', sentIn: 'u0' }), media(B)]);
+    for (const id of [A, B]) {
+      fs.mkdirSync(path.join(proj, '.nota-bene', 'marks', id), { recursive: true });
+      fs.writeFileSync(path.join(proj, '.nota-bene', 'marks', id, 'frame.jpg'), 'x');
+    }
+    const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, resume: 'sess-m' });
+    closers.push(s.close);
+    const cl = await connect(s.url);
+    await until(() => lastComments(cl)?.length === 2);
+    cl.ws.send(JSON.stringify({ type: 'comments', sessionId: 'sess-m', items: [] }));
+    await until(() => !fs.existsSync(path.join(proj, '.nota-bene', 'marks', B))); // the pending one goes
+    expect(lastComments(cl)!.map((x) => [x.id, x.status])).toEqual([[A, 'sent']]);
+    expect(fs.existsSync(path.join(proj, '.nota-bene', 'marks', A, 'frame.jpg'))).toBe(true);
+    const origin = s.url.replace(/\/$/, '');
+    const d = await fetch(`${origin}/marks/${A}`, { method: 'DELETE', headers: { origin } });
+    expect(d.status).toBe(409);
+    expect(fs.existsSync(path.join(proj, '.nota-bene', 'marks', A, 'frame.jpg'))).toBe(true);
+  });
+});
