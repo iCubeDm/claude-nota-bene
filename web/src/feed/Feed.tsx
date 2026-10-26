@@ -3,7 +3,7 @@ import { useT } from '@/i18n/index.ts';
 import { refClick } from '@/refs/refs.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { Markdown } from './Markdown.tsx';
-import { CompactingLine, DoneLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
+import { CompactingLine, DoneLine, IdleCompactLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
 import { PlanCard } from './PlanCard.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
 import { ToolLine } from './ToolLine.tsx';
@@ -50,7 +50,7 @@ export function Feed() {
       {items.map((it, i) => {
         switch (it.kind) {
           case 'user':
-            return <UserMessage key={it.id} item={it} />;
+            return it.idle ? <IdleCompactLine key={it.id} item={it} /> : <UserMessage key={it.id} item={it} />;
           case 'assistant':
             return (
               <div key={it.id} data-kind="assistant" data-item-id={it.id} data-final={String(it.final)} className="my-2.5">

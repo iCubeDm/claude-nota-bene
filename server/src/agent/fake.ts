@@ -30,6 +30,8 @@ export type FakeTurn = {
   compactPreTokens?: number;
   /** how long a `/compact` runs between its `status: compacting` and `status: null` frames (first turn that sets it; default 0) */
   compactMs?: number;
+  /** a `/compact` fails: status null with compact_result failed and this error, no boundary (first turn that sets it) */
+  compactError?: string;
   /** runs for a prompt containing this text, whatever turn the sequence is at, and does not use up the sequence */
   match?: string;
   /** raw SDK frames sent right after init (session_id is filled in); `{ sleepMs }` only waits (the turn stays busy) */
@@ -184,8 +186,12 @@ class FakeSession implements AgentSession {
       yield sdk({ type: 'system', subtype: 'status', status: 'compacting', session_id: this.sessionId, uuid: `fake-cs-${n}` });
       if (ms > 0) await new Promise((r) => setTimeout(r, ms));
       if (this.closed) return;
-      yield sdk({ type: 'system', subtype: 'status', status: null, compact_result: 'success', session_id: this.sessionId, uuid: `fake-ce-${n}` });
+      const error = this.turns.find((t) => t.compactError !== undefined)?.compactError;
       yield sdk({
+        type: 'system', subtype: 'status', status: null, compact_result: error === undefined ? 'success' : 'failed',
+        ...(error === undefined ? {} : { compact_error: error }), session_id: this.sessionId, uuid: `fake-ce-${n}`,
+      });
+      if (error === undefined) yield sdk({
         type: 'system', subtype: 'compact_boundary', session_id: this.sessionId, uuid: `fake-cb-${n}`,
         compact_metadata: {
           trigger: 'manual', pre_tokens: this.turns.find((t) => t.compactPreTokens !== undefined)?.compactPreTokens ?? 12000,

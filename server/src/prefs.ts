@@ -4,7 +4,8 @@ import { MODES } from '@nota-bene/shared';
 import type { Mode } from '@nota-bene/shared';
 import { stateDir } from './state.ts';
 
-export type Prefs = { modes: Record<string, Mode>; lang?: 'ru' | 'en' };
+/** `idleCompact[root]`: idle compaction per project dir; absent = on (the default) */
+export type Prefs = { modes: Record<string, Mode>; lang?: 'ru' | 'en'; idleCompact: Record<string, boolean> };
 
 const isMode = (v: unknown): v is Mode => (MODES as readonly unknown[]).includes(v);
 let reported = false; // a broken file is reported once per process, not on every read
@@ -28,15 +29,18 @@ export function readPrefs(): Prefs {
   try {
     raw = fs.readFileSync(file(), 'utf8');
   } catch {
-    return { modes: {} };
+    return { modes: {}, idleCompact: {} };
   }
   try {
     const data: unknown = JSON.parse(raw);
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('prefs.json is not an object');
-    const { modes, lang } = data as { modes?: unknown; lang?: unknown };
-    const out: Prefs = { modes: {} };
+    const { modes, lang, idleCompact } = data as { modes?: unknown; lang?: unknown; idleCompact?: unknown };
+    const out: Prefs = { modes: {}, idleCompact: {} };
     if (modes && typeof modes === 'object' && !Array.isArray(modes)) {
       for (const [k, v] of Object.entries(modes)) if (isMode(v)) out.modes[k] = v;
+    }
+    if (idleCompact && typeof idleCompact === 'object' && !Array.isArray(idleCompact)) {
+      for (const [k, v] of Object.entries(idleCompact)) if (typeof v === 'boolean') out.idleCompact[k] = v;
     }
     if (lang === 'ru' || lang === 'en') out.lang = lang;
     return out;
@@ -45,7 +49,7 @@ export function readPrefs(): Prefs {
       reported = true;
       console.error('[prefs] ignoring unreadable prefs.json:', e);
     }
-    return { modes: {} };
+    return { modes: {}, idleCompact: {} };
   }
 }
 
@@ -81,6 +85,14 @@ export function setModePref(dir: string, mode: Mode): void {
   const tmp = `${f}.tmp${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(raw, null, 2));
   fs.renameSync(tmp, f);
+}
+
+export function setIdleCompactPref(dir: string, on: boolean): void {
+  updateRawPrefs((raw) => {
+    const m = raw.idleCompact && typeof raw.idleCompact === 'object' && !Array.isArray(raw.idleCompact) ? (raw.idleCompact as Record<string, unknown>) : {};
+    m[prefsKey(dir)] = on;
+    raw.idleCompact = m;
+  });
 }
 
 /** Read-modify-write of the raw prefs object: unknown keys survive. Atomic like setModePref. */

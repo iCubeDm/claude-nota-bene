@@ -12,6 +12,7 @@ import { EventHub } from './hub.ts';
 import { complete, fileRoutes } from './fileRoutes.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
 import { SwitchError, createSessionManager } from './session.ts';
+import type { IdleConfig } from './idle.ts';
 import { listSessionsView } from './sessions.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
@@ -41,6 +42,9 @@ export async function startServer(o: {
   exit?: (code: number) => void;
   webDist: string;
   allowedOrigins?: string[];
+  /** idle compaction timing and the settings.json check (tests shorten / stub them) */
+  idle?: IdleConfig;
+  idleOffInSettings?: () => boolean;
 }): Promise<{ url: string; close(): Promise<void> }> {
   const hub = new EventHub();
   installProcessHandlers();
@@ -54,6 +58,8 @@ export async function startServer(o: {
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
       ...(o.resume && o.fork ? { fork: true } : {}),
+      ...(o.idle ? { idle: o.idle } : {}),
+      ...(o.idleOffInSettings ? { idleOffInSettings: o.idleOffInSettings } : {}),
     });
     const store = new CommentStore({ dir: path.join(stateDir(), 'comments') });
     // comments are live state, not history: never stored in the replay, a new socket gets the set directly
@@ -158,6 +164,11 @@ export async function startServer(o: {
         reportError(hub, 'mode', e);
       }
       try {
+        ws.send(JSON.stringify({ kind: 'idle-compact', state: manager.idleCompact() }));
+      } catch (e) {
+        reportError(hub, 'idle-compact', e);
+      }
+      try {
         ws.send(JSON.stringify({ kind: 'stats', stats: manager.stats() }));
       } catch (e) {
         reportError(hub, 'stats', e);
@@ -216,6 +227,12 @@ export async function startServer(o: {
             break;
           case 'switch':
             manager.switch({ id: msg.id, dir: msg.dir }).catch(switchFailed);
+            break;
+          case 'activity':
+            manager.activity();
+            break;
+          case 'idle-compact':
+            manager.setIdleCompact(msg.on);
             break;
           case 'restart':
             manager.restart().catch(switchFailed);

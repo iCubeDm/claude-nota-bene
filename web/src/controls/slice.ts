@@ -1,5 +1,5 @@
 import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
-import { MODES, type Mode } from '@nota-bene/shared';
+import { MODES, type IdleCompact, type Mode } from '@nota-bene/shared';
 import { t } from '../i18n/index.ts';
 import { toast } from '../shell/toast.ts';
 import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
@@ -16,10 +16,12 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
   suggestion: string;
   /** the session last announced, to tell a real change from the server's title refresh (same id, new title) */
   seen: { id: string | null; root: string } | null;
+  /** idle compaction of this project, as the server last said (null until it has) */
+  idleCompact: IdleCompact | null;
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, restarting: false, suggestion: '', seen: null };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, restarting: false, suggestion: '', seen: null, idleCompact: null };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -29,6 +31,8 @@ function setMode(s: ControlsState, m: Mode): void {
 
 /** Local, optimistic mode change: no message is sent from here (see pickMode). */
 const modeSet = createAction<Mode>('controls/modeSet');
+/** Local, optimistic idle-compaction toggle (see toggleIdleCompact). */
+const idleCompactSet = createAction<boolean>('controls/idleCompactSet');
 
 export const controlsSlice = createSlice({
   name: 'controls',
@@ -43,9 +47,11 @@ export const controlsSlice = createSlice({
   },
   extraReducers: (b) => {
     b.addCase(modeSet, (s, a) => setMode(s, a.payload));
+    b.addCase(idleCompactSet, (s, a) => void (s.idleCompact && (s.idleCompact.on = a.payload)));
     b.addCase(serverEvent, (s, a) => {
       const ev = a.payload;
       if (ev.kind === 'mode') setMode(s, ev.mode);
+      if (ev.kind === 'idle-compact') s.idleCompact = ev.state;
       // stale once the conversation moves on: a user turn (live or replayed), a reset, a replay, another session
       if (ev.kind === 'replay') { s.modeBeforePlan = null; s.restoreAfterPlan = null; } // plan-restore belongs to one conversation
       if (ev.kind === 'user' || ev.kind === 'replay') s.suggestion = '';
@@ -90,6 +96,26 @@ export const pickMode = (mode: Mode): AppThunk => (dispatch, getState, { send })
   dispatch(modeSet(mode));
   send({ type: 'mode', mode });
 };
+
+export const selectIdleCompact = (s: RootState): IdleCompact | null => s.controls.idleCompact;
+
+/** Optimistic, like pickMode; the server's echo (to every socket) confirms it. Off while Claude Code's settings block it. */
+export const toggleIdleCompact = (): AppThunk => (dispatch, getState, { send }) => {
+  const st = getState().controls.idleCompact;
+  if (!st || st.blocked) return;
+  dispatch(idleCompactSet(!st.on));
+  send({ type: 'idle-compact', on: !st.on });
+};
+
+export const ACTIVITY_THROTTLE_MS = 30_000;
+let lastActivity = -Infinity;
+/** The user touched the UI: tell the server at most once per ACTIVITY_THROTTLE_MS (the idle clock is minutes). */
+export const reportActivity = (now = Date.now()): AppThunk => (_d, _g, { send }) => {
+  if (now - lastActivity < ACTIVITY_THROTTLE_MS) return;
+  if (send({ type: 'activity' })) lastActivity = now;
+};
+/** tests */
+export const resetActivityThrottle = (): void => void (lastActivity = -Infinity);
 
 export const nextMode = (m: Mode): Mode => MODES[(MODES.indexOf(m) + 1) % MODES.length];
 

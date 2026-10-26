@@ -136,7 +136,7 @@ describe('switch', () => {
     await until(() => switched(c, SB));
 
     const after = c.events.slice(mark).filter((e) => e.kind !== 'server-error');
-    expect(after.map((e) => e.kind)).toEqual(['replay', 'replay', 'resumed', 'session', 'mode', 'stats', 'comments']);
+    expect(after.map((e) => e.kind)).toEqual(['replay', 'replay', 'resumed', 'session', 'mode', 'idle-compact', 'stats', 'comments']);
     expect(after[0]).toEqual({ kind: 'replay', events: [] });
     const replay = after[1] as Extract<ServerEvent, { kind: 'replay' }>;
     expect(replay.events.map((e) => (e.kind === 'user' ? e.text : e.kind))).toEqual(['b-before', 'sdk']);

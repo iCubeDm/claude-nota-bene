@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { fmtK } from '@/lib/format.ts';
 import { useT } from '@/i18n/index.ts';
 import type { FeedItem } from '@/store/feed.ts';
+import { useAppSelector } from '@/store/store.ts';
+import { selectIdleCompact } from '@/controls/slice.ts';
 import { compactProgress, expectedCompactMs, mmss } from './compactTiming.ts';
 import { timeOf } from './UserMessage.tsx';
 
@@ -36,6 +38,17 @@ export function MarkerLine({ item }: { item: Extract<FeedItem, { kind: 'marker' 
       {item.what === 'compacted' ? t('compacted', fmtK(item.pre ?? 0), at, item.ms ? mmss(item.ms) : '')
         : item.what === 'compactFailed' ? t('compactFailed', item.error ?? '', at)
         : t('cleared', at)}
+    </div>
+  );
+}
+
+/** The server's own /compact after a quiet stretch: a line, never a bubble the user did not write. */
+export function IdleCompactLine({ item }: { item: Extract<FeedItem, { kind: 'user' }> }) {
+  const t = useT();
+  const idle = useAppSelector(selectIdleCompact);
+  return (
+    <div data-kind="idle-compact" data-item-id={item.id} className={LINE}>
+      {t('idleLine', idle ? String(idle.minutes) : '', item.ts === 0 ? '' : timeOf(item.ts))}
     </div>
   );
 }

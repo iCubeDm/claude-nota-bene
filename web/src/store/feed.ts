@@ -1,7 +1,8 @@
 import type { ImageRef, ServerEvent } from '@nota-bene/shared';
 
 export type FeedItem =
-  | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean; images?: ImageRef[] }
+  /** idle: the server's own /compact after a quiet stretch, shown as a line, not as the user's message */
+  | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean; images?: ImageRef[]; idle?: boolean }
   | { kind: 'assistant'; id: string; text: string; final: boolean } // `${uuid}:${blockIndex}`; while streaming `stream:${n}`
   | {
       kind: 'tool'; id: string; name: string; arg: string; sub: boolean;
@@ -231,6 +232,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
         kind: 'user', id: ev.id, text: ev.text, ts: ev.ts,
         ...(ev.force ? { force: true } : {}),
         ...(ev.images?.length ? { images: ev.images } : {}),
+        ...(ev.idle ? { idle: true } : {}),
         ...(!ev.historic && s.busy ? { duringWork: true } : {}),
       };
       return {
@@ -256,6 +258,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'comments': // handled by the comments store, not the feed
     case 'stats': // handled by the stats store (M4)
     case 'mode':
+    case 'idle-compact': // the controls slice
     case 'send-refused': // composer/refused.ts: restores the draft, never the feed
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
