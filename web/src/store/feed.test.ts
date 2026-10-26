@@ -263,6 +263,37 @@ test('compact_boundary adds a compacted line, live or replayed', () => {
   expect(reduce(emptyFeed, { kind: 'replay', events: [cb] }).items).toEqual(want);
 });
 
+const status = (status: string | null, extra: Record<string, unknown> = {}, ts = 1) => sdk({ type: 'system', subtype: 'status', status, ...extra }, ts);
+
+test('a compaction shows while it runs: status compacting to status null, then the boundary with its duration', () => {
+  const running = fold([status('compacting', {}, 20)]);
+  expect(running.compacting).toBe(20);
+  expect(running.items).toEqual([]);
+  const ended = fold([
+    status(null, { compact_result: 'success' }, 80),
+    sdk({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 900000, duration_ms: 61000 } }, 80),
+  ], running);
+  expect(ended.compacting).toBeNull();
+  expect(ended.items).toEqual([{ kind: 'marker', what: 'compacted', pre: 900000, ms: 61000, ts: 80 }]);
+});
+
+test('a reload mid-compaction keeps its start time; a failed one leaves its error line', () => {
+  const replayed = reduce(emptyFeed, { kind: 'replay', events: [user(), status('compacting', {}, 20)] });
+  expect(replayed.compacting).toBe(20);
+  const failed = reduce(replayed, status(null, { compact_result: 'failed', compact_error: 'prompt too long' }, 30));
+  expect(failed.compacting).toBeNull();
+  expect(failed.items.at(-1)).toEqual({ kind: 'marker', what: 'compactFailed', error: 'prompt too long', ts: 30 });
+});
+
+test('other status frames leave the compaction alone; a result or a clear ends a stuck one', () => {
+  const running = fold([status('compacting', {}, 20)]);
+  expect(reduce(running, status('requesting')).compacting).toBe(20);
+  expect(reduce(running, status(null, { permissionMode: 'plan' })).compacting).toBeNull();
+  expect(reduce(emptyFeed, status(null, { compact_result: 'failed' })).items).toEqual([]); // no compaction was shown
+  expect(reduce(running, result()).compacting).toBeNull();
+  expect(reduce(running, sdk({ type: 'conversation_reset', new_conversation_id: 'n' })).compacting).toBeNull();
+});
+
 test('the live result that follows a clear adds no done line; one after a new message does', () => {
   const s0 = fold([user(), result()]);
   const cleared = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7), result({ duration_ms: 0 })], s0);

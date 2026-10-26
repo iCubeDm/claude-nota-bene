@@ -49,12 +49,24 @@ export type ClientMessage =
   | { type: 'command'; name: 'compact' | 'clear' }
   /** id null = a new session in dir; dir is absolute */
   | { type: 'switch'; id: string | null; dir: string }
-  | { type: 'restart' };
+  | { type: 'restart' }
+  /** the user touched the UI (throttled by the client): the idle-compaction clock starts again */
+  | { type: 'activity' }
+  /** idle compaction on or off for this project */
+  | { type: 'idle-compact'; on: boolean };
+
+/**
+ * Idle compaction of this window's project. `on` is the project's setting; `blocked`: `"idleCompaction": false` in the
+ * user's Claude Code settings.json keeps it off whatever `on` says.
+ */
+/** `minutes` after the last turn, if the window saw no activity for `awayMinutes` */
+export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; awayMinutes: number; minTokens: number };
 
 export type ServerEvent =
   | { kind: 'replay'; events: ServerEvent[] }
   | { kind: 'sdk'; m: SDKMessage; ts: number }
-  | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; historic?: boolean; images?: ImageRef[] }
+  /** `idle`: a `/compact` the server sent itself after the session sat idle */
+  | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; historic?: boolean; images?: ImageRef[]; idle?: boolean }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; ts: number }
   | { kind: 'permission-done'; id: string; allow: boolean; ts: number }
   /** full comment set; never stored in history, so no ts */
@@ -64,6 +76,8 @@ export type ServerEvent =
   | { kind: 'stats'; stats: Stats }
   /** never stored in history */
   | { kind: 'mode'; mode: Mode }
+  /** never stored in history */
+  | { kind: 'idle-compact'; state: IdleCompact }
   /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */
   | { kind: 'resumed'; id: string }
   | { kind: 'server-error'; where: string; message: string }
@@ -195,6 +209,11 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
       return { type: 'switch', id: m.id, dir: m.dir };
     case 'restart':
       return { type: 'restart' };
+    case 'activity':
+      return { type: 'activity' };
+    case 'idle-compact':
+      if (typeof m.on !== 'boolean') return { error: 'idle-compact needs boolean on' };
+      return { type: 'idle-compact', on: m.on };
     default:
       return { error: `unknown message type: ${String(m.type)}` };
   }

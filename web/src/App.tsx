@@ -11,6 +11,7 @@ import { SelectionButton, type PendingSelection } from './comments/SelectionButt
 import { FileTree } from './files/FileTree.tsx';
 import { Feed } from './feed/Feed.tsx';
 import { Footer } from './shell/Footer.tsx';
+import { useActivity } from './controls/useActivity.ts';
 import { Panes } from './tabs/Panes.tsx';
 import { TabStrip } from './tabs/TabStrip.tsx';
 import { Header } from './shell/Header.tsx';
@@ -20,6 +21,7 @@ import { useFavicon } from './shell/Favicon.ts';
 export function App() {
   const dispatch = useAppDispatch();
   useFavicon();
+  useActivity();
   const sendPanel = useCallback(() => void dispatch(sendBatch(false)), [dispatch]);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const close = useCallback(() => setPending(null), []);

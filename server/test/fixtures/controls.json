@@ -11,7 +11,7 @@
     }
   ],
   "turns": [
-    { "text": "plain reply", "suggestions": ["notes.md"] },
+    { "text": "plain reply", "compactMs": 1500, "suggestions": ["notes.md"] },
     { "match": "[plan]", "text": "Here is the plan.", "ask": { "toolName": "ExitPlanMode", "input": { "plan": "## The plan\n\nStep one: rename bravo.\n\nStep two: run the tests.\n" }, "onAllow": "default" } },
     { "match": "[initmode]", "text": "the CLI changed the mode", "initMode": "acceptEdits" },
     { "match": "[warn]", "text": "context is filling", "context": { "used": 130000, "max": 200000, "pct": 65 } },

@@ -2,14 +2,15 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MODES } from '@nota-bene/shared';
-import type { ImageRef, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { IdleCompact, ImageRef, Mode, ServerEvent, Stats } from '@nota-bene/shared';
 import { AttachmentStore } from './attachments.ts';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './agent/types.ts';
 import { stripUserFrameImages } from './agent/transcript.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
-import { prefsKey, readPrefs, setModePref } from './prefs.ts';
+import { IdleCompactor, idleConfig, offInClaudeSettings, type IdleConfig } from './idle.ts';
+import { prefsKey, readPrefs, setIdleCompactPref, setModePref } from './prefs.ts';
 import { cwdOf, titleOf } from './sessions.ts';
 import { saveSession, stateDir } from './state.ts';
 import { StatsService } from './stats.ts';
@@ -58,6 +59,11 @@ export type SessionManager = {
    * (reported as `busy`) while the agent is busy or the session is switching (R-M4-4).
    */
   command(name: 'compact' | 'clear'): void;
+  /** The UI was used (any socket): the idle-compaction clock starts again. */
+  activity(): void;
+  idleCompact(): IdleCompact;
+  /** Persists for this project and announces it to every socket. */
+  setIdleCompact(on: boolean): void;
   /** Called at the end of a switch, after the session, mode and stats events (the server sends the comments there). */
   onSwitch(cb: (id: string | null, o: { restart: boolean }) => void): void;
   /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
@@ -104,6 +110,10 @@ export async function createSessionManager(o: {
   interruptTimeoutMs?: number;
   /** how long a switch waits for the transcript read (tests shorten it) */
   historyTimeoutMs?: number;
+  /** idle compaction timing (tests shorten it); default from the env, see idle.ts */
+  idle?: IdleConfig;
+  /** `"idleCompaction": false` in Claude Code's settings (tests stub it) */
+  idleOffInSettings?: () => boolean;
 }): Promise<SessionManager> {
   const { hub, backend } = o;
   const attachments = o.attachments ?? new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
@@ -141,6 +151,26 @@ export async function createSessionManager(o: {
     hasClients: () => hub.clients() > 0,
     onError: (e) => reportError(hub, 'stats', e),
   });
+  const idleCfg = o.idle ?? idleConfig();
+  const idleBlocked = o.idleOffInSettings ?? offInClaudeSettings;
+  const idleState = (): IdleCompact => ({
+    on: readPrefs().idleCompact[prefsKey(root)] ?? true,
+    blocked: idleBlocked(),
+    minutes: Math.round(idleCfg.afterMs / 60_000),
+    awayMinutes: Math.round(idleCfg.awayMs / 60_000),
+    minTokens: idleCfg.minTokens,
+  });
+  const idle = new IdleCompactor({
+    config: idleCfg,
+    enabled: () => { const st = idleState(); return st.on && !st.blocked; },
+    // no agent (it died): starting one only to compact, with nobody watching, is not ours to do
+    busy: () => switching || closed || agent === null || waiting.size > 0 || pending.size > 0,
+    contextUsed: () => stats.current().context?.used ?? null,
+    compact: () => runCommand('compact', true),
+    onFire: (why) => { if (why !== 'active' && why !== 'off') console.log(`[idle] ${why}`); }, // the retries would flood the log
+  });
+  let compactedInTurn = false;
+  const commandIds = new Set<string>(); // /compact and /clear sends whose result has not come yet
   const idListeners: ((id: string, prev: string | null) => void)[] = [];
   const switchListeners: ((id: string | null, o: { restart: boolean }) => void)[] = [];
 
@@ -192,7 +222,18 @@ export async function createSessionManager(o: {
           emitSession();
           if (session_id) heardId(session_id);
         }
-        if (type === 'result') scheduleTitle();
+        // any compaction (manual, auto, idle) disarms; the turn that compacted (a /compact's own result too) does not
+        // arm again: the next one waits for a turn after it
+        if (type === 'system' && subtype === 'compact_boundary') { compactedInTurn = true; idle.disarm(); }
+        if (type === 'result') {
+          scheduleTitle();
+          // a command's result (a /compact that failed or was stopped, a /clear) never arms: a failed idle compaction
+          // would otherwise retry every idle stretch, keeping its own cache warm forever
+          const ids = Array.isArray(f.user_message_uuids) ? f.user_message_uuids : typeof f.user_message_uuid === 'string' ? [f.user_message_uuid] : [];
+          const ofCommand = ids.some((x) => commandIds.delete(x as string));
+          if (!compactedInTurn && !ofCommand) idle.turnEnded();
+          compactedInTurn = false;
+        }
       }
       if (current()) died(a, new Error('agent session ended'));
     } catch (e) {
@@ -433,6 +474,9 @@ export async function createSessionManager(o: {
       tornDown = true;
       // 1. stop everything of the old session; nothing it does later may reach the hub (gen)
       stats.stop();
+      idle.disarm(); // the new session gets compacted only after a turn of its own
+      compactedInTurn = false;
+      commandIds.clear();
       gen++;
       const old = agent;
       const oldLoop = loop;
@@ -465,6 +509,7 @@ export async function createSessionManager(o: {
       // 3. the feed, the header, the mode, the stats; the comments come from the onSwitch listeners
       await load(id);
       hub.emit({ kind: 'mode', mode }, { store: false });
+      hub.emit({ kind: 'idle-compact', state: idleState() }, { store: false }); // a per-project setting: the root may have changed
       hub.emit({ kind: 'stats', stats: stats.current() }, { store: false });
       for (const cb of switchListeners) {
         try { cb(id, { restart: same }); } catch (e) { reportError(hub, 'switch', e); }
@@ -479,6 +524,32 @@ export async function createSessionManager(o: {
     }
   }
 
+  /** `idle`: the server's own /compact after a quiet stretch (the feed shows it as such, not as the user's). */
+  function runCommand(name: 'compact' | 'clear', isIdle: boolean): void {
+    if (switching || waiting.size > 0 || pending.size > 0) {
+      if (isIdle) return; // nobody asked: no toast
+      reportError(hub, 'busy', new Error(switching ? 'the session is switching; the command was not sent' : 'the agent is busy; the command was not sent'));
+      return;
+    }
+    if (!isIdle) idle.touch();
+    const id = randomUUID();
+    const text = `/${name}`;
+    const g = gen;
+    try {
+      const a = ensureAgent();
+      hub.emit({ kind: 'user', id, text, ...(isIdle ? { idle: true } : {}) }); // before the agent sees it, as in the prototype
+      waiting.add(id);
+      commandIds.add(id);
+      clearSent = name === 'clear';
+      clearResultDue = false;
+      a.send({ uuid: id, text, priority: 'next' });
+    } catch (e) {
+      if (g !== gen) return;
+      reportError(hub, 'send', e);
+      emitErrorResult(e, id);
+    }
+  }
+
   await load(sessionId);
   ensureAgent();
   stats.start();
@@ -487,6 +558,7 @@ export async function createSessionManager(o: {
     send({ id, text, force, images }) {
       if (switching) return 'switching';
       clearSent = clearResultDue = false; // a real turn follows: its result is a normal one
+      idle.touch();
       ensureAgent();
       // resolve refs first: an unknown id is reported, the text and the other images still go out
       const refs: ImageRef[] = [];
@@ -522,25 +594,7 @@ export async function createSessionManager(o: {
       return null;
     },
     command(name) {
-      if (switching || waiting.size > 0 || pending.size > 0) {
-        reportError(hub, 'busy', new Error(switching ? 'the session is switching; the command was not sent' : 'the agent is busy; the command was not sent'));
-        return;
-      }
-      const id = randomUUID();
-      const text = `/${name}`;
-      const g = gen;
-      try {
-        const a = ensureAgent();
-        hub.emit({ kind: 'user', id, text }); // before the agent sees it, as in the prototype
-        waiting.add(id);
-        clearSent = name === 'clear';
-        clearResultDue = false;
-        a.send({ uuid: id, text, priority: 'next' });
-      } catch (e) {
-        if (g !== gen) return;
-        reportError(hub, 'send', e);
-        emitErrorResult(e, id);
-      }
+      runCommand(name, false);
     },
     interrupt() {
       const g = gen;
@@ -576,6 +630,16 @@ export async function createSessionManager(o: {
     switching: () => switching,
     switch: ({ id, dir }) => switchTo(id, dir, false),
     restart: () => switchTo(sessionId, root, true),
+    activity: () => idle.touch(),
+    idleCompact: idleState,
+    setIdleCompact(on) {
+      try {
+        setIdleCompactPref(root, on);
+      } catch (e) {
+        reportError(hub, 'prefs', e);
+      }
+      hub.emit({ kind: 'idle-compact', state: idleState() }, { store: false });
+    },
     onSwitch(cb) {
       switchListeners.push(cb);
     },
@@ -586,6 +650,7 @@ export async function createSessionManager(o: {
       closed = true;
       gen++;
       stats.stop();
+      idle.stop();
       if (titleTimer) clearTimeout(titleTimer);
       titleTimer = null;
       const a = agent;

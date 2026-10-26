@@ -110,3 +110,9 @@ test('permission keeps an optional input object', () => {
   expect(P({ type: 'permission', id: 'p', allow: true, input: 'x' })).toHaveProperty('error');
   expect(P({ type: 'permission', id: 'p', allow: true, input: [1] })).toHaveProperty('error');
 });
+
+test('activity and idle-compact (only a boolean on; extra keys dropped)', () => {
+  expect(parseClientMessage('{"type":"activity","x":1}')).toEqual({ type: 'activity' });
+  expect(parseClientMessage('{"type":"idle-compact","on":false,"x":1}')).toEqual({ type: 'idle-compact', on: false });
+  expect(parseClientMessage('{"type":"idle-compact","on":"no"}')).toHaveProperty('error');
+});

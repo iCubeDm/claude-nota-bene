@@ -163,3 +163,89 @@ describe('compact and clear', () => {
     expect(errors(a)).toEqual([]);
   });
 });
+
+describe('idle compaction', () => {
+  const idle = { afterMs: 150, awayMs: 100, retryMs: 30, cacheMs: 400, minTokens: 100_000 };
+  const big = { text: 'hello', context: { used: 500_000, max: 1_000_000, pct: 50 } };
+  async function bootIdle(turns: FakeTurn[], off = false) {
+    const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend(turns), webDist: dist, idle, idleOffInSettings: () => off });
+    closers.push(s.close);
+    return s;
+  }
+  const idleUsers = (cl: Client) => cl.events.filter((e) => e.kind === 'user' && e.idle === true);
+  const states = (cl: Client) => cl.events.flatMap((e) => (e.kind === 'idle-compact' ? [e.state] : []));
+
+  it('a quiet session with a big context is compacted once, shown as the server\'s own /compact', async () => {
+    const s = await bootIdle([big]);
+    const a = await connect(s.url);
+    await until(() => states(a).length === 1);
+    expect(states(a)[0]).toEqual({ on: true, blocked: false, minutes: 0, awayMinutes: 0, minTokens: 100_000 });
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => results(a).length === 1);
+    await until(() => idleUsers(a).length === 1);
+    expect(idleUsers(a)[0]).toMatchObject({ text: '/compact', idle: true });
+    await until(() => results(a).length === 2);
+    expect(a.events.some((e) => sdkType(e)?.subtype === 'compact_boundary')).toBe(true);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(idleUsers(a)).toHaveLength(1); // the compaction disarmed it; its own result does not count as a quiet turn
+    expect(errors(a)).toEqual([]);
+  });
+
+  it('activity until the cache runs out holds it off; turned off for the project it never runs, and the setting is announced and kept', async () => {
+    const s = await bootIdle([big]);
+    const a = await connect(s.url);
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => results(a).length === 1);
+    for (let i = 0; i < 9; i++) { await new Promise((r) => setTimeout(r, 50)); a.send({ type: 'activity' }); }
+    expect(idleUsers(a)).toHaveLength(0);
+    a.send({ type: 'idle-compact', on: false });
+    await until(() => states(a).some((x) => !x.on));
+    await new Promise((r) => setTimeout(r, 400));
+    expect(idleUsers(a)).toHaveLength(0);
+    const late = await connect(s.url);
+    await until(() => states(late).length === 1);
+    expect(states(late)[0]!.on).toBe(false);
+  });
+
+  it('blocked by Claude Code settings: announced as blocked and never runs', async () => {
+    const s = await bootIdle([big], true);
+    const a = await connect(s.url);
+    await until(() => states(a).length === 1);
+    expect(states(a)[0]).toMatchObject({ on: true, blocked: true });
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => results(a).length === 1);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(idleUsers(a)).toHaveLength(0);
+  });
+
+  it('a failed idle compaction is not retried at every quiet stretch (its result does not arm)', async () => {
+    const s = await bootIdle([{ ...big, compactError: 'overloaded' }]);
+    const a = await connect(s.url);
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => idleUsers(a).length === 1);
+    await until(() => results(a).length === 2);
+    expect(a.events.some((e) => sdkType(e)?.subtype === 'compact_boundary')).toBe(false);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(idleUsers(a)).toHaveLength(1);
+  });
+
+  it('a manual /compact or /clear result does not arm it either', async () => {
+    const s = await bootIdle([{ ...big, compactError: 'nope' }]);
+    const a = await connect(s.url);
+    a.send({ type: 'command', name: 'compact' });
+    await until(() => results(a).length === 1);
+    a.send({ type: 'command', name: 'clear' });
+    await until(() => results(a).length === 2);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(idleUsers(a)).toHaveLength(0);
+  });
+
+  it('a small context is left alone', async () => {
+    const s = await bootIdle([{ text: 'hello', context: { used: 5000, max: 1_000_000, pct: 1 } }]);
+    const a = await connect(s.url);
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => results(a).length === 1);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(idleUsers(a)).toHaveLength(0);
+  });
+});
