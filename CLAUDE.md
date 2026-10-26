@@ -14,7 +14,7 @@ The root also holds **local, uncommitted symlinks** (`server.mjs`, `public`, `id
 
 Node >= 23.6 (the server runs `.ts` directly). From the repo root:
 
-- `npm run dev` — server on 4780 (`node --watch`, with `--allow-origin http://localhost:5173`) + Vite on 5173 (proxies `/info` and `/ws` to the server). Open http://localhost:5173.
+- `npm run dev` — server on 4780 (`node --watch`, with `--allow-origin http://localhost:5173`) + Vite on 5173 (proxies `/info` and `/ws` to the server). Open http://localhost:5173. Dev has its own state dir, `~/.nota-bene-dev` (set `NOTA_BENE_HOME` to override; the prototype import is off), so experiments never touch the working `~/.nota-bene`; the server logs `state: <dir>` at startup.
 - `npm test` — unit tests (vitest, ports are 0 / random).
 - `npm run e2e` — Playwright, ports 4791-4795. The `files` project uses `ffmpeg` on PATH to generate its media fixtures at startup; without it the media tests are skipped with a message (`NB_E2E_FFMPEG=0` forces that path).
 - `npm start [-- <dir> --port N --resume ID --continue]` — builds `web/dist`, then serves app + API from the server (default port 4777; project = the directory you ran npm from, or the `<dir>` argument, relative to it).

@@ -6,7 +6,7 @@ import { sdkBackend } from './agent/sdk.ts';
 import { importPrototypeStateSafely } from './migrate.ts';
 import { startServer } from './server.ts';
 import { transcriptExists } from './sessions.ts';
-import { lastSession } from './state.ts';
+import { lastSession, stateDir } from './state.ts';
 
 const USAGE =
   'Usage: node server/src/main.ts [dir] [--port N] [--resume ID [--fork]] [--new] [--continue] [--fake script.json] [--allow-origin URL]';
@@ -71,6 +71,11 @@ export function invocationCwd(env: NodeJS.ProcessEnv, cwd: string): string {
   return env.INIT_CWD || cwd;
 }
 
+/** The startup log line that says which state dir this server uses (dev mode has its own). */
+export function stateLine(): string {
+  return `state: ${stateDir()}`;
+}
+
 /** Exit code for a failed listen (port taken): the launcher retries its first start on another port. */
 export const LISTEN_FAILED = 98;
 
@@ -104,6 +109,7 @@ async function main(): Promise<void> {
   }
   const { url, close } = started;
   console.log(`Nota Bene: ${url}  project: ${args.dir}`);
+  console.log(stateLine());
   const stop = () => {
     close().then(
       () => process.exit(0),

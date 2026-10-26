@@ -16,7 +16,7 @@
   "scripts": {
     "test": "vitest run",
     "e2e": "playwright test -c e2e/playwright.config.ts",
-    "dev": "concurrently --kill-others-on-fail \"node --watch server/src/main.ts --port 4780 --allow-origin http://localhost:5173\" \"vite web\"",
+    "dev": "node scripts/dev.mjs",
     "start": "npm run build -w web && node server/src/main.ts"
   },
   "devDependencies": {

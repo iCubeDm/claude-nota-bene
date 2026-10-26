@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { invocationCwd, launchTarget, parseArgs } from './main.ts';
+import { invocationCwd, launchTarget, parseArgs, stateLine } from './main.ts';
 import { saveSession } from './state.ts';
 
 const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-main-')));
@@ -96,5 +96,11 @@ describe('invocationCwd', () => {
   it('prefers npm INIT_CWD, else cwd', () => {
     expect(invocationCwd({ INIT_CWD: '/x' }, '/y')).toBe('/x');
     expect(invocationCwd({}, '/y')).toBe('/y');
+  });
+});
+
+describe('stateLine', () => {
+  it('names the state dir taken from NOTA_BENE_HOME', () => {
+    expect(stateLine()).toBe(`state: ${home}`);
   });
 });
