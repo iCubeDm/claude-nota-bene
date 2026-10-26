@@ -10,6 +10,8 @@ import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
  */
 export type SwitchPhase = 'asked' | 'committed';
 export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; restoreAfterPlan: Mode | null; switching: SwitchPhase | null;
+  /** ids of the `mode` messages this window sent that the server has not acked yet, oldest first */
+  modeInFlight: string[];
   /** the running "switch" is a ↻ restart (same phases and end; only the header label differs) */
   restarting: boolean;
   /** the SDK's predicted next prompt; ghost text in an empty, idle composer. Cleared by anything that moves the conversation on. */
@@ -21,7 +23,7 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, restarting: false, suggestion: '', seen: null, idleCompact: null };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -31,6 +33,8 @@ function setMode(s: ControlsState, m: Mode): void {
 
 /** Local, optimistic mode change: no message is sent from here (see pickMode). */
 const modeSet = createAction<Mode>('controls/modeSet');
+/** the optimistic mode went out to the server: its ack is now expected */
+const modeSent = createAction<string>('controls/modeSent');
 /** Local, optimistic idle-compaction toggle (see toggleIdleCompact). */
 const idleCompactSet = createAction<boolean>('controls/idleCompactSet');
 
@@ -47,13 +51,26 @@ export const controlsSlice = createSlice({
   },
   extraReducers: (b) => {
     b.addCase(modeSet, (s, a) => setMode(s, a.payload));
+    b.addCase(modeSent, (s, a) => void s.modeInFlight.push(a.payload));
     b.addCase(idleCompactSet, (s, a) => void (s.idleCompact && (s.idleCompact.on = a.payload)));
     b.addCase(serverEvent, (s, a) => {
       const ev = a.payload;
-      if (ev.kind === 'mode') setMode(s, ev.mode);
+      if (ev.kind === 'mode') {
+        // Two quick Shift+Tabs: the echo of the first lands after the second was shown, and applying it would put the
+        // pill (and the next Shift+Tab's starting point) one mode back. So while our own changes are in flight, echoes
+        // only acknowledge: the ack of the LAST one shows the server's mode then (also a refused change, or one the
+        // CLI made meanwhile, since the server answers in order). Every `mode` gets its ack, and a replay (reconnect,
+        // session switch) drops what is in flight, so nothing waits forever.
+        if (s.modeInFlight.length === 0) setMode(s, ev.mode);
+        else if (ev.ack !== undefined && s.modeInFlight.includes(ev.ack)) {
+          s.modeInFlight = s.modeInFlight.slice(s.modeInFlight.indexOf(ev.ack) + 1);
+          if (s.modeInFlight.length === 0) setMode(s, ev.mode);
+        }
+      }
       if (ev.kind === 'idle-compact') s.idleCompact = ev.state;
       // stale once the conversation moves on: a user turn (live or replayed), a reset, a replay, another session
-      if (ev.kind === 'replay') { s.modeBeforePlan = null; s.restoreAfterPlan = null; } // plan-restore belongs to one conversation
+      // plan-restore belongs to one conversation; a reconnect may have lost the sends still in flight
+      if (ev.kind === 'replay') { s.modeBeforePlan = null; s.restoreAfterPlan = null; s.modeInFlight = []; }
       if (ev.kind === 'user' || ev.kind === 'replay') s.suggestion = '';
       else if (ev.kind === 'session') {
         // the server re-announces after every result (title refresh): only a different id or root is a new session
@@ -88,13 +105,14 @@ export const selectSuggestion = (s: RootState): string => s.controls.suggestion;
 export const selectSwitching = (s: RootState): boolean => s.controls.switching !== null;
 export const selectRestarting = (s: RootState): boolean => s.controls.restarting;
 
-/** Optimistic: set locally, then send. The server echo sets the same value again and never sends (reducers cannot). */
+/** Optimistic: set locally, then send. The server answers every `mode` with one echo (to every socket). */
 export const pickMode = (mode: Mode): AppThunk => (dispatch, getState, { send }) => {
   const c = getState().controls;
   // mid-switch the server ignores it and announces the new session's mode: an optimistic pill would lie
   if (c.mode === mode || c.switching) return;
   dispatch(modeSet(mode));
-  send({ type: 'mode', mode });
+  const id = crypto.randomUUID();
+  if (send({ type: 'mode', mode, id })) dispatch(modeSent(id));
 };
 
 export const selectIdleCompact = (s: RootState): IdleCompact | null => s.controls.idleCompact;

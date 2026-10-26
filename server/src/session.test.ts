@@ -621,12 +621,19 @@ describe('permission mode', () => {
   }
   const status = (permissionMode: string) => ({ type: 'system', subtype: 'status', permissionMode });
 
-  it('a status frame that beats the control response gives one emit', async () => {
+  it('a status frame that beats the control response: the CLI\'s emit, then the answer with the ack', async () => {
     const { events, make } = setup(manual(async (push) => { push(status('plan')); await new Promise((r) => setTimeout(r, 20)); }));
     const s = await make();
-    await s.setMode('plan');
-    expect(modeEvents(events)).toEqual(['plan']);
+    await s.setMode('plan', 'm1');
+    expect(events.filter((e) => e.kind === 'mode')).toEqual([{ kind: 'mode', mode: 'plan' }, { kind: 'mode', mode: 'plan', ack: 'm1' }]);
     expect(readPrefs().modes[prefsKey('/proj')]).toBe('plan');
+  });
+
+  it('every mode request is answered once with its ack, a refused one too', async () => {
+    const { events, make } = setup(manual(async () => { throw new Error('nope'); }));
+    const s = await make();
+    await s.setMode('plan', 'm2');
+    expect(events.filter((e) => e.kind === 'mode').at(-1)).toEqual({ kind: 'mode', mode: 'auto', ack: 'm2' });
   });
 
   it('the echo of our own change (same mode in a later status) gives one emit', async () => {

@@ -72,7 +72,7 @@ it('an open list takes Shift+Tab like the @ picker (no mode cycle); once closed 
   expect(sent.filter((m) => m.type === 'mode')).toEqual([]);
   expect(box.value).toMatch(/^\p{Extended_Pictographic}/u);
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
-  expect(sent.filter((m) => m.type === 'mode')).toEqual([{ type: 'mode', mode: 'default' }]);
+  expect(sent.filter((m) => m.type === 'mode')).toEqual([{ type: 'mode', mode: 'default', id: expect.any(String) }]);
 });
 
 it('only one list at a time: ":smi" after "@a" shows the emoji list, "@a" alone shows the mention list', async () => {

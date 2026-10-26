@@ -45,7 +45,8 @@ export type ClientMessage =
   | { type: 'interrupt' }
   /** `input` is ignored by the server (an allow always runs the original input); no client sends it. */
   | { type: 'permission'; id: string; allow: boolean; input?: Record<string, unknown> }
-  | { type: 'mode'; mode: Mode }
+  /** `id`: echoed back as the `mode` event's `ack`, so the sender can tell its own echo from the others */
+  | { type: 'mode'; mode: Mode; id?: string }
   | { type: 'command'; name: 'compact' | 'clear' }
   /** id null = a new session in dir; dir is absolute */
   | { type: 'switch'; id: string | null; dir: string }
@@ -75,7 +76,8 @@ export type ServerEvent =
   /** never stored in history */
   | { kind: 'stats'; stats: Stats }
   /** never stored in history */
-  | { kind: 'mode'; mode: Mode }
+  /** `ack`: the id of the `mode` message this answers (none when the mode changed otherwise) */
+  | { kind: 'mode'; mode: Mode; ack?: string }
   /** never stored in history */
   | { kind: 'idle-compact'; state: IdleCompact }
   /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */
@@ -199,7 +201,8 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
       };
     case 'mode':
       if (!isMode(m.mode)) return { error: `mode must be one of ${MODES.join(', ')}` };
-      return { type: 'mode', mode: m.mode };
+      if (m.id !== undefined && (typeof m.id !== 'string' || m.id.length > 64)) return { error: 'mode id must be a short string' };
+      return { type: 'mode', mode: m.mode, ...(m.id !== undefined && { id: m.id }) };
     case 'command':
       if (m.name !== 'compact' && m.name !== 'clear') return { error: 'command name must be compact or clear' };
       return { type: 'command', name: m.name };

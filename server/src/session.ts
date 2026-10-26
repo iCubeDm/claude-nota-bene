@@ -37,7 +37,8 @@ export type SessionManager = {
   answer(permissionId: string, allow: boolean): void;
   mode(): Mode;
   /** Asks the agent, then persists and announces; a refusal is reported and the current mode re-announced. */
-  setMode(mode: Mode): Promise<void>;
+  /** answers with one `mode` event carrying `ack: id` (unless a session switch takes over, which announces its own) */
+  setMode(mode: Mode, id?: string): Promise<void>;
   info(): { id: string | null; root: string; title: string | null; model: string | null };
   /** A send not yet answered by a result, a waiting permission, or a switch in progress (R-M4-4). */
   busy(): boolean;
@@ -604,26 +605,25 @@ export async function createSessionManager(o: {
       pending.get(permissionId)?.(allow);
     },
     mode: () => mode,
-    async setMode(next) {
-      if (switching) return; // the switch announces the new session's mode; the client's optimistic pill follows it
+    async setMode(next, id) {
+      // Every `mode` gets exactly one answer carrying its ack: the sender ignores the other echoes until it has it.
+      const answer = () => hub.emit({ kind: 'mode', mode, ...(id && { ack: id }) }, { store: false });
+      // mid-switch it is not applied: the answer says the mode as it stands, then the switch announces the new session's
+      if (switching) return answer();
       const g = gen;
       const dir = root;
       try {
         // no agent (it died): nothing to tell, the next one starts in this mode
         await agent?.setPermissionMode(next);
-        if (g !== gen) return;
-        // the CLI's own status frame may have got here first and already announced it
-        if (mode !== next) {
+        // a switch meanwhile: this was the old session's. The CLI's own status frame may have set it already
+        if (g === gen && mode !== next) {
           mode = next;
           setModePref(dir, next);
-          hub.emit({ kind: 'mode', mode }, { store: false });
         }
-        return;
       } catch (e) {
-        if (g !== gen) return;
-        reportError(hub, 'mode', e);
+        if (g === gen) reportError(hub, 'mode', e);
       }
-      hub.emit({ kind: 'mode', mode }, { store: false });
+      answer();
     },
     info: () => ({ id: sessionId, root, title, model }),
     busy: () => switching || waiting.size > 0 || pending.size > 0,

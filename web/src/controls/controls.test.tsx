@@ -32,9 +32,11 @@ function setup() {
     </Provider>,
   );
   const echo = (mode: Mode) => act(() => ev({ kind: 'mode', mode }));
-  return { sent, store, echo, box: screen.getByRole('textbox') as HTMLTextAreaElement };
+  return { sent, store, echo, ev: () => ev, box: screen.getByRole('textbox') as HTMLTextAreaElement };
 }
-const modes = (sent: ClientMessage[]) => sent.filter((m) => m.type === 'mode');
+const raw = (sent: ClientMessage[]) => sent.filter((m) => m.type === 'mode');
+/** the mode messages without their (random) ids */
+const modes = (sent: ClientMessage[]) => raw(sent).map((m) => ({ type: m.type, mode: (m as { mode: Mode }).mode }));
 
 it('Shift+Tab cycles auto to default and sends once', async () => {
   const { sent, echo, box, store } = setup();
@@ -172,4 +174,50 @@ it('a replay drops the plan-restore state: a later mode echo sends nothing', () 
   expect(store.getState().controls.modeBeforePlan).toBeNull();
   ev({ kind: 'mode', mode: 'default' });
   expect(modes(sent)).toEqual([]);
+});
+
+const echo0 = (ev: () => (e: ServerEvent) => void, mode: Mode) => act(() => ev()({ kind: 'mode', mode }));
+const ids = (sent: ClientMessage[]) => raw(sent).map((m) => (m as { id?: string }).id!);
+
+it('quick Shift+Tabs: a late echo of an earlier press neither moves the pill back nor skews the next press', async () => {
+  const { sent, ev, box, store } = setup();
+  echo0(ev, 'default');
+  box.focus();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}'); // acceptEdits
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}'); // plan
+  const [a1] = ids(sent);
+  act(() => ev()({ kind: 'mode', mode: 'acceptEdits', ack: a1 })); // the first press's answer, after the second was shown
+  expect(store.getState().controls.mode).toBe('plan');
+  act(() => ev()({ kind: 'mode', mode: 'acceptEdits' })); // the CLI's own status echo meanwhile: no ack, ignored
+  expect(store.getState().controls.mode).toBe('plan');
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}'); // counts on from plan
+  expect(modes(sent).map((m) => m.mode)).toEqual(['acceptEdits', 'plan', 'auto']);
+  const [, a2, a3] = ids(sent);
+  act(() => ev()({ kind: 'mode', mode: 'plan', ack: a2 }));
+  expect(store.getState().controls.mode).toBe('auto');
+  act(() => ev()({ kind: 'mode', mode: 'auto', ack: a3 }));
+  expect(store.getState().controls.mode).toBe('auto');
+  expect(store.getState().controls.modeInFlight).toEqual([]);
+  act(() => ev()({ kind: 'mode', mode: 'default' })); // nothing in flight: another window's change applies
+  expect(store.getState().controls.mode).toBe('default');
+});
+
+it('the ack of the last change shows the server\'s mode, also when it refused the change', async () => {
+  const { sent, ev, box, store } = setup();
+  echo0(ev, 'default');
+  box.focus();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  act(() => ev()({ kind: 'mode', mode: 'default', ack: ids(sent)[0] }));
+  expect(store.getState().controls.mode).toBe('default');
+  expect(store.getState().controls.modeInFlight).toEqual([]);
+});
+
+it('a replay drops the changes in flight, so the next echo applies', async () => {
+  const { ev, box, store } = setup();
+  echo0(ev, 'default');
+  box.focus();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  act(() => ev()({ kind: 'replay', events: [] }));
+  act(() => ev()({ kind: 'mode', mode: 'plan' }));
+  expect(store.getState().controls.mode).toBe('plan');
 });

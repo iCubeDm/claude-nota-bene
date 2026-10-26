@@ -212,7 +212,7 @@ export async function startServer(o: {
             }
             break;
           case 'mode':
-            void manager.setMode(msg.mode);
+            void manager.setMode(msg.mode, msg.id);
             break;
           case 'interrupt':
             manager.interrupt();
