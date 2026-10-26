@@ -253,3 +253,14 @@ Feature freeze on `prototype/` from M0's start, except for bug fixes.
   - PiP's "back to tab" never starts playback or PiP elsewhere: it only activates the video's own tab.
   - e2e: play A, open B, open C → exactly one video plays, no PiP, no repeated focus or selection events.
 - **Media rules confirmed by the user (2026-10-25, after M3):** all media are equal: opening any media tab pauses whatever else plays, background audio included. Media never autoplay on open (`preload=metadata`); playback starts only on the user's click.
+- **Idle compaction (shipped 2026-10-26).** The terminal CLI compacts a quiet 200k+ conversation before its 1 h prompt cache expires. Under the SDK it never does.
+  - Nota Bene does it on the server:
+    - 50 min after the last turn;
+    - only if the window saw no activity for 15 min;
+    - only for a context of 200k or more;
+    - only while the cache can still be warm (55 min).
+  - On by default. It can be switched off per project with the clock toggle next to ⇣.
+  - `"idleCompaction": false` in settings.json blocks it.
+- **Tool-wide journal (idea, 2026-10-26).** A Nota Bene journal of its own: what was done in each session, collected across all projects. It must not depend on the user's personal Obsidian setup, which is one person's workflow; other users set things up differently.
+  - Possible later use: give it to the agent after a compaction, so the summary loses less.
+  - Design it separately, with a brainstorm. It must not duplicate the CLAUDE.md or memory files a project already has.
