@@ -121,8 +121,12 @@ Rules:
   `<root>/.nota-bene/marks/`, only names it generates (`<commentId>` must match the comment-id format, file names are
   fixed), never a path from the client, and refuses a symlinked `.nota-bene` or `marks`. This gets an independent
   review, like the other persistence code.
-- **One copy.** At send time the server attaches these files to the agent message as images for the model to see;
-  they are not also stored in `~/.nota-bene/attachments/`. The batch names both files by their project-relative paths.
+- **Two copies, two purposes** (revised while planning). The project files are at full resolution, for tools and
+  generators. The model's view goes through the existing attachments, which are downscaled to 1568 px on the long edge
+  (`IMG_EDGE`) and feed the chat bubbles and the history replay. Reusing that path avoids a second image pipeline. The
+  attachment copies are content-addressed like pasted images, and are covered by the M6-15 "clean unreferenced
+  attachments"; the project folder is deleted with its comment. The batch names both project files by their
+  project-relative paths.
 - **Lifecycle:**
   - The folder is written when the comment is added. Deleting the comment, pending or sent, removes its folder
     in the same step.
