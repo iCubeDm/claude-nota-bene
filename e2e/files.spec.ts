@@ -37,7 +37,8 @@ test('comment on an md file: mark in its pane only, badges, jump from a closed t
     await expect(cards(page)).toHaveCount(n - 1);
   }
 
-  await page.locator('#toggleTree').click();
+  // the tree starts open (R-M6-3) unless an earlier test closed it
+  if (await page.locator('#tree-sheet').isHidden()) await page.locator('#toggleTree').click();
   await page.locator('button[data-path="notes.md"]').click();
   await expect(fileRoot(page).locator('p').first()).toHaveText('alpha bravo charlie delta');
   await page.locator('#toggleTree').click();
@@ -144,10 +145,25 @@ test('tree: the Cyrillic md renders, its relative image loads, the path is a ref
   await expect(tabOf(page, 'docs/pic.png')).toHaveAttribute('aria-selected', 'true');
 });
 
-// M6-04 (R-M6-2): widths follow the viewport; large media is fitted to the pane; every pane has the chat's grid.
-test('widths follow the viewport; a large image fits the pane and a click toggles its natural size @files', async ({ page }) => {
-  const prose = (vw: number) => Math.min(vw, Math.min(Math.max(860, 0.62 * vw), 1280));
-  const widthOf = (sel: string) => page.locator(sel).evaluate((el) => el.getBoundingClientRect().width);
+// Prose keeps the prototype's 860 px, code gets up to 256 characters a line, both within what the docked panels leave;
+// large media is fitted to the pane; every pane has the chat's grid.
+test('prose is 860 px and code 256 characters wide, within the room the panels leave; a large image fits the pane and a click toggles its natural size @files', async ({ page }) => {
+  // the element's width, and what it should be: its cap, or the parent's content box when that is narrower
+  const measure = (sel: string, kind: 'prose' | 'code') => page.locator(sel).evaluate((el, k) => {
+    const p = el.parentElement!;
+    const ps = getComputedStyle(p);
+    const room = p.clientWidth - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight) - 48; // the card's margin
+    let cap = 860;
+    if (k === 'code') {
+      // measured inside the pre, so it has exactly the code's font (CSS `ch` is the width of its 0)
+      const probe = document.createElement('span');
+      probe.textContent = '0'.repeat(256);
+      el.append(probe);
+      cap = probe.getBoundingClientRect().width + 32 + 2;
+      probe.remove();
+    }
+    return { width: el.getBoundingClientRect().width, want: Math.min(cap, room) };
+  }, kind);
   await start(page);
   await openFromTree(page, MD);
   await openFromTree(page, 'src/a.ts');
@@ -155,12 +171,15 @@ test('widths follow the viewport; a large image fits the pane and a click toggle
   for (const vw of [1440, 2560]) {
     await page.setViewportSize({ width: vw, height: 900 });
     await tabOf(page, MD).click();
-    await expect.poll(() => widthOf(`[data-file-path="${MD}"] > .nb-prose`)).toBeCloseTo(Math.min(prose(vw), vw - 2), 0);
+    let m = await measure(`[data-file-path="${MD}"] > .nb-prose`, 'prose');
+    expect(m.width).toBeCloseTo(m.want, 0);
     await tabOf(page, 'src/a.ts').click();
-    const code = Math.min(Math.max(960, 0.78 * vw), 1600);
-    await expect.poll(() => widthOf('[data-file-path="src/a.ts"] > pre.nb-code')).toBeCloseTo(Math.min(code, vw), 0);
+    m = await measure('[data-file-path="src/a.ts"] > pre.nb-code', 'code');
+    expect(m.width).toBeCloseTo(m.want, 0);
+    if (vw === 2560) expect(m.width).toBeGreaterThan(1500); // the code card does use the room a wide screen has
     await chatTab(page).click();
-    await expect.poll(() => widthOf('#items')).toBeCloseTo(Math.min(prose(vw), vw), 0);
+    m = await measure('#items', 'prose');
+    expect(m.width).toBeCloseTo(m.want, 0);
   }
   // the grid background is on every pane
   for (const sel of ['[data-pane="chat"]', `[data-pane="file:${MD}"]`, '[data-pane="file:src/a.ts"]', '[data-pane="file:docs/big.png"]']) {

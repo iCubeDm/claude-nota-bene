@@ -194,6 +194,8 @@ test('edit and delete from the card; a click on the mark opens it @chat', async 
   await expect(panel(page)).toHaveAttribute('data-open', 'false');
   const mark = marks(page, 'pending').first();
   await expect(mark).toBeVisible();
+  // the closed (docked) panel gave the chat its room back: the text reflowed, wait for the mark to follow it
+  await expect.poll(async () => { const b = await mark.boundingBox(); const a = await anchoredBox(page, text); return !!b && Math.abs(b.x - a.x) <= 4 && Math.abs(b.y - a.y) <= 4; }).toBe(true);
   const box = (await mark.boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2); // real hit path: the layer ignores pointer events
   const pop = page.getByRole('dialog').filter({ hasText: 'first draft v2' });

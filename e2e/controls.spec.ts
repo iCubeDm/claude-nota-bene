@@ -341,7 +341,8 @@ test('switching sessions: both pages follow, the file tabs follow the root, send
   const root = (p: Page) => p.locator('#root-path');
 
   // a file tab of this root
-  await page.locator('#toggleTree').click();
+  // the tree starts open (R-M6-3) unless an earlier test closed it
+  if (await page.locator('#tree-sheet').isHidden()) await page.locator('#toggleTree').click();
   await page.locator('button[data-path="notes.md"]').click();
   await expect(page.locator('[data-tab="file:notes.md"]')).toBeVisible();
   await page.locator('#toggleTree').click();
@@ -362,7 +363,7 @@ test('switching sessions: both pages follow, the file tabs follow the root, send
   const draft = `draft ${uniq('kept')}`;
   await page.keyboard.type(draft);
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('button', { name: en.send, exact: true })).toBeDisabled();
+  await expect(page.locator('footer').getByRole('button', { name: en.send, exact: true })).toBeDisabled();
   await expect(page.locator('#conn')).toHaveText(en.switching); // still inside the window: the Enter was refused by it
   expect(t.sent.filter((f) => f.type === 'send').length).toBe(sentBefore);
   await expect(bubble(page, draft)).toHaveCount(0);
@@ -382,7 +383,8 @@ test('switching sessions: both pages follow, the file tabs follow the root, send
   await expect(other.getByText('alpha answer')).toHaveCount(0);
 
   // the new root has its own tabs
-  await page.locator('#toggleTree').click();
+  // the tree starts open (R-M6-3) unless an earlier test closed it
+  if (await page.locator('#tree-sheet').isHidden()) await page.locator('#toggleTree').click();
   await page.locator('button[data-path="other.md"]').click();
   await expect(page.locator('[data-tab="file:other.md"]')).toBeVisible();
   await page.locator('#toggleTree').click();

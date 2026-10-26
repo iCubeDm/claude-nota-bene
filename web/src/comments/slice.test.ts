@@ -84,8 +84,11 @@ it('selectSentFor groups by sentIn', () => {
 
 it('ui state: panel and card', () => {
   const f = fake();
+  localStorage.removeItem('panel:comments');
   const store = makeStore({ url: 'u', connect: f.connect });
-  expect(selectCommentsUi(store.getState())).toEqual({ panelOpen: false, card: null });
+  expect(selectCommentsUi(store.getState())).toEqual({ panelOpen: true, card: null }); // open by default (R-M6-3)
+  store.dispatch(setPanelOpen(false));
+  expect(selectCommentsUi(store.getState()).panelOpen).toBe(false);
   store.dispatch(setPanelOpen(true));
   store.dispatch(openCommentCard({ id: 'a', x: 1, y: 2 }));
   expect(selectCommentsUi(store.getState())).toEqual({ panelOpen: true, card: { id: 'a', x: 1, y: 2 } });

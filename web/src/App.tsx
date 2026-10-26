@@ -31,12 +31,15 @@ export function App() {
   return (
     <TooltipProvider>
       <Header />
-      {/* the strips run the full height between header and footer; the tabs belong to the work area */}
+      {/*
+        IntelliJ-style (R-M6-3): the strips and their panels run the full height under the header; an open panel is
+        docked and narrows the middle column (tabs, panes, composer) instead of covering it.
+      */}
       <div className="flex min-h-0 flex-1">
         <LeftStrip />
+        <FileTree key={rootGen} />
         <div className="flex min-w-0 flex-1 flex-col">
           <TabStrip />
-          {/* the panels are absolute sheets inside this box: each slides out next to its strip, over the work area */}
           <div className="relative flex min-h-0 flex-1 flex-col">
             <Panes
               chat={
@@ -51,16 +54,15 @@ export function App() {
                 </>
               }
             />
-            <FileTree key={rootGen} />
-            <CommentsPanel onSend={sendPanel} />
           </div>
+          <Footer />
         </div>
+        <CommentsPanel onSend={sendPanel} />
         <RightStrip />
       </div>
       <SelectionButton onComment={setPending} />
       {pending && <CommentPopup pending={pending} onClose={close} />}
       <CommentCardPopover />
-      <Footer />
       <Toasts />
     </TooltipProvider>
   );

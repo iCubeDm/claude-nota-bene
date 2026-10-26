@@ -14,12 +14,12 @@ const ancestors = (p: string): string[] => {
   return parts.map((_, i) => parts.slice(0, i + 1).join('/'));
 };
 
-/** The sheet's open state survives a reload (store.ts persists it, like the comments panel's). */
+/** Open unless the user closed it (store.ts persists it, like the comments panel's): panels start open (R-M6-3). */
 const readTreeOpen = (): boolean => {
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('panel:tree') === '1';
+    return typeof localStorage === 'undefined' || localStorage.getItem('panel:tree') !== '0';
   } catch {
-    return false;
+    return true; // storage unavailable: the default, open
   }
 };
 

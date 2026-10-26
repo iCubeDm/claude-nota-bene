@@ -31,11 +31,11 @@ The user works IN the app. A `web/` change reaches them after `npm run build -w 
   - Every prototype use of `var(--accent)` maps to `--nb-accent`.
 
 **Sizing**
-- **R-M6-2.** Content width is relative to the viewport: `width: min(100%, clamp(860px, 62vw, 1280px))` for prose (chat, md), and `clamp(960px, 78vw, 1600px)` for code.
+- **R-M6-2.** ~~Content width is relative to the viewport~~ (revised by the user, 2026-10-26, once panels docked): prose (chat, md) keeps the prototype's 860 px; code is up to 256 characters a line. Both leave a 1.5rem margin in a narrow column.
 - Media is centred and fitted to the pane: `max-width:100%; max-height: calc(100% - margin)`. A click toggles natural size.
 
 **Strips and tabs**
-- **R-M6-3.** Two thin tool strips, IntelliJ-style:
+- **R-M6-3.** Two thin tool strips, IntelliJ-style (user, 2026-10-26: panels are DOCKED and narrow the middle column, open by default; strips and panels run the full height under the header):
   - the left one holds Files (later Structure);
   - the right one holds Comments (later Agents, M2).
   - Clicking an icon toggles that panel.

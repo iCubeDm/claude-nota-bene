@@ -19,7 +19,8 @@ function Panel() {
   return <CommentsPanel onSend={() => void d(sendBatch(false))} />;
 }
 
-beforeEach(() => { setLang('en'); localStorage.clear(); });
+// the composer's Send is under test: the comments panel (open by default, with its own Send) is closed
+beforeEach(() => { setLang('en'); localStorage.clear(); localStorage.setItem('panel:comments', '0'); });
 afterEach(cleanup);
 
 const cm = (id: string, o: Partial<Comment> = {}): Comment => ({

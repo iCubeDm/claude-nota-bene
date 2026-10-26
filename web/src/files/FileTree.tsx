@@ -26,7 +26,7 @@ async function loadDir(rel: string, src: string): Promise<Loaded> {
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
-/** The left overlay sheet. It floats over the chat area (absolute), so it never shifts the chat layout. */
+/** The left tool window, docked next to its strip: open, it narrows the middle column (R-M6-3). */
 export function FileTree() {
   const t = useT();
   const d = useAppDispatch();
@@ -185,7 +185,7 @@ export function FileTree() {
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); d(setTreeOpen(false)); }
       }}
-      className="absolute inset-y-0 left-0 z-[5] flex w-[300px] flex-col border-r border-border-soft bg-chrome backdrop-blur-[24px]"
+      className="flex w-[300px] flex-none flex-col border-r border-border-soft bg-chrome"
     >
       <div className="flex h-10 flex-none items-center justify-between border-b border-border-soft pr-2 pl-3.5 text-[13px] font-medium text-foreground">
         {t('files')}

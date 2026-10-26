@@ -7,7 +7,7 @@ import { selectSwitching } from '@/controls/slice.ts';
 import { CommentCard } from './CommentCard.tsx';
 import { selectCommentsUi, selectPending, setPanelOpen } from './slice.ts';
 
-/** Overlay sheet on the right: slides over the chat, never resizes it. Positioned by a `relative` wrapper around <main>. */
+/** The right tool window, docked next to its strip: open, it narrows the middle column (R-M6-3). */
 export function CommentsPanel({ onSend }: { onSend: () => void }) {
   const t = useT();
   const d = useAppDispatch();
@@ -26,8 +26,8 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
       ref={aside}
       id="comments"
       data-open={open}
-      aria-hidden={!open}
-      className={`absolute inset-y-0 right-0 z-[5] flex min-h-0 w-80 flex-col border-l border-border bg-side transition-[transform,visibility] duration-[180ms] ease-out ${open ? 'translate-x-0 shadow-[0_0_40px_rgba(0,0,0,0.35)]' : 'invisible translate-x-full'}`}
+      hidden={!open}
+      className="flex min-h-0 w-80 flex-none flex-col border-l border-border bg-side"
     >
       <div className="flex h-[41px] flex-none items-center justify-between border-b border-border-soft pr-2 pl-3.5 text-[13px] font-medium">
         <span id="cTitle">{n ? t('commentsN', n) : t('comments')}</span>

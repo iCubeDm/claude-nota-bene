@@ -18,7 +18,7 @@ const cm = (id: string, o: Partial<Comment> = {}): Comment => ({
 });
 
 function setup(items: Comment[] = [], onSend = () => {}, open = true) {
-  if (open) localStorage.setItem('panel:comments', '1'); // the initial open state is read from storage
+  localStorage.setItem('panel:comments', open ? '1' : '0'); // the initial open state is read from storage
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   act(() => void store.dispatch(serverEvent({ kind: 'comments', items })));
   render(
@@ -53,8 +53,7 @@ it('closing via × writes 0, hands focus to the toggle, and the closed aside is 
   expect(localStorage.getItem('panel:comments')).toBe('0');
   expect(document.activeElement).toBe(document.getElementById('toggleComments'));
   const aside = document.getElementById('comments')!;
-  expect(aside).toHaveClass('invisible');
-  expect(aside).toHaveAttribute('aria-hidden', 'true');
+  expect(aside).not.toBeVisible(); // `hidden`: out of the layout (docked, the chat gets the room back) and of the a11y tree
 });
 
 it('adding a comment through the popup auto-opens the panel and persists 1', () => {
@@ -74,8 +73,8 @@ it('adding a comment through the popup auto-opens the panel and persists 1', () 
 });
 
 it('persisting survives unavailable storage', () => {
-  const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
   const store = setup([], () => {}, false);
+  const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
   fireEvent.click(screen.getByRole('button', { name: 'Comments' }));
   expect(store.getState().comments.ui.panelOpen).toBe(true);
   spy.mockRestore();

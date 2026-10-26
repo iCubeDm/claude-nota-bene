@@ -9,9 +9,9 @@ export type CommentsState = { items: Comment[]; /** a local change the server ha
 
 const readPanelOpen = (): boolean => {
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('panel:comments') === '1';
+    return typeof localStorage === 'undefined' || localStorage.getItem('panel:comments') !== '0';
   } catch {
-    return false;
+    return true; // storage unavailable: the default, open
   }
 };
 

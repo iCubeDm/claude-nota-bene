@@ -28,19 +28,22 @@ it('Files sits on the left strip, Comments on the right; each icon toggles its p
   const comments = screen.getByRole('button', { name: 'Comments' });
   expect(files.closest('[data-strip]')).toHaveAttribute('data-strip', 'left');
   expect(comments.closest('[data-strip]')).toHaveAttribute('data-strip', 'right');
-  fireEvent.click(files);
-  expect(store.getState().tree.open).toBe(true);
+  // both panels start open (R-M6-3)
   expect(files).toHaveAttribute('aria-pressed', 'true');
-  fireEvent.click(comments);
-  expect(store.getState().comments.ui.panelOpen).toBe(true);
+  expect(comments).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(files);
   expect(store.getState().tree.open).toBe(false);
+  expect(files).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(comments);
+  expect(store.getState().comments.ui.panelOpen).toBe(false);
+  fireEvent.click(files);
+  expect(store.getState().tree.open).toBe(true);
 });
 
-it('the tree open state is persisted and read back on the next load', () => {
+it('a closed tree stays closed on the next load', () => {
   setup();
   act(() => void fireEvent.click(screen.getByRole('button', { name: 'Files' })));
-  expect(localStorage.getItem('panel:tree')).toBe('1');
+  expect(localStorage.getItem('panel:tree')).toBe('0');
   cleanup();
-  expect(makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) }).getState().tree.open).toBe(true);
+  expect(makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) }).getState().tree.open).toBe(false);
 });

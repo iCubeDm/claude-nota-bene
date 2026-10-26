@@ -91,9 +91,11 @@
 @keyframes nb-flash { from { background-color: oklch(0.88 0.18 95 / 0.35); } to { background-color: transparent; } }
 .nb-flash { animation: nb-flash 1.2s ease-out; }
 
-/* R-M6-2: content width follows the viewport. Prose (chat card, md files) and code are centred paper cards. */
-.nb-prose { width: min(100%, clamp(860px, 62vw, 1280px)); }
-.nb-code { width: min(100%, clamp(960px, 78vw, 1600px)); }
+/* Prose (chat card, md files) keeps the prototype's 860 px; code is wider. Both are centred paper cards. */
+/* 3rem: a narrow column (docked panels) still leaves a margin around the card */
+.nb-prose { width: min(100% - 3rem, 860px); }
+/* in the code's own font (the pre is mono): 256 characters per line, plus the padding and border */
+.nb-code { width: min(100% - 3rem, calc(256ch + 2rem + 2px)); }
 .nb-card {
   margin: 1rem auto 1.5rem;
   border: 1px solid var(--border-soft);
