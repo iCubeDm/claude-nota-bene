@@ -7,7 +7,16 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          include: ['shared/**/*.test.ts', 'server/**/*.test.ts', 'bin/**/*.test.ts', 'skill/**/*.test.ts'],
+          include: ['shared/**/*.test.ts', 'server/**/*.test.ts'],
+        },
+      },
+      {
+        // the launcher and /nb tests spawn real servers on the shared ports 4791-4795: one file at a time
+        test: {
+          name: 'launcher',
+          environment: 'node',
+          include: ['bin/**/*.test.ts', 'skill/**/*.test.ts'],
+          fileParallelism: false,
         },
       },
       {
