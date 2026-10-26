@@ -89,3 +89,35 @@ it('the chat tab shows the session title and tooltip; without one, Chat and the 
   const titled = screen.getByRole('tab', { name: /Fix login/ });
   expect(titled).toHaveAttribute('title', 'Fix login');
 });
+
+// ---- M6-12: overflow
+const rect = (left: number, width: number) => ({ left, right: left + width, top: 0, bottom: 28, width, height: 28, x: left, y: 0, toJSON() {} }) as DOMRect;
+
+it('▾ lists the hidden tabs first, then all; the filter matches paths; ↓ Enter opens; the strip has no scrollbar (M6-12)', async () => {
+  const s = setup(['src/a.ts', 'src/b.ts', 'docs/c.md']);
+  const strip = screen.getByRole('tablist');
+  expect(strip.className).toContain('nb-no-scrollbar');
+  // layout: the strip shows 0..300 px; c.md sits past its right edge
+  vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue(rect(0, 300));
+  const at: Record<string, number> = { chat: 0, 'file:src/a.ts': 100, 'file:src/b.ts': 200, 'file:docs/c.md': 320 };
+  for (const el of strip.querySelectorAll<HTMLElement>('[data-tab]')) vi.spyOn(el, 'getBoundingClientRect').mockReturnValue(rect(at[el.dataset.tab!]!, 90));
+  fireEvent.click(screen.getByRole('button', { name: 'All tabs' }));
+  const list = await screen.findByRole('listbox', { name: 'All tabs' });
+  const items = () => [...list.querySelectorAll<HTMLElement>('[data-tab-item]')].map((b) => b.dataset.tabItem);
+  expect(within(list).getByText('Hidden')).toBeInTheDocument();
+  expect(items()).toEqual(['file:docs/c.md', 'chat', 'file:src/a.ts', 'file:src/b.ts', 'file:docs/c.md']);
+  const box = screen.getByRole('textbox', { name: 'Find a tab…' });
+  fireEvent.change(box, { target: { value: 'src/' } });
+  expect(items()).toEqual(['file:src/a.ts', 'file:src/b.ts']);
+  fireEvent.keyDown(box, { key: 'ArrowDown' });
+  fireEvent.keyDown(box, { key: 'Enter' });
+  expect(selectTabs(s.getState()).active).toBe('file:src/b.ts');
+  expect(screen.queryByRole('listbox')).toBeNull();
+});
+
+it('the wheel scrolls the strip sideways (M6-12)', () => {
+  setup(['a.ts']);
+  const strip = screen.getByRole('tablist');
+  fireEvent.wheel(strip, { deltaY: 120, deltaX: 0 });
+  expect(strip.scrollLeft).toBe(120);
+});

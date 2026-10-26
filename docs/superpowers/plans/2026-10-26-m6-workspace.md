@@ -131,8 +131,8 @@ The hotkey list appears in the `?` help.
 - [x] The icons are coloured as in IntelliJ, inline SVG, with no new dependency. If a third-party set is used, it must be MIT-licensed, vendored, and have its licence noted.
 
 ### M6-12: Tab overflow, IntelliJ-style
-- [ ] No horizontal scrollbar. The wheel scrolls the strip, and the active tab scrolls into view.
-- [ ] A "▾" button on the right lists the hidden tabs (and all tabs), with search.
+- [x] No horizontal scrollbar. The wheel scrolls the strip, and the active tab scrolls into view.
+- [x] A "▾" button on the right lists the hidden tabs (and all tabs), with search. Ruling (2026-10-26): "▾" is always shown, not only on overflow (it doubles as a searchable list of all tabs; no layout probe needed).
 
 ### M6-13: Recent files (Cmd/Ctrl+E)
 - [ ] A modal with the recently opened files of this root (persisted, up to 50) and a search field. An empty query shows the recent files; typing searches the whole project through `/complete`.

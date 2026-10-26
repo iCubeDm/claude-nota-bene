@@ -120,3 +120,7 @@
   user-select: none;
 }
 .nb-icon-label::before { content: attr(data-label); }
+
+/* a strip that scrolls without showing a scrollbar (the tab strip, M6-12) */
+.nb-no-scrollbar { scrollbar-width: none; }
+.nb-no-scrollbar::-webkit-scrollbar { display: none; }

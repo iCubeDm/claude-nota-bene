@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { FileIcon } from '@/files/FileIcon.tsx';
@@ -7,6 +7,7 @@ import { SourceChip } from '@/files/SourcePicker.tsx';
 import { selectSession, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
 import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
+import { TabsMenu } from './TabsMenu.tsx';
 
 export const Svg = ({ children, size = 14 }: { children: ReactNode; size?: number }) => (
   <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width={size} height={size} className="flex-none">{children}</svg>
@@ -79,16 +80,43 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
   );
 }
 
+/**
+ * Tab overflow, IntelliJ-style (M6-12): no scrollbar; the wheel scrolls the strip sideways, the active tab is scrolled
+ * into view, and "▾" at the right end lists the hidden tabs and all tabs.
+ */
 export function TabStrip() {
   const { open, active } = useAppSelector(selectTabs);
   const media = useMedia();
   const playing = useSyncExternalStore(media.subscribe, () => media.playing());
+  const strip = useRef<HTMLDivElement>(null);
+  // after a switch, an open or a close, and when the strip is resized (a panel docked or the window narrowed)
+  useEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    const show = () => [...el.querySelectorAll<HTMLElement>('[data-tab]')].find((n) => n.dataset.tab === active)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    show();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(show);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [active, open.length]);
   return (
-    <div role="tablist" className="flex h-10 flex-none items-center gap-1 overflow-x-auto border-b border-border-soft bg-chrome px-2">
-      {open.map((tab, i) => (
-        // the dot marks a background tab that still plays; the active tab shows its own player
-        <TabItem key={tab.id} tab={tab} active={tab.id === active} last={i === open.length - 1} playing={tab.id === playing && tab.id !== active} />
-      ))}
+    <div className="flex h-10 flex-none items-center gap-1 border-b border-border-soft bg-chrome pr-1.5 pl-2">
+      <div
+        ref={strip}
+        role="tablist"
+        onWheel={(e) => {
+          // a vertical wheel scrolls the strip sideways (a trackpad's own horizontal swipe already does)
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+        }}
+        className="nb-no-scrollbar flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+      >
+        {open.map((tab, i) => (
+          // the dot marks a background tab that still plays; the active tab shows its own player
+          <TabItem key={tab.id} tab={tab} active={tab.id === active} last={i === open.length - 1} playing={tab.id === playing && tab.id !== active} />
+        ))}
+      </div>
+      <TabsMenu strip={strip} />
     </div>
   );
 }
