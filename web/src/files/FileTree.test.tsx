@@ -186,7 +186,7 @@ it('Expand all opens every folder level by level, skipping node_modules and .git
   await row('a.md');
   expect([...store.getState().tree.dirs].sort()).toEqual(['docs', 'src', 'src/lib']);
   expect(calls.some((u) => u.includes('node_modules') || u.includes('.git'))).toBe(false);
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveAttribute('aria-disabled', 'true'));
   fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
   expect(store.getState().tree.dirs).toEqual([]);
   expect(screen.queryByRole('button', { name: /^deep\.ts/ })).toBeNull();
@@ -203,8 +203,48 @@ it('Expand all stops at the row cap (M6-10)', { timeout: 15000 }, async () => {
   const store = setup();
   await row('d00');
   fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
-  // 3000+ rows render slowly in jsdom under a full parallel run: a wider wait than the default 1 s
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).toBeEnabled(), { timeout: 8000 });
-  expect(store.getState().tree.dirs).toHaveLength(30);
+  // ~2000 rows render slowly in jsdom under a full parallel run: a wider wait than the default 1 s
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveAttribute('aria-disabled', 'true'), { timeout: 8000 });
+  // 30 + 19 × 101 = 1949 rows; the 20th folder would make 2050: the run ends there, in order
+  expect(store.getState().tree.dirs).toEqual(Array.from({ length: 19 }, (_, i) => `d${String(i).padStart(2, '0')}`));
+  expect(document.querySelectorAll('#tree-sheet [data-path]').length).toBeLessThanOrEqual(2000);
   expect(calls.some((u) => u.includes('sub'))).toBe(false);
+});
+
+it('Expand all works after an earlier load error, and a turn ending during the run refreshes after it (M6-10 review)', async () => {
+  const store = setup();
+  await row('src');
+  // an earlier, unrelated error
+  const real = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementationOnce(async () => new Response('x', { status: 500 }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  await screen.findByRole('alert');
+  vi.mocked(fetch).mockImplementation(real);
+  // slow listings: the run is still going when a turn ends
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  vi.mocked(fetch).mockImplementation(async (u) => { if (String(u).includes('path=src')) await gate; return real(u as string); });
+  fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+  calls.length = 0;
+  live(store, sdkResult());
+  await new Promise((r) => setTimeout(r, 20));
+  expect(calls.filter((u) => u === '/tree?path=')).toEqual([]); // no refresh across the run
+  release();
+  await row('deep.ts');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveAttribute('aria-disabled', 'true'));
+  await waitFor(() => expect(calls).toContain('/tree?path=')); // the missed refresh, after it
+  expect([...store.getState().tree.dirs].sort()).toEqual(['src', 'src/lib']);
+});
+
+it('refresh lists only shown folders; a folder under a closed parent is not fetched until shown (M6-10 review)', async () => {
+  const store = setup();
+  fireEvent.click(await row('src'));
+  fireEvent.click(await row('lib'));
+  await row('deep.ts');
+  fireEvent.click(screen.getByRole('button', { name: /^src/ })); // close the parent; src/lib stays "open" below it
+  expect(store.getState().tree.dirs).toContain('src/lib');
+  calls.length = 0;
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  await waitFor(() => expect(calls).toContain('/tree?path='));
+  expect(calls.some((u) => u.includes('path=src%2Flib'))).toBe(false);
 });

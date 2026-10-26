@@ -20,6 +20,10 @@ export const ICONS = {
 
 const basename = (p: string) => p.split('/').pop() || p;
 
+/** After a pick in a list (▾, Cmd+E): the focus goes to the tab it activated, not back to a now-hidden pane. */
+export const focusTab = (id: string) =>
+  requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[role="tablist"] [data-tab]')].find((n) => n.dataset.tab === id)?.focus({ preventScroll: true }));
+
 function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; last: boolean; playing: boolean }) {
   const t = useT();
   const d = useAppDispatch();
@@ -89,16 +93,9 @@ export function TabStrip() {
   const media = useMedia();
   const playing = useSyncExternalStore(media.subscribe, () => media.playing());
   const strip = useRef<HTMLDivElement>(null);
-  // after a switch, an open or a close, and when the strip is resized (a panel docked or the window narrowed)
+  // after a switch, an open or a close (not on a resize: that would undo the user's own scroll of the strip)
   useEffect(() => {
-    const el = strip.current;
-    if (!el) return;
-    const show = () => [...el.querySelectorAll<HTMLElement>('[data-tab]')].find((n) => n.dataset.tab === active)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-    show();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(show);
-    ro.observe(el);
-    return () => ro.disconnect();
+    [...(strip.current?.querySelectorAll<HTMLElement>('[data-tab]') ?? [])].find((n) => n.dataset.tab === active)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [active, open.length]);
   return (
     <div className="flex h-10 flex-none items-center gap-1 border-b border-border-soft bg-chrome pr-1.5 pl-2">
@@ -107,7 +104,8 @@ export function TabStrip() {
         role="tablist"
         onWheel={(e) => {
           // a vertical wheel scrolls the strip sideways (a trackpad's own horizontal swipe already does)
-          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+          // deltaMode 1 (lines, Firefox's mouse wheel): about 16 px a line
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 16 : 1);
         }}
         className="nb-no-scrollbar flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto"
       >

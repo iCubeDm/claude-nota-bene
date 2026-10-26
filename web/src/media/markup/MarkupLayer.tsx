@@ -8,13 +8,12 @@ import { box as rectBox, rectFrom, shapePath, shapesBounds, simplify, toRel } fr
 import { MarkupToolbar } from './MarkupToolbar.tsx';
 import { HALO, HALO_PX, shapeEls, STROKE_PX, useNatSize, useOverlayPlacement, type Media } from './overlay.tsx';
 import { addShape, clear, selectDraft, setColor, setMode, setTool, undo, type MarkTool } from './slice.ts';
+import { editable } from '@/lib/editable.ts';
 
 type Pt = { x: number; y: number };
 
 const TOOL_KEYS: Record<string, MarkTool> = { KeyR: 'rect', KeyE: 'ellipse', KeyP: 'pen', KeyA: 'arrow' };
 
-const editable = (t: EventTarget | null): boolean =>
-  t instanceof HTMLElement && (t.isContentEditable || !!t.closest('input, textarea, select, [contenteditable]'));
 
 /** A finished drag as a shape, or null when it has no extent (a click with a box tool is not a drawing). */
 function shapeOf(tool: MarkTool, color: MediaShape['color'], a: Pt, b: Pt, pen: number[]): MediaShape | null {

@@ -4,7 +4,7 @@ import { makeStore } from '../store/store.ts';
 import { MediaController } from '../media/mediaController.ts';
 import { filesSlice, setFileLoad } from '../files/slice.ts';
 import { setSource, toggleDir } from '../tree/slice.ts';
-import { activate, closeAll, closeOthers, closeRight, closeTab, fileTabId, openFile, selectActiveTab, selectTabs } from './slice.ts';
+import { activate, CLOSED_MAX, closeAll, closeOthers, closeRight, closeTab, fileTabId, openFile, reopenClosed, selectActiveTab, selectTabs } from './slice.ts';
 
 function mk() {
   let onEvent!: (e: ServerEvent) => void;
@@ -204,4 +204,36 @@ it('one onSwitch per restore: the first root and every re-root report the active
   m.session('/r2');
   expect(onSwitch.mock.calls).toEqual([['file:b.md', 'file:x.md']]);
   onSwitch.mockRestore();
+});
+
+it('the closed-tab stack: every close kind remembers its files, last closed first; an open one is skipped; capped (M6-14)', () => {
+  const { store } = mk();
+  for (const f of ['a', 'b', 'c', 'd', 'e']) store.dispatch(openFile(`${f}.ts`));
+  store.dispatch(closeTab('file:e.ts'));
+  store.dispatch(closeRight('file:b.ts')); // c, d
+  store.dispatch(closeOthers('file:b.ts')); // a
+  expect(selectTabs(store.getState()).closed.map((f) => (typeof f === 'string' ? f : f.path))).toEqual(['e.ts', 'c.ts', 'd.ts', 'a.ts']);
+  store.dispatch(reopenClosed());
+  expect(selectTabs(store.getState()).active).toBe('file:a.ts');
+  store.dispatch(openFile('d.ts')); // opened again by hand: skipped
+  store.dispatch(reopenClosed());
+  expect(ids(store)).toEqual(['chat', 'file:b.ts', 'file:a.ts', 'file:d.ts', 'file:c.ts']);
+  store.dispatch(closeAll());
+  expect(selectTabs(store.getState()).closed.slice(-4).map((f) => (typeof f === 'string' ? f : f.path))).toEqual(['b.ts', 'a.ts', 'd.ts', 'c.ts']);
+  for (let i = 0; i < CLOSED_MAX + 5; i++) { store.dispatch(openFile(`n${i}.ts`)); store.dispatch(closeTab(`file:n${i}.ts`)); }
+  expect(selectTabs(store.getState()).closed).toHaveLength(CLOSED_MAX);
+  store.dispatch(closeAll());
+  store.dispatch(reopenClosed());
+  expect(selectTabs(store.getState()).active).toBe(`file:n${CLOSED_MAX + 4}.ts`);
+});
+
+it('another folder empties the closed-tab stack: its paths are other files (M6-14)', () => {
+  const { store, session } = mk();
+  session('/p');
+  store.dispatch(openFile('a.ts'));
+  store.dispatch(closeTab('file:a.ts'));
+  session('/q');
+  expect(selectTabs(store.getState()).closed).toEqual([]);
+  store.dispatch(reopenClosed());
+  expect(ids(store)).toEqual(['chat']);
 });

@@ -2,6 +2,8 @@ import type { SavedFile } from '@/tabs/slice.ts';
 
 /** Recently opened files of a project root, newest first (M6-13). Stored under `recent:<root>`, at most RECENT_MAX. */
 export const RECENT_MAX = 50;
+/** A tab counts as visited after staying active this long: stepping through tabs (a held Alt+→) records none of the passed ones. */
+export const RECENT_DWELL_MS = 300;
 export const recentKey = (root: string) => `recent:${root}`;
 
 const same = (a: SavedFile, b: SavedFile) => a.path === b.path && (a.src ?? 'here') === (b.src ?? 'here');

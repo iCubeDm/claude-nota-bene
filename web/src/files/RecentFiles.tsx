@@ -4,6 +4,7 @@ import { useT } from '@/i18n/index.ts';
 import { selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { fileTabId, openFile, selectTabs, type SavedFile } from '@/tabs/slice.ts';
 import { FileIcon } from './FileIcon.tsx';
+import { focusTab } from '@/tabs/TabStrip.tsx';
 import { readRecent, recentModal } from './recent.ts';
 
 const DEBOUNCE_MS = 120;
@@ -60,8 +61,10 @@ export function RecentFiles() {
   const cur = Math.max(0, Math.min(at, items.length - 1));
 
   const close = () => recentModal.close();
+  const picked = useRef<string | null>(null);
   const pick = (f: SavedFile | undefined) => {
     if (!f) return;
+    picked.current = fileTabId(f.path, f.src);
     close();
     d(openFile({ path: f.path, src: f.src ?? 'here', ...(f.ref && { ref: f.ref }) }));
   };
@@ -72,7 +75,10 @@ export function RecentFiles() {
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          onOpenAutoFocus={(e) => { e.preventDefault(); input.current?.focus({ preventScroll: true }); }}
+          data-nb-modal=""
+          onOpenAutoFocus={(e) => { e.preventDefault(); picked.current = null; input.current?.focus({ preventScroll: true }); }}
+          // after a pick the opener may sit in a pane that is hidden now: the focus goes to the opened tab instead
+          onCloseAutoFocus={(e) => { if (picked.current) { e.preventDefault(); focusTab(picked.current); } }}
           className="fixed top-[14vh] left-1/2 z-50 flex max-h-[min(70vh,560px)] w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 flex-col rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-2xl outline-none"
         >
           <DialogPrimitive.Title className="px-2 pt-1 pb-1.5 text-xs font-semibold text-muted-foreground">{t('recentTitle')}</DialogPrimitive.Title>
@@ -87,15 +93,21 @@ export function RecentFiles() {
             }}
             placeholder={t('recentFilter')}
             aria-label={t('recentFilter')}
+            role="combobox"
+            aria-expanded
+            aria-controls="nb-recent-list"
+            aria-activedescendant={items.length ? `nb-recent-opt-${cur}` : undefined}
             className="mx-1 mb-1 flex-none rounded-md border border-border-soft bg-transparent px-2.5 py-1.5 text-[13px] text-foreground outline-none focus:border-primary"
           />
-          <div role="listbox" aria-label={t('recentTitle')} className="min-h-0 overflow-auto">
+          <div id="nb-recent-list" role="listbox" aria-label={t('recentTitle')} className="min-h-0 overflow-auto">
             {!items.length && <div className="px-2 py-4 text-center text-xs text-muted-foreground">{needle ? t('recentNone') : t('recentEmpty')}</div>}
             {items.map((f, i) => (
               <button
                 key={key(f)}
                 type="button"
                 role="option"
+                id={`nb-recent-opt-${i}`}
+                tabIndex={-1}
                 aria-selected={i === cur}
                 data-recent={f.path}
                 onMouseMove={() => setAt(i)}

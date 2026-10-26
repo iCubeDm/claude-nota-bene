@@ -11,6 +11,7 @@ import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { labelsFor, labelText } from './labels.ts';
 import { LabelTip } from './LabelTip.tsx';
 import { addComment, setPanelOpen } from './slice.ts';
+import { editable } from '@/lib/editable.ts';
 
 /** What the popup (M1-10) needs: where the text is anchored and where to put the popup; `text` is what was typed to open it. */
 export type PendingSelection = { anchor: Anchor; rect: DOMRect; text?: string };
@@ -18,8 +19,6 @@ export type PendingSelection = { anchor: Anchor; rect: DOMRect; text?: string };
 /** The labels offered right next to the selection, one click each; the rest are in the popup. */
 const BAR: QuickLabelId[] = ['looks-good', 'fire', 'clarify', 'verify', 'out-of-scope'];
 
-const editable = (t: EventTarget | null): boolean =>
-  t instanceof HTMLElement && (t.isContentEditable || !!t.closest('input, textarea, select, [contenteditable]'));
 
 const elementOf = (n: Node): Element | null => (n.nodeType === Node.ELEMENT_NODE ? (n as Element) : n.parentElement);
 

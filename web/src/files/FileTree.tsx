@@ -33,6 +33,13 @@ export const EXPAND_CAP = 2000;
 const NO_EXPAND = new Set(['node_modules', '.git']);
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
+/** How many folder listings "Expand all" fetches at once. */
+const EXPAND_FETCHES = 8;
+/** A folder is shown when every ancestor is open: only those are fetched and refreshed (a closed parent hides the rest). */
+const shownIn = (open: Set<string>) => (p: string): boolean => {
+  for (let i = p.indexOf('/'); i > 0; i = p.indexOf('/', i + 1)) if (!open.has(p.slice(0, i))) return false;
+  return true;
+};
 
 /** The left tool window, docked next to its strip: open, it narrows the middle column (R-M6-3). */
 export function FileTree() {
@@ -64,8 +71,11 @@ export function FileTree() {
   }, [open]);
   // the source the loaded entries belong to: a switch drops them, and an answer for the previous source is ignored
   const shown = useRef(src);
-  // "Expand all" in progress: each loaded level opens the next, until EXPAND_CAP rows or nothing is left
+  // "Expand all" in progress: opens the shown closed folders in order while the rows stay within EXPAND_CAP
   const [expanding, setExpanding] = useState(false);
+  const expandingRef = useRef(false);
+  expandingRef.current = expanding;
+  const missedTurn = useRef(false); // a turn ended during "Expand all": refreshed once it is over
   if (shown.current !== src) {
     shown.current = src;
     requested.current = new Set();
@@ -86,10 +96,11 @@ export function FileTree() {
     try { return await p; } finally { setLoading((n) => n - 1); }
   }, []);
 
-  // Lazy expand: any folder in `dirs` (clicked, restored, revealed) is fetched once.
+  // Lazy expand: any shown folder in `dirs` (clicked, restored, revealed) is fetched once; one under a closed parent
+  // waits until it is shown
   useEffect(() => {
     if (!open) return;
-    const want = ['', ...dirs].filter((p) => !requested.current.has(p));
+    const want = ['', ...dirs].filter(shownIn(new Set(dirs))).filter((p) => !requested.current.has(p));
     for (const p of want) {
       requested.current.add(p);
       void track(loadDir(p, src)).then((r) => {
@@ -104,30 +115,33 @@ export function FileTree() {
     if (busy.current) return;
     busy.current = true;
     try {
-      const paths = ['', ...dirs];
+      // the shown folders only (a long-collapsed subtree is not re-listed on every turn)
+      const paths = ['', ...dirs.filter(shownIn(new Set(dirs)))];
       // the root it was asked for: an answer that lands after a switch to another root (same 'here' source, other
       // folder) must not prune that root's folders with this one's listing
       const gen = store.getState().tabs.rootGen;
       const results = await track(Promise.all(paths.map((p) => loadDir(p, src))));
       if (shown.current !== src || store.getState().tabs.rootGen !== gen) return;
-      const next: Record<string, TreeEntry[]> = {};
-      const keep: string[] = [];
+      // merged into what is there now: listings loaded meanwhile (another click) stay; an error keeps the old listing
+      const gone = new Set<string>();
       let bad = false;
+      const fresh: Record<string, TreeEntry[]> = {};
       paths.forEach((p, i) => {
         const r = results[i];
-        if (r === 'error') { bad = true; keep.push(p); return; }
-        if (r === 'gone') { if (p === '') next[p] = []; return; } // a vanished folder is dropped silently
-        next[p] = r;
-        if (p) keep.push(p);
+        if (r === 'error') bad = true;
+        else if (r === 'gone') { if (p === '') fresh[p] = []; else gone.add(p); } // a vanished folder is dropped silently
+        else fresh[p] = r;
       });
       setFailed(bad);
       setEntries((e) => {
-        for (const p of paths) if (results[paths.indexOf(p)] === 'error' && e[p]) next[p] = e[p];
-        return next;
+        const n = { ...e, ...fresh };
+        for (const p of gone) delete n[p];
+        return n;
       });
-      const kept = new Set(keep);
-      requested.current = new Set(['', ...keep]);
-      if (kept.size !== dirs.length) d(setDirs(dirs.filter((p) => kept.has(p))));
+      for (const p of gone) requested.current.delete(p);
+      // pruned from the folders open NOW, not those of the request (a click meanwhile stays)
+      const cur = store.getState().tree.dirs;
+      if (gone.size && cur.some((p) => gone.has(p))) d(setDirs(cur.filter((p) => !gone.has(p))));
     } finally {
       busy.current = false;
     }
@@ -139,31 +153,71 @@ export function FileTree() {
   useEffect(() => {
     if (seenTurn.current === turnSeq) return;
     seenTurn.current = turnSeq;
-    if (!isFixed(src, sources) && (open || requested.current.size > 0)) void refresh();
+    if (isFixed(src, sources) || !(open || requested.current.size > 0)) return;
+    if (expandingRef.current) missedTurn.current = true; // after "Expand all", not across it
+    else void refresh();
   }, [turnSeq, open, src, sources, refresh]);
+  useEffect(() => {
+    if (expanding || !missedTurn.current) return;
+    missedTurn.current = false;
+    void refresh();
+  }, [expanding, refresh]);
 
-  // "Expand all": once every open folder is loaded, open the closed folders it shows, one level per round. Stops at the
-  // cap, when no closed folder is left, or on a load error (that folder would never load and stall the rounds)
+  // "Expand all": walk the shown closed folders in order (outer levels first); fetch each one's listing (at most
+  // EXPAND_FETCHES at a time) and open it if its rows still fit under EXPAND_CAP. The first one that does not fit ends
+  // the run, as do no closed folders left and a load error during the run (that folder would never load).
+  const inFlight = useRef(0);
   useEffect(() => {
     if (!expanding) return;
     if (failed || !open) return void setExpanding(false);
-    if (['', ...dirs].some((p) => !entries[p])) return; // this level is still loading
-    const open_ = new Set(dirs);
-    const closed: string[] = [];
+    const isOpen = new Set(dirs);
+    if (['', ...dirs].filter(shownIn(isOpen)).some((p) => !entries[p])) return; // the open folders are still loading
+    // breadth first: the rows shown now, and the closed folders level by level
     let rows = 0;
-    const walk = (dir: string) => {
-      for (const e of entries[dir] ?? []) {
-        rows++;
-        const p = join(dir, e.name);
-        if (!e.dir) continue;
-        if (open_.has(p)) walk(p);
-        else if (!NO_EXPAND.has(e.name)) closed.push(p);
+    const closed: string[] = [];
+    let level = [''];
+    while (level.length) {
+      const next: string[] = [];
+      for (const dir of level) {
+        for (const e of entries[dir] ?? []) {
+          rows++;
+          if (!e.dir) continue;
+          const p = join(dir, e.name);
+          // node_modules and .git: never opened, nor walked into when the user opened one
+          if (NO_EXPAND.has(e.name)) continue;
+          if (isOpen.has(p)) next.push(p);
+          else closed.push(p);
+        }
       }
-    };
-    walk('');
-    if (rows >= EXPAND_CAP || !closed.length) return void setExpanding(false);
-    d(setDirs([...dirs, ...closed]));
-  }, [expanding, entries, dirs, failed, open, d]);
+      level = next;
+    }
+    const add: string[] = [];
+    let stop = rows >= EXPAND_CAP || !closed.length;
+    for (const p of stop ? [] : closed) {
+      const kids = entries[p];
+      if (!kids) {
+        // fetch it (and the next few) before deciding; the effect runs again as listings land
+        for (const q of closed.slice(closed.indexOf(p))) {
+          if (inFlight.current >= EXPAND_FETCHES) break;
+          if (entries[q] || requested.current.has(q)) continue;
+          requested.current.add(q);
+          inFlight.current++;
+          void track(loadDir(q, src)).then((r) => {
+            inFlight.current--;
+            if (shown.current !== src) return;
+            if (r === 'error') { requested.current.delete(q); setFailed(true); return; }
+            setEntries((e) => ({ ...e, [q]: r === 'gone' ? [] : r }));
+          });
+        }
+        break;
+      }
+      if (rows + kids.length > EXPAND_CAP) { stop = true; break; }
+      rows += kids.length;
+      add.push(p);
+    }
+    if (add.length) d(setDirs([...dirs, ...add]));
+    else if (stop) setExpanding(false);
+  }, [expanding, entries, dirs, failed, open, src, track, d]);
 
   // a reveal clears the filter, so the revealed row is not filtered away
   useEffect(() => {
@@ -232,8 +286,10 @@ export function FileTree() {
           className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent">
           <Svg><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></Svg>
         </button>
-        <button type="button" aria-label={t('expandAll')} title={t('expandAll')} disabled={expanding} onClick={() => setExpanding(true)}
-          className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+        {/* aria-disabled, not disabled: a disabled button would drop the keyboard focus to <body> */}
+        <button type="button" aria-label={t('expandAll')} title={t('expandAll')} aria-disabled={expanding}
+          onClick={() => { if (expanding) return; setFailed(false); setExpanding(true); }}
+          className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground aria-disabled:opacity-40">
           <Svg><path d="m7 15 5 5 5-5M7 9l5-5 5 5" /></Svg>
         </button>
         <button type="button" aria-label={t('collapseAll')} title={t('collapseAll')} onClick={() => { setExpanding(false); d(setDirs([])); }}

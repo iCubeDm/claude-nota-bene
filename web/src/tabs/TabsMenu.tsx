@@ -4,7 +4,7 @@ import { FileIcon } from '@/files/FileIcon.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { activate, selectTabs, type Tab } from './slice.ts';
-import { ICONS, Svg } from './TabStrip.tsx';
+import { ICONS, Svg, focusTab } from './TabStrip.tsx';
 
 /** The ids of the tabs not fully inside the strip's visible width (a 1 px slack for subpixel layouts). */
 export function hiddenTabs(strip: HTMLElement): Set<string> {
@@ -52,8 +52,10 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
     setAt(0);
     setHidden(strip.current ? hiddenTabs(strip.current) : new Set());
   };
+  const picked = useRef<string | null>(null);
   const pick = (tab: Tab | undefined) => {
     if (!tab) return;
+    picked.current = tab.id;
     setOpen(false);
     d(activate(tab.id));
   };
@@ -71,7 +73,8 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
         aria-label={t('tabsAll')}
         collisionPadding={8}
         className="flex max-h-[min(70vh,520px)] w-[380px] flex-col"
-        onOpenAutoFocus={(e) => { e.preventDefault(); requestAnimationFrame(() => input.current?.focus({ preventScroll: true })); }}
+        onOpenAutoFocus={(e) => { e.preventDefault(); picked.current = null; requestAnimationFrame(() => input.current?.focus({ preventScroll: true })); }}
+        onCloseAutoFocus={(e) => { if (picked.current) { e.preventDefault(); focusTab(picked.current); } }}
       >
         <input
           ref={input}
@@ -80,13 +83,17 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
           onKeyDown={(e) => {
             if (e.key === 'ArrowDown') { e.preventDefault(); setAt((i) => Math.min(flat.length - 1, i + 1)); }
             else if (e.key === 'ArrowUp') { e.preventDefault(); setAt((i) => Math.max(0, i - 1)); }
-            else if (e.key === 'Enter') { e.preventDefault(); pick(flat[cur]); }
+            else if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); pick(flat[cur]); }
           }}
           placeholder={t('tabsFilter')}
           aria-label={t('tabsFilter')}
+          role="combobox"
+          aria-expanded
+          aria-controls="nb-tabs-list"
+          aria-activedescendant={flat.length ? `nb-tabs-opt-${cur}` : undefined}
           className="m-1 flex-none rounded-md border border-border-soft bg-transparent px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary"
         />
-        <div role="listbox" aria-label={t('tabsAll')} className="min-h-0 overflow-auto">
+        <div id="nb-tabs-list" role="listbox" aria-label={t('tabsAll')} className="min-h-0 overflow-auto">
           {!flat.length && <div className="px-2 py-3 text-center text-xs text-muted-foreground">{t('tabsNone')}</div>}
           {sections.map((s) => (
             <div key={s.name || 'all'}>
@@ -98,6 +105,8 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
                     key={`${s.name}:${tab.id}`}
                     type="button"
                     role="option"
+                    id={`nb-tabs-opt-${i}`}
+                    tabIndex={-1}
                     aria-selected={i === cur}
                     data-tab-item={tab.id}
                     onMouseMove={() => setAt(i)}

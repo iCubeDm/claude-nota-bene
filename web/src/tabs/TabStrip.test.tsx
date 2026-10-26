@@ -106,7 +106,7 @@ it('▾ lists the hidden tabs first, then all; the filter matches paths; ↓ Ent
   const items = () => [...list.querySelectorAll<HTMLElement>('[data-tab-item]')].map((b) => b.dataset.tabItem);
   expect(within(list).getByText('Hidden')).toBeInTheDocument();
   expect(items()).toEqual(['file:docs/c.md', 'chat', 'file:src/a.ts', 'file:src/b.ts', 'file:docs/c.md']);
-  const box = screen.getByRole('textbox', { name: 'Find a tab…' });
+  const box = screen.getByRole('combobox', { name: 'Find a tab…' });
   fireEvent.change(box, { target: { value: 'src/' } });
   expect(items()).toEqual(['file:src/a.ts', 'file:src/b.ts']);
   fireEvent.keyDown(box, { key: 'ArrowDown' });
@@ -120,4 +120,18 @@ it('the wheel scrolls the strip sideways (M6-12)', () => {
   const strip = screen.getByRole('tablist');
   fireEvent.wheel(strip, { deltaY: 120, deltaX: 0 });
   expect(strip.scrollLeft).toBe(120);
+});
+
+it('the active tab is scrolled into view when it changes (M6-12)', () => {
+  const seen: string[] = [];
+  const orig = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) { seen.push((this as HTMLElement).dataset.tab ?? ''); };
+  try {
+    const s = setup(['a.ts', 'b.ts']);
+    seen.length = 0;
+    act(() => void s.dispatch(openFile('a.ts')));
+    expect(seen).toContain('file:a.ts');
+  } finally {
+    Element.prototype.scrollIntoView = orig;
+  }
 });
