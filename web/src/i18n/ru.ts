@@ -53,6 +53,7 @@ export const ru = {
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
   // quick labels (M1-08)
   'label_looks-good': 'Выглядит хорошо',
+  label_fire: 'Огонь!',
   label_clarify: 'Поясни',
   label_verify: 'Проверь',
   label_example: 'Приведи пример',

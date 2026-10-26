@@ -8,7 +8,7 @@ import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { labelText, QUICK_LABELS } from './labels.ts';
+import { labelsFor, labelText } from './labels.ts';
 import { LabelTip } from './LabelTip.tsx';
 import { addComment, setPanelOpen } from './slice.ts';
 
@@ -16,8 +16,7 @@ import { addComment, setPanelOpen } from './slice.ts';
 export type PendingSelection = { anchor: Anchor; rect: DOMRect; text?: string };
 
 /** The labels offered right next to the selection, one click each; the rest are in the popup. */
-const BAR: QuickLabelId[] = ['looks-good', 'clarify', 'verify', 'out-of-scope'];
-const BAR_LABELS = QUICK_LABELS.filter((l) => BAR.includes(l.id));
+const BAR: QuickLabelId[] = ['looks-good', 'fire', 'clarify', 'verify', 'out-of-scope'];
 
 const editable = (t: EventTarget | null): boolean =>
   t instanceof HTMLElement && (t.isContentEditable || !!t.closest('input, textarea, select, [contenteditable]'));
@@ -95,6 +94,8 @@ function attachedInside(rect: DOMRect, view: View): boolean {
 export function SelectionButton({ onComment }: { onComment: (s: PendingSelection) => void }) {
   const t = useT();
   const dispatch = useAppDispatch();
+  const protocol = useAppSelector((s) => s.controls.protocol);
+  const barLabels = labelsFor(protocol).filter((l) => BAR.includes(l.id));
   const [sel, setSel] = useState<PendingSelection | null>(null);
   const selNow = useRef<PendingSelection | null>(null);
   selNow.current = sel;
@@ -201,7 +202,7 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
       >
         {t('commentBtn')}
       </Button>
-      {BAR_LABELS.map((l) => (
+      {barLabels.map((l) => (
         <Tooltip key={l.id}>
           <TooltipTrigger asChild>
             <button

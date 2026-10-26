@@ -367,7 +367,7 @@ describe('one step to a comment', () => {
     expect(window.getSelection()!.isCollapsed).toBe(true);
   });
 
-  it('offers only the most used labels; the rest stay in the popup', async () => {
+  it('an older server (no hello) is not offered 🔥, which it would refuse', async () => {
     await shown();
     const names = screen.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
     expect(names).toEqual(['💬 Comment', 'Looks good', 'Clarify this', 'Verify this', 'Out of scope']);
@@ -402,4 +402,16 @@ describe('one step to a comment', () => {
     expect(onComment).not.toHaveBeenCalled();
     expect(screen.getByTestId('selection-bar')).toBeInTheDocument();
   });
+});
+
+it('with a server that knows it, 🔥 sits right after 👍 in the selection bar', async () => {
+  const { store, q } = setup(A);
+  act(() => void store.dispatch({ type: 'server/event', payload: { kind: 'hello', protocol: 3 } }));
+  const t = q('a1').querySelector('p')!.firstChild!;
+  select(t, 6, t, 11);
+  await up(q('a1'));
+  const names = screen.getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
+  expect(names).toEqual(['💬 Comment', 'Looks good', 'Love it!', 'Clarify this', 'Verify this', 'Out of scope']);
+  fireEvent.click(screen.getByRole('button', { name: 'Love it!' }));
+  expect(store.getState().comments.items[0]).toMatchObject({ label: 'fire' });
 });

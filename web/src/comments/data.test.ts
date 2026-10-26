@@ -7,10 +7,11 @@ import { en } from '../i18n/en.ts';
 
 beforeAll(async () => { await loadEmoji(); });
 
-it('ten labels with the exact instructions', () => {
+it('eleven labels with the exact instructions', () => {
   expect(QUICK_LABELS.map((l) => l.id)).toEqual([...QUICK_LABEL_IDS]);
   expect(QUICK_LABELS).toEqual([
     { id: 'looks-good', emoji: '👍' },
+    { id: 'fire', emoji: '🔥', instruction: 'I really like this and had not thought of it myself. Ideas like this are welcome.' },
     { id: 'clarify', emoji: '❓' },
     { id: 'verify', emoji: '🔍', instruction: 'This seems like an assumption. Verify by reading the actual code before proceeding.' },
     { id: 'example', emoji: '🔬', instruction: 'This is too abstract. Show a before/after, a sample input/output, or a specific scenario so I can see how this actually works.' },

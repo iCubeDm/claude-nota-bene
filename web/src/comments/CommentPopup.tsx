@@ -5,7 +5,7 @@ import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
-import { labelText, QUICK_LABELS } from './labels.ts';
+import { labelsFor, labelText } from './labels.ts';
 import { LabelTip } from './LabelTip.tsx';
 import { EmojiMenu } from './EmojiMenu.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
@@ -22,6 +22,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   const dispatch = useAppDispatch();
   // the comment set belongs to the session being left: no new comment mid-switch (the server resets it with the session)
   const switching = useAppSelector(selectSwitching);
+  const protocol = useAppSelector((s) => s.controls.protocol);
   const root = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(pending.text ?? '');
@@ -141,7 +142,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       <ShortcodePicker target={area} />
       <MentionPicker target={area} />
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {QUICK_LABELS.map((l) => (
+        {labelsFor(protocol).map((l) => (
           <Tooltip key={l.id}>
             <TooltipTrigger asChild>
               <span className="inline-flex">

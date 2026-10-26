@@ -83,8 +83,8 @@ Success: the user never opens macOS Markup for this again, and the agent gets th
 - `Anchor` is used everywhere as a text anchor. Add a media anchor as a **distinct anchor kind** (a discriminated union),
   so text code paths cannot misread it. Parsing and validation on the server (`isAnchor`, `toAnchor`) must accept it.
 - **Protocol gating.** A newer page may talk to an older server; see `PROTOCOL` / `hello` in `shared/src/protocol.ts`. An
-  older server would reject comments with the new anchor. Bump `PROTOCOL` to 3, and offer the markup mode only when
-  the server announced >= 3.
+  older server would reject comments with the new anchor. Bump `PROTOCOL` to 4 (3 is the 🔥 label), and offer the markup mode only when
+  the server announced >= 4.
 - Images sent to the model are downscaled by the API anyway. The two attachment images must fit the attachment cap,
   so no huge PNGs of 4K frames. The coordinates, not the pictures, carry the precision.
 - No new heavy dependencies. Canvas/SVG in the browser is enough. Any library must be MIT, small, and justified.

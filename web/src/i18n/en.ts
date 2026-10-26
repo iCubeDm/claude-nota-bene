@@ -56,6 +56,7 @@ export const en: Dict = {
   resumed: (id) => `↻ resumed session ${id}`,
   // quick labels (M1-08)
   'label_looks-good': 'Looks good',
+  label_fire: 'Love it!',
   label_clarify: 'Clarify this',
   label_verify: 'Verify this',
   label_example: 'Give me an example',

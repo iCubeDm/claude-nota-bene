@@ -3,7 +3,7 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
 export type AnchorSource = { kind: 'message'; id: string } | { kind: 'file'; path: string; ref?: string };
 export type Anchor = { source: AnchorSource; start: number; end: number; quote: string; prefix: string; suffix: string };
-export const QUICK_LABEL_IDS = ['looks-good', 'clarify', 'verify', 'example', 'overview', 'patterns',
+export const QUICK_LABEL_IDS = ['looks-good', 'fire', 'clarify', 'verify', 'example', 'overview', 'patterns',
   'alternatives', 'no-regression', 'out-of-scope', 'needs-tests'] as const;
 export type QuickLabelId = (typeof QUICK_LABEL_IDS)[number];
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
@@ -31,9 +31,9 @@ export type Comment = {
 /**
  * What this server understands beyond the base protocol, announced in `hello` on connect. Every window serves the one
  * shared `web/dist`, so a reloaded page can be newer than its server (until "Restart the server"): the page sends a newer
- * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`.
+ * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label.
  */
-export const PROTOCOL = 2;
+export const PROTOCOL = 3;
 
 export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type Mode = (typeof MODES)[number];

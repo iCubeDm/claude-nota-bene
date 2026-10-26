@@ -7,6 +7,8 @@ export interface QuickLabel { id: QuickLabelId; emoji: string; /** sent to the a
 /** In display order. Source: Plannotator's built-in quick labels. */
 export const QUICK_LABELS: QuickLabel[] = [
   { id: 'looks-good', emoji: '👍' },
+  // the user's own: not just good, a pleasant surprise they had not thought of
+  { id: 'fire', emoji: '🔥', instruction: 'I really like this and had not thought of it myself. Ideas like this are welcome.' },
   { id: 'clarify', emoji: '❓' },
   { id: 'verify', emoji: '🔍', instruction: 'This seems like an assumption. Verify by reading the actual code before proceeding.' },
   { id: 'example', emoji: '🔬', instruction: 'This is too abstract. Show a before/after, a sample input/output, or a specific scenario so I can see how this actually works.' },
@@ -17,6 +19,11 @@ export const QUICK_LABELS: QuickLabel[] = [
   { id: 'out-of-scope', emoji: '🚫', instruction: 'This is not part of the current task. Remove it and stay focused on what was actually requested.' },
   { id: 'needs-tests', emoji: '🧪' },
 ];
+
+/** a label an older server does not know (it would refuse the comment): offered from this protocol on */
+const SINCE: Partial<Record<QuickLabelId, number>> = { fire: 3 };
+/** The labels the connected server accepts. */
+export const labelsFor = (protocol: number): QuickLabel[] => QUICK_LABELS.filter((l) => protocol >= (SINCE[l.id] ?? 0));
 
 const byId = new Map(QUICK_LABELS.map((l) => [l.id, l]));
 const keyOf = (id: QuickLabelId) => `label_${id}` as keyof typeof ru;

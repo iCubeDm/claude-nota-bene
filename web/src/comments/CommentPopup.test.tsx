@@ -31,6 +31,7 @@ function setup(p: PendingSelection = pending) {
       return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };
     }) as never,
   });
+  store.dispatch({ type: 'server/event', payload: { kind: 'hello', protocol: 3 } }); // a server that knows every label
   const onClose = vi.fn();
   render(
     <Provider store={store}>
