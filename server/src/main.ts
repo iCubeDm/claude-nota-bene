@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeFromScript } from './agent/fake.ts';
 import { sdkBackend } from './agent/sdk.ts';
+import { importPrototypeStateSafely } from './migrate.ts';
 import { startServer } from './server.ts';
 import { transcriptExists } from './sessions.ts';
 import { lastSession } from './state.ts';
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(2);
   }
+  importPrototypeStateSafely(); // once, before the session is chosen
   const backend = args.fake
     ? fakeFromScript(JSON.parse(fs.readFileSync(args.fake, 'utf8')), args.dir)
     : sdkBackend();

@@ -51,4 +51,9 @@ describe('prefs', () => {
       future: { x: 1 }, lang: 'ru', modes: { '/old': 'plan', '/odd': 'bogus', [prefsKey('/a')]: 'default' },
     });
   });
+  it('keeps a copy of a corrupt file before replacing it', () => {
+    fs.writeFileSync(path.join(home, 'prefs.json'), '{ broken');
+    setModePref('/a', 'plan');
+    expect(fs.readFileSync(path.join(home, 'prefs.json.corrupt'), 'utf8')).toBe('{ broken');
+  });
 });

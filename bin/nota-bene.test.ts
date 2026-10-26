@@ -78,6 +78,7 @@ function windows(): Record<string, Win> {
 const env = (extra: Record<string, string> = {}) => ({
   ...process.env,
   NOTA_BENE_HOME: home,
+  NOTA_BENE_PROTOTYPE_SESSIONS: path.join(tmp, 'no-prototype.json'), // independent of the developer's machine
   NOTA_BENE_BUILD_CMD: 'true', // never run the real vite build from a test
   CLAUDE_CONFIG_DIR: path.join(tmp, 'claude'),
   NOTA_BENE_PORT_RANGE: '4791-4795', // a picked port never lands on a live window's or the dev server's

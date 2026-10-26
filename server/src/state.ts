@@ -30,3 +30,20 @@ export function saveSession(projectDir: string, id: string | null): void {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
   fs.renameSync(tmp, file);
 }
+
+/** Adds the entries the file does not have yet (never overwrites), in one atomic write; returns how many were added. */
+export function addMissingSessions(entries: Record<string, string>): number {
+  const file = path.join(stateDir(), 'sessions.json');
+  const data = read(file);
+  let added = 0;
+  for (const [k, v] of Object.entries(entries)) {
+    if (data[k] !== undefined) continue;
+    data[k] = v;
+    added++;
+  }
+  if (added === 0) return 0;
+  const tmp = `${file}.tmp${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+  return added;
+}
