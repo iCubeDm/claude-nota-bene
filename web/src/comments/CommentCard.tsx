@@ -11,6 +11,7 @@ import { useT } from '@/i18n/index.ts';
 import { activate } from '@/tabs/slice.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { labelText, QUICK_LABELS } from './labels.ts';
+import { LabelTip } from './LabelTip.tsx';
 import { whereOfFile } from './send.ts';
 import { closeCommentCard, editComment, removeComment, selectComments, selectPending, selectSentFor } from './slice.ts';
 
@@ -203,9 +204,19 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
       </div>
       {c.images?.length ? <Attachments ids={c.images} /> : null}
       {label && (
-        <span className="mt-1.5 inline-block rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80">
-          {label.emoji} {labelText(label.id)}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              tabIndex={0}
+              aria-label={labelText(label.id)}
+              className="mt-1.5 inline-flex min-h-7 min-w-7 cursor-default items-center justify-center rounded-full border border-border-soft px-1.5 text-sm leading-none"
+            >
+              {label.emoji}
+            </span>
+          </TooltipTrigger>
+          <LabelTip id={label.id} />
+        </Tooltip>
       )}
     </div>
   );

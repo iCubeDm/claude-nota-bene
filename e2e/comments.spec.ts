@@ -142,7 +142,7 @@ test('a quick label adds a comment in one click @chat', async ({ page }) => {
 
   await expect(popup(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(1);
-  await expect(cards(page).first()).toContainText(/Verify this|Проверь/);
+  await expect(cards(page).first().getByLabel(/Verify this|Проверь/)).toBeVisible();
   await page.locator('#cSend').click();
   await expect.poll(() => frames.some((f) => f.includes('Verify by reading the actual code'))).toBe(true);
   await expect(page.getByText(/agent is working|агент работает/)).toBeHidden();
