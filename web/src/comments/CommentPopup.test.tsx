@@ -7,6 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
 import { switchSession } from '@/controls/slice.ts';
+import { getToasts, resetToasts } from '@/shell/toast.ts';
 import { CommentPopup, type PendingComment } from './CommentPopup.tsx';
 import { labelText, QUICK_LABELS } from './labels.ts';
 import type { PendingSelection } from './SelectionButton.tsx';
@@ -278,25 +279,53 @@ it('a failed prepare shows the error and keeps the popup open; nothing is added'
   expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled(); // a retry is possible
 });
 
-it('cancelling the popup while prepare runs deletes /marks/<id> once it settles (Review Focus 5)', async () => {
+it('while Add saves, Esc and a click outside are ignored: the popup stays and the comment is added with the text', async () => {
+  const d = deferred<{ images: string[] }>();
+  const onAdded = vi.fn();
+  const { comments, onClose } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise }, onAdded);
+  fireEvent.change(box(), { target: { value: 'keep me' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(false); // still taken (never reaches the agent), no close
+  fireEvent.mouseDown(document.getElementById('outside')!);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(box()).toHaveValue('keep me');
+  await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+  expect(comments()).toHaveLength(1);
+  expect(comments()[0]).toMatchObject({ id: MID, text: 'keep me', images: [FRAME, LAYER] });
+  expect(onAdded).toHaveBeenCalledTimes(1);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('the popup unmounted while Add saves (its tab closed): the save still finishes and the comment is added, no DELETE', async () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
   vi.stubGlobal('fetch', fetchMock);
   try {
     const d = deferred<{ images: string[] }>();
     const onAdded = vi.fn();
-    const p = { ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise };
-    const { comments, onClose } = setup(p, onAdded);
+    const { comments } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise }, onAdded);
+    fireEvent.change(box(), { target: { value: 'keep me' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    fireEvent.keyDown(document, { key: 'Escape' }); // the user gives up while the files upload
-    expect(onClose).toHaveBeenCalled();
-    cleanup(); // the parent unmounts the popup on close
+    cleanup();
     await act(async () => d.resolve({ images: [FRAME, LAYER] }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/marks/${MID}`, expect.objectContaining({ method: 'DELETE' })));
-    expect(comments()).toEqual([]);
-    expect(onAdded).not.toHaveBeenCalled();
+    expect(comments()).toHaveLength(1);
+    expect(comments()[0]).toMatchObject({ id: MID, text: 'keep me' });
+    expect(onAdded).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalledWith(`/marks/${MID}`, expect.objectContaining({ method: 'DELETE' }));
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('the popup unmounted while Add saves and the save fails: a toast says so and carries the typed text', async () => {
+  resetToasts();
+  const d = deferred<{ images: string[] }>();
+  const { comments } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise });
+  fireEvent.change(box(), { target: { value: 'keep me' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  cleanup();
+  await act(async () => d.reject(new Error('marks 500')));
+  expect(comments()).toEqual([]);
+  expect(getToasts()).toContainEqual(expect.objectContaining({ title: expect.stringMatching(/Could not save the drawing.*marks 500/), msg: expect.stringContaining('keep me') }));
 });
 
 it('the anchor patch from prepare (scale, version, the exact time) lands on the comment', async () => {

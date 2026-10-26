@@ -10,6 +10,7 @@ import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent, useAppDispatch } from '@/store/store.ts';
 import { addImage, uploadFinished, uploadStarted } from '@/composer/slice.ts';
 import { openFile } from '@/tabs/slice.ts';
+import { setFileVersion } from '@/files/slice.ts';
 import { getToasts, resetToasts } from '@/shell/toast.ts';
 import { sendBatch } from './send.ts';
 import { CommentsPanel } from './CommentsPanel.tsx';
@@ -316,4 +317,25 @@ it('send numbers a media comment\'s images frame-then-layer within the global nu
   expect(msg.text).toContain('2. [media/clip.mp4 @ 0:04.240 · 1280×720]\n> rect');
   expect(msg.text).toContain('📎 images: 3 (frame with marks), 4 (marks only, transparent)');
 
+});
+
+it('the "earlier version" line: only for a media comment whose drawn version differs from the known current one', async () => {
+  setLang('en');
+  const shape = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.2, h: 0.2 } as const;
+  const at = (path: string, version?: string) => ({ kind: 'media', source: { kind: 'file', path }, width: 10, height: 10, shapes: [shape], ...(version && { version }) }) as Comment['anchor'];
+  const { sent, store, box } = setup([
+    cm('changed', { anchor: at('a.png', 'W/"1"') }), // current W/"2": changed
+    cm('same', { anchor: at('b.png', 'W/"5"') }), // current W/"5": not
+    cm('unknown', { anchor: at('c.png', 'W/"7"') }), // no tab has c.png: unknown, not claimed
+  ]);
+  act(() => {
+    store.dispatch(setFileVersion({ path: 'a.png', version: 'W/"2"' }));
+    store.dispatch(setFileVersion({ path: 'b.png', version: 'W/"5"' }));
+  });
+  await userEvent.type(box, 'go{Enter}');
+  const blocks = sentOf(sent[0]!).text.split(/\n(?=\d+\. \[)/);
+  const of = (p: string) => blocks.find((b) => b.includes(`[${p} `))!;
+  expect(of('a.png')).toContain('marked on an earlier version of the file');
+  expect(of('b.png')).not.toContain('earlier version');
+  expect(of('c.png')).not.toContain('earlier version');
 });

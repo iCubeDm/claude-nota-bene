@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { toast } from '@/shell/toast.ts';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { labelsFor, labelText } from './labels.ts';
 import { LabelTip } from './LabelTip.tsx';
@@ -30,11 +31,26 @@ export type PendingComment = {
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 
+/** The popup's header line: the quoted text, or the media file (with the time) and its shape count. */
+function quoteOf(a: Anchor, t: ReturnType<typeof useT>): string {
+  return isMediaAnchor(a)
+    ? `${baseName(a.source.path)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${t('markShapes', a.shapes.length)}`
+    : `«${a.quote.trim()}»`;
+}
+
 /**
  * The popup next to a fresh selection or drawing: a note plus optional quick-label chips; a chip adds at once.
  * `onAdded`: after the comment is in the store (a drawing clears its draft then, never before).
+ * `onBusy`: a drawing's Add started (true) or ended without a comment (false); the parent keeps the popup meanwhile.
+ * `hidden`: its tab is not shown (kept only while busy or after a failed save): no keys, no outside clicks.
+ *
+ * Once Add has started saving a drawing, nothing but a session switch cancels it: Esc and outside clicks are ignored,
+ * and an unmount (the tab closed) does not stop it; the comment is added when the files are written. A failure the
+ * user cannot see (unmounted or hidden) is a toast that carries the typed text, so it is never lost silently.
  */
-export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingComment; onClose: () => void; onAdded?: () => void }) {
+export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false }: {
+  pending: PendingComment; onClose: () => void; onAdded?: () => void; onBusy?: (busy: boolean) => void; hidden?: boolean;
+}) {
   const t = useT();
   const dispatch = useAppDispatch();
   // the comment set belongs to the session being left: no new comment mid-switch (the server resets it with the session)
@@ -51,8 +67,14 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
   const [dropping, setDropping] = useState(false);
   const [busy, setBusyState] = useState(false); // a drawing's files are being written
   const busyNow = useRef(false); // a second click in the same tick must not start a second prepare
-  const setBusy = (v: boolean) => void ((busyNow.current = v), setBusyState(v));
-  // false once unmounted: a prepare that finishes after a cancel must not add, and must take its folder along
+  const setBusy = (v: boolean) => {
+    busyNow.current = v;
+    if (alive.current) setBusyState(v);
+    onBusy?.(v);
+  };
+  const hiddenNow = useRef(hidden);
+  hiddenNow.current = hidden;
+  // false once unmounted: what the save says then goes to a toast
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -88,19 +110,20 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
         if (r.anchor && isMediaAnchor(anchor)) anchor = { ...anchor, ...r.anchor };
       } catch (e) {
         // prepare removed the folder; the popup and the drawing stay, so Add can be tried again
-        if (alive.current) {
-          setBusy(false);
-          notify(t('markSaveFailed', e instanceof Error ? e.message : String(e)), 8000);
-        }
+        const msg = t('markSaveFailed', e instanceof Error ? e.message : String(e));
+        setBusy(false);
+        if (alive.current) notify(msg, 8000);
+        if (!alive.current || hiddenNow.current) toast(msg, body || quoteOf(pending.anchor, t));
         return;
       }
-      // cancelled meanwhile (Esc, a click outside, the tab closed), or a session switch began: the comment never came to be
-      if (!alive.current || switchingNow.current) {
+      // a session switch began meanwhile: the comment set belongs to the session left, the comment never came to be
+      if (switchingNow.current) {
         if (id) await deleteMarks(id); // done before Add is offered again, so a retry cannot race the delete
-        if (alive.current) setBusy(false);
+        setBusy(false);
         return;
       }
     }
+    if (prepare) setBusy(false); // the save is over (the parent stops holding the popup)
     const all = [...prepared, ...images.map((i) => i.id)];
     if (has) dispatch(addComment({ ...(id && { id }), anchor, text: body, ...(label && { label }), ...(all.length && { images: all }) }));
     window.getSelection()?.removeAllRanges();
@@ -121,12 +144,15 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
 
   useEffect(() => {
     // capture + preventDefault: this Esc must not also interrupt the agent (Composer skips defaultPrevented)
+    if (hidden) return;
+    // while a drawing is being saved, neither cancels: the save finishes and adds the comment
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
-      onClose();
+      if (!busyNow.current) onClose();
     };
     const onDown = (e: MouseEvent) => {
+      if (busyNow.current) return;
       // the lightbox is portalled out of the popup: a click there is not an outside click
       if (!root.current?.contains(e.target as Node) && !(e.target as Element).closest?.('[data-lightbox]')) onClose();
     };
@@ -136,7 +162,7 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('mousedown', onDown);
     };
-  }, [onClose]);
+  }, [onClose, hidden]);
 
   useLayoutEffect(() => {
     if (!root.current) return;
@@ -155,10 +181,7 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
     e.stopPropagation(); // never reaches the composer
     void add();
   };
-  const a = pending.anchor;
-  const quote = isMediaAnchor(a)
-    ? `${baseName(a.source.path)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${t('markShapes', a.shapes.length)}`
-    : `«${a.quote.trim()}»`;
+  const quote = quoteOf(pending.anchor, t);
 
   return (
     <div

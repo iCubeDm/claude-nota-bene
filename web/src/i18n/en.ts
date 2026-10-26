@@ -223,5 +223,6 @@ export const en: Dict = {
   markDiscard: 'Discard',
   markShapes: (n) => `${n} shape${n === 1 ? '' : 's'}`,
   markSaveFailed: (e) => `Could not save the drawing: ${e}`,
+  markNoFrame: 'the video frame did not load (try again once the video shows it)',
   markNoSize: 'Cannot mark up this file: it has no size yet (still loading, or an SVG without one)',
 };

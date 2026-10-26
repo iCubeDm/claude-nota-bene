@@ -146,3 +146,18 @@ it('a mark on a file that has changed since says so', () => {
   act(() => void store.dispatch(setFileVersion({ path: 'p.png', version: 'W/"2-2"' })));
   expect(pane.querySelector('[data-hit="mine"] title')?.textContent).toBe('the file has changed since');
 });
+
+it('a sent mark of another version of the file is not drawn; a pending one still is (with its "file changed" title)', () => {
+  const v1 = 'W/"1-1"';
+  const { store } = setup(image(), [
+    comment('pending-old', media('p.png', [RED], { version: v1 })),
+    comment('sent-old', media('p.png', [BLUE], { version: v1 }), { status: 'sent', sentIn: 'u1' }),
+    comment('sent-same', media('p.png', [BLUE], { version: 'W/"2-2"' }), { status: 'sent', sentIn: 'u1' }),
+    comment('sent-unversioned', media('p.png', [BLUE]), { status: 'sent', sentIn: 'u1' }),
+  ]);
+  // the current version unknown: nothing to compare against, all shown
+  expect(ids().sort()).toEqual(['pending-old', 'sent-old', 'sent-same', 'sent-unversioned']);
+  act(() => void store.dispatch(setFileVersion({ path: 'p.png', version: 'W/"2-2"' })));
+  expect(ids().sort()).toEqual(['pending-old', 'sent-same', 'sent-unversioned']);
+  expect(pane.querySelector('g[data-hit="pending-old"] title')?.textContent).toMatch(/changed/i);
+});

@@ -4,16 +4,17 @@ import type { RootState } from '../../store/store.ts';
 import { enterRoot } from '../../tabs/slice.ts';
 
 export type MarkTool = 'rect' | 'ellipse' | 'pen' | 'arrow';
-/** One media tab's unfinished drawing. In memory only: a page reload loses it, a tab switch does not. */
+/** One media tab's unfinished drawing. In memory only: a page reload loses it, a tab or folder switch does not. */
 export type Draft = { on: boolean; tool: MarkTool; color: MarkColor; shapes: MediaShape[] };
-export type MarkupState = { drafts: Record<string, Draft> };
+/** `drafts`: the current folder's, by tab id; `parked`: the other folders' (by root), put back on a switch back. */
+export type MarkupState = { drafts: Record<string, Draft>; root: string | null; parked: Record<string, Record<string, Draft>> };
 
 const EMPTY: Draft = { on: false, tool: 'rect', color: MARK_COLORS[0], shapes: [] };
 const draftOf = (s: MarkupState, tabId: string): Draft => (s.drafts[tabId] ??= { ...EMPTY, shapes: [] });
 
 export const markupSlice = createSlice({
   name: 'markup',
-  initialState: (): MarkupState => ({ drafts: {} }),
+  initialState: (): MarkupState => ({ drafts: {}, root: null, parked: {} }),
   reducers: {
     setMode: {
       reducer: (s, a: PayloadAction<{ tabId: string; on: boolean }>) => void (draftOf(s, a.payload.tabId).on = a.payload.on),
@@ -38,8 +39,17 @@ export const markupSlice = createSlice({
       if (d) s.drafts[a.payload] = { ...d, on: false, shapes: [] };
     },
   },
-  // another folder: its tabs are other files even when a path is the same
-  extraReducers: (b) => b.addCase(enterRoot, (s, a) => void (a.payload.first || (s.drafts = {}))),
+  // another folder: its tabs are other files even when a path is the same, so the drafts are parked under the folder
+  // left and the new folder's own come back (the first root merges: drafts made before it was known are its own)
+  extraReducers: (b) => b.addCase(enterRoot, (s, a) => {
+    const { root, first } = a.payload;
+    if (!first && root !== s.root) {
+      if (s.root !== null && Object.keys(s.drafts).length) s.parked[s.root] = s.drafts;
+      s.drafts = s.parked[root] ?? {};
+      delete s.parked[root];
+    }
+    s.root = root;
+  }),
 });
 
 export const { setMode, setTool, setColor, addShape, undo, clear } = markupSlice.actions;

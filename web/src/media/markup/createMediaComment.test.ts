@@ -104,6 +104,7 @@ it('a video is paused and its time read at the moment of the render', async () =
   let playing = true;
   Object.defineProperty(v, 'currentTime', { get: () => t, set: (x: number) => void (t = x) });
   Object.defineProperty(v, 'paused', { get: () => !playing });
+  Object.defineProperty(v, 'readyState', { get: () => 4 });
   v.pause = vi.fn(() => void (playing = false));
   const seen: { paused: boolean; time: number }[] = [];
   renderMarks.mockImplementationOnce(async () => {
@@ -115,4 +116,56 @@ it('a video is paused and its time read at the moment of the render', async () =
   const out = await prepareMediaComment(ID, v, { ...anchor, time: 1 });
   expect(seen).toEqual([{ paused: true, time: 4.2406 }]);
   expect(out.anchor).toEqual({ time: 4.241 });
+});
+
+/** A video whose readyState / seeking the test drives; events are fired by hand. */
+function fakeVideo(o: { ready: number; seeking: boolean }) {
+  const v = document.createElement('video');
+  let t = 2;
+  Object.defineProperty(v, 'currentTime', { get: () => t, set: (x: number) => void (t = x) });
+  Object.defineProperty(v, 'readyState', { get: () => o.ready });
+  Object.defineProperty(v, 'seeking', { get: () => o.seeking });
+  v.pause = vi.fn();
+  return { v, setTime: (x: number) => void (t = x) };
+}
+
+it('a video without the current frame (readyState < HAVE_CURRENT_DATA) is waited for until loadeddata, then drawn', async () => {
+  const o = { ready: 1, seeking: false };
+  const { v, setTime } = fakeVideo(o);
+  const p = prepareMediaComment(ID, v, { ...anchor, time: 1 });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(renderMarks).not.toHaveBeenCalled(); // nothing drawn from an empty video
+  o.ready = 2;
+  setTime(3.5);
+  v.dispatchEvent(new Event('loadeddata'));
+  const out = await p;
+  expect(renderMarks).toHaveBeenCalledTimes(1);
+  expect(out.anchor).toEqual({ time: 3.5 }); // the time is read once the frame is there
+});
+
+it('a seeking video is waited for until seeked', async () => {
+  const o = { ready: 4, seeking: true };
+  const { v } = fakeVideo(o);
+  const p = prepareMediaComment(ID, v, anchor);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(renderMarks).not.toHaveBeenCalled();
+  o.seeking = false;
+  v.dispatchEvent(new Event('seeked'));
+  await p;
+  expect(renderMarks).toHaveBeenCalledTimes(1);
+});
+
+it('a video frame that never arrives: an error (shown in the popup) after the timeout, nothing drawn or written', async () => {
+  vi.useFakeTimers();
+  try {
+    const { v } = fakeVideo({ ready: 0, seeking: false });
+    const p = prepareMediaComment(ID, v, anchor);
+    const settled = expect(p).rejects.toThrow(/frame/i);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settled;
+    expect(renderMarks).not.toHaveBeenCalled();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -72,6 +72,9 @@ export async function renderMarks(
   for (;;) {
     const pw = Math.max(1, Math.round(w * scale)), ph = Math.max(1, Math.round(h * scale));
     const f = makeCanvas(pw, ph);
+    // JPEG has no alpha: a transparent pixel of the source would encode black; white under it, as a viewer shows it
+    f.ctx.fillStyle = '#ffffff';
+    f.ctx.fillRect(0, 0, pw, ph);
     f.ctx.drawImage(source, 0, 0, pw, ph);
     drawShapes(f.ctx, shapes, pw, ph);
     const l = makeCanvas(pw, ph);

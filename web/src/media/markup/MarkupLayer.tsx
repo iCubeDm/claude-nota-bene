@@ -76,16 +76,33 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
   // ---- drawing: refs only until pointerup ----
   // `box`: the content box at pointerdown (no layout read per move); a scroll during the drag refreshes it.
   // `tool`/`color`: fixed at pointerdown, so a key pressed mid-drag changes the next shape, not this one.
+  // `ptsText`: the live pen's points as a string, kept only where SVGPointList is missing
   type Drag = { id: number; a: Pt; b: Pt; pen: number[]; ptsText: string; box: DOMRect; tool: MarkTool; color: MediaShape['color'] };
   const drag = useRef<Drag | null>(null);
   const toolRef = useRef(draft);
   toolRef.current = draft;
   const relOf = (e: { clientX: number; clientY: number }, b: DOMRect) => toRel(e.clientX, e.clientY, b);
-  const showLive = (d: Drag) => {
-    if (d.tool === 'pen') {
-      livePen.current?.setAttribute('points', d.ptsText);
-      return void livePenHalo.current?.setAttribute('points', d.ptsText);
+  // the live pen grows point by point through SVGPointList (O(1) per sample; rewriting `points` is O(n) per move, O(n²)
+  // per stroke); without one (jsdom) the whole string is set
+  const pens = () => [livePen.current, livePenHalo.current];
+  const appendable = () => typeof svg.current?.createSVGPoint === 'function'
+    && pens().every((el) => typeof el?.points?.appendItem === 'function');
+  const appendPen = (d: Drag, pts: Pt[]) => {
+    if (!appendable()) {
+      for (const p of pts) d.ptsText += ` ${p.x},${p.y}`;
+      for (const el of pens()) el?.setAttribute('points', d.ptsText);
+      return;
     }
+    for (const el of pens()) {
+      for (const p of pts) {
+        const sp = svg.current!.createSVGPoint(); // one per list: an item belongs to one list
+        sp.x = p.x;
+        sp.y = p.y;
+        el!.points.appendItem(sp);
+      }
+    }
+  };
+  const showLive = (d: Drag) => { // a box tool or the arrow: one path, recomputed from the two ends
     const s = shapeOf(d.tool, d.color, d.a, d.b, d.pen);
     const path = s ? shapePath(s, nat[0], nat[1]) : '';
     live.current?.setAttribute('d', path);
@@ -102,7 +119,8 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     const d: Drag = { id: e.pointerId, a, b: a, pen: [a.x, a.y], ptsText: `${a.x},${a.y}`, box: at, tool, color };
     drag.current = d;
     (tool === 'pen' ? livePen : live).current?.setAttribute('stroke', color);
-    showLive(d);
+    if (tool === 'pen') for (const el of pens()) el?.setAttribute('points', d.ptsText);
+    else showLive(d);
   };
   const onMove = (e: RPointerEvent<SVGSVGElement>) => {
     const d = drag.current;
@@ -110,15 +128,17 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     // every input sample since the last frame, for a stroke as smooth as the pointer (pen only; a box needs the last)
     const native = e.nativeEvent;
     const samples = d.tool === 'pen' && typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [];
+    const added: Pt[] = [];
     for (const p of samples.length ? samples : [native]) {
       const r = relOf(p, d.box);
       d.b = r;
       if (d.tool === 'pen') {
         d.pen.push(r.x, r.y);
-        d.ptsText += ` ${r.x},${r.y}`;
+        added.push(r);
       }
     }
-    showLive(d);
+    if (d.tool === 'pen') appendPen(d, added);
+    else showLive(d);
   };
   const finish = (e: RPointerEvent<SVGSVGElement>) => {
     const d = drag.current;
@@ -147,7 +167,9 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
     const v = pane?.getBoundingClientRect();
     const seen = at.right >= Math.max(0, v?.left ?? 0) && at.left <= Math.min(window.innerWidth, v?.right ?? Infinity)
       && at.bottom >= Math.max(0, v?.top ?? 0) && at.top <= Math.min(window.innerHeight, v?.bottom ?? Infinity);
-    onAdd(shapes, seen || !toolbar.current ? at : toolbar.current.getBoundingClientRect());
+    // the toolbar itself, not its pane-wide wrapper
+    const bar = toolbar.current?.firstElementChild;
+    onAdd(shapes, seen || !bar ? at : bar.getBoundingClientRect());
   }, [shapes, onAdd, box, pane]);
 
   // ---- keys: only while on, in the visible tab, with focus on nothing (body) or in this tab's pane or toolbar; never in
@@ -190,7 +212,8 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
   if (!offered && !on) return null;
   return (
     <>
-      <div ref={toolbar} data-anchor-skip className="pointer-events-none absolute top-2 right-3 z-20">
+      {/* spans the pane (left-3 too): a narrow pane wraps the toolbar's rows instead of pushing it off the left edge */}
+      <div ref={toolbar} data-anchor-skip className="pointer-events-none absolute top-2 right-3 left-3 z-20 flex justify-end">
         <MarkupToolbar
           draft={draft}
           onEnter={enter}

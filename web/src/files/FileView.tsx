@@ -165,9 +165,12 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   }, [markable, path, ref, t]);
   const closeMarkPopup = useCallback(() => setMarkPopup(null), []);
   const markAdded = useCallback(() => void dispatch(clear(tabId)), [dispatch, tabId]);
-  // the popup belongs to a visible drawing: hiding the tab or leaving the mode closes it (the draft stays)
+  // the popup belongs to a visible drawing: hiding the tab or leaving the mode closes it (the draft stays). Not while
+  // its Add is saving: that finishes (the popup waits hidden; a failure is shown there, and as a toast)
+  const popupBusy = useRef(false);
+  const onPopupBusy = useCallback((b: boolean) => void (popupBusy.current = b), []);
   useEffect(() => {
-    if (!active || !marking) setMarkPopup(null);
+    if ((!active || !marking) && !popupBusy.current) setMarkPopup(null);
   }, [active, marking]);
   // image/media reload: a new cache-busting key; a video/audio resumes where it was (a new src starts at 0)
   const resumeAt = useRef(0);
@@ -200,6 +203,12 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     const el = mediaEl.current;
     if (kind === 'image' || failedRef.current || !el || el.paused) reloadMedia();
   }, [marking, kind, reloadMedia]);
+  // the header ↻: like a finished turn, held while marking up (the drawing belongs to the frame on screen)
+  const reloadClick = () => {
+    if (!media) return setRev((r) => r + 1);
+    if (markingRef.current) return void (heldReload.current = true);
+    reloadMedia();
+  };
   const onMediaMeta = (e: { currentTarget: HTMLMediaElement }) => {
     if (resumeAt.current > 0) e.currentTarget.currentTime = resumeAt.current;
     resumeAt.current = 0;
@@ -329,7 +338,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <span className="min-w-0 flex-1 truncate" title={ref ? `${path} @ ${ref}` : path}>{path}</span>
         {ref && <SourceChip name={ref} />}
         {large && <span>{t('noHighlight')}</span>}
-        <button type="button" aria-label={t('reload')} title={t('reload')} onClick={() => (media ? reloadMedia() : setRev((r) => r + 1))} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
+        <button type="button" aria-label={t('reload')} title={t('reload')} onClick={reloadClick} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
       {markableKind && !failed && !srcGone ? (
@@ -339,7 +348,12 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
           {markable && <MediaMarks tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} path={path} refName={ref} />}
           {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} held={!!markPopup} />}
           {/* portalled with its own layer: above the markup toolbar, which it may open next to */}
-          {markPopup && createPortal(<div className="relative z-30"><CommentPopup pending={markPopup} onClose={closeMarkPopup} onAdded={markAdded} /></div>, document.body)}
+          {markPopup && createPortal(
+            <div className="relative z-30" hidden={!active}>
+              <CommentPopup pending={markPopup} onClose={closeMarkPopup} onAdded={markAdded} onBusy={onPopupBusy} hidden={!active} />
+            </div>,
+            document.body,
+          )}
         </div>
       ) : body}
     </div>

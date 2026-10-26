@@ -1,5 +1,6 @@
 import type { MediaAnchor } from '@nota-bene/shared';
 import { prepareImage, uploadImage } from '@/attachments/image.ts';
+import { t } from '@/i18n/index.ts';
 import { renderMarks } from './render.ts';
 
 async function putMark(id: string, name: 'frame.jpg' | 'layer.png', b: Blob): Promise<void> {
@@ -26,12 +27,33 @@ export type MediaAnchorPatch = Partial<Pick<MediaAnchor, 'scale' | 'version' | '
 
 /** A HEAD that never answers must not hold Add forever: no version then. */
 const VERSION_WAIT_MS = 5000;
+/** How long a video may take to have its current frame (loading, or mid-seek) before Add gives up with an error. */
+const FRAME_WAIT_MS = 5000;
+
+/** Resolves once the video has the frame at its current time (not seeking, readyState >= HAVE_CURRENT_DATA). */
+function frameReady(v: HTMLVideoElement): Promise<void> {
+  const ready = () => v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !v.seeking;
+  if (ready()) return Promise.resolve();
+  const events = ['loadeddata', 'seeked', 'canplay', 'timeupdate'] as const;
+  return new Promise((resolve, reject) => {
+    const done = (e?: Error) => {
+      clearTimeout(timer);
+      for (const n of events) v.removeEventListener(n, check);
+      if (e) reject(e);
+      else resolve();
+    };
+    const check = () => void (ready() && done());
+    const timer = setTimeout(() => done(new Error(t('markNoFrame'))), FRAME_WAIT_MS);
+    for (const n of events) v.addEventListener(n, check);
+  });
+}
 
 /**
  * Renders, uploads the natural-size files to /marks/<id>/…, uploads downscaled copies to /attach; returns the ids
  * (frame first) and the anchor patch. On any failure deletes /marks/<id> and rejects. Sequential on purpose: a DELETE
  * after a failure must not overtake a write still in flight.
- * - A video is paused and its time read right before the frame is drawn (an OS media key may have resumed it).
+ * - A video is paused, waited for until it has the current frame (FRAME_WAIT_MS, then an error), and its time read
+ *   right before the frame is drawn (an OS media key may have resumed it).
  * - `version`: the media's ETag request, made when the mode was entered; awaited here, after the frame is captured.
  * - `scale`: only when the files had to be downscaled to fit (< 1).
  */
@@ -42,6 +64,8 @@ export async function prepareMediaComment(
     const patch: MediaAnchorPatch = {};
     if (source instanceof HTMLVideoElement) {
       source.pause();
+      await frameReady(source); // an empty or mid-seek video would draw a blank (or a stale) frame
+      source.pause(); // again: a media key may have resumed it during the wait
       patch.time = Math.round(source.currentTime * 1000) / 1000;
     }
     // no await between the time and the call: renderMarks draws the frame before its first await

@@ -139,6 +139,29 @@ it('pen strokes update in place during the drag and are simplified on pointerup'
   expect(draft().shapes[1]).toEqual({ kind: 'pen', color: '#ff3b30', points: [0.5, 0.5, 0.5, 0.5] });
 });
 
+it('a live pen stroke appends each new point to both polylines (no rewrite of the whole points string per move)', () => {
+  setup();
+  fireEvent.click(toggle());
+  key({ key: 'p', code: 'KeyP' });
+  // jsdom has no SVGPointList: a browser-like one on the two live polylines and createSVGPoint on the svg
+  (layer() as unknown as { createSVGPoint: () => { x: number; y: number } }).createSVGPoint = () => ({ x: 0, y: 0 });
+  const lists = [...pane.querySelectorAll('polyline')].map((el) => {
+    const items: { x: number; y: number }[] = [];
+    Object.defineProperty(el, 'points', { configurable: true, value: { appendItem: (p: { x: number; y: number }) => (items.push(p), p) } });
+    return { el, items, set: vi.spyOn(el, 'setAttribute') };
+  });
+  expect(lists).toHaveLength(2);
+  fireEvent.pointerDown(layer(), { button: 0, clientX: 100, clientY: 500, pointerId: 1 });
+  fireEvent.pointerMove(layer(), { clientX: 200, clientY: 500, pointerId: 1 });
+  fireEvent.pointerMove(layer(), { clientX: 300, clientY: 600, pointerId: 1 });
+  for (const l of lists) {
+    expect(l.items).toEqual([{ x: 0.2, y: 0.5 }, { x: 0.3, y: 0.7 }]);
+    // the stroke colour (live pen) and the first point at pointerdown, nothing per move
+    expect(l.set.mock.calls.filter((c) => c[0] === 'points')).toEqual([['points', '0.1,0.5']]);
+    expect(l.items[0]).not.toBe(lists[0] === l ? lists[1]!.items[0] : lists[0]!.items[0]); // one point object per list
+  }
+});
+
 it('undo removes the last shape; Esc with shapes asks before discarding; Esc without shapes just leaves', () => {
   const { draft } = setup();
   fireEvent.click(toggle());
@@ -302,7 +325,8 @@ it('shapes scrolled out of sight: the rect is the toolbar\'s', () => {
   act(() => { store.dispatch(addShape(TAB, { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 })); });
   const bar = screen.getByRole('toolbar');
   const tb = rect(800, 8, 180, 30);
-  bar.parentElement!.getBoundingClientRect = () => tb;
+  bar.getBoundingClientRect = () => tb;
+  bar.parentElement!.getBoundingClientRect = () => rect(12, 8, 976, 30); // the pane-wide wrapper: not where it opens
   fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
   expect(onAdd.mock.calls[0]![1]).toBe(tb);
 });

@@ -248,6 +248,17 @@ it('a turn ending while marking does not reload the media; leaving catches up', 
   expect(img().getAttribute('src')).toBe('/file?path=p.png&r=1');
 });
 
+it('the header ↻ while marking does not reload the media (the drawing belongs to this frame); leaving catches up', () => {
+  const { r, store } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = () => r.container.querySelector('img')!;
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+  expect(img().getAttribute('src')).toBe('/file?path=p.png');
+  fireEvent.click(screen.getByRole('button', { name: /leave/i }));
+  expect(img().getAttribute('src')).toBe('/file?path=p.png&r=1');
+});
+
 it('audio has no markup mode', () => {
   const { r, store } = setup('a.mp3');
   act(() => { store.dispatch(serverEvent(hello())); });
@@ -315,6 +326,58 @@ it('a paused video: the anchor has the time to the ms and no version without an 
   expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), v,
     { kind: 'media', source: { kind: 'file', path: 'v.mp4' }, width: 640, height: 360, time: 4.24, shapes: [SHAPE] }, expect.anything());
   expect(store.getState().comments.items[0]!.anchor).not.toHaveProperty('version');
+});
+
+it('a tab switch while Add saves: the save finishes and the comment is added; the typed text is never lost', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  prepareMediaComment.mockImplementationOnce(async () => { await gate; return { images: ['1'.repeat(64), '2'.repeat(64)], anchor: {} }; });
+  const { r, store, setActive } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = r.container.querySelector('img')!;
+  Object.defineProperty(img, 'naturalWidth', { value: 10 });
+  Object.defineProperty(img, 'naturalHeight', { value: 10 });
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:p.png', SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  fireEvent.change(screen.getByPlaceholderText('Comment…'), { target: { value: 'keep me' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  setActive(false); // the user switches tabs while the files upload
+  await act(async () => release());
+  await waitFor(() => expect(store.getState().comments.items).toHaveLength(1));
+  expect(store.getState().comments.items[0]).toMatchObject({ text: 'keep me' });
+  expect(selectDraft(store.getState(), 'file:p.png')).toMatchObject({ on: false, shapes: [] });
+  expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
+  // the save is over: the next popup closes on a tab switch as before
+  setActive(true);
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:p.png', SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  expect(screen.getByPlaceholderText('Comment…')).toBeInTheDocument();
+  setActive(false);
+  expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
+});
+
+it('a tab switch while Add saves and the save fails: back on the tab the popup is there with the text and the error', async () => {
+  let fail!: () => void;
+  const gate = new Promise<void>((_, rej) => (fail = () => rej(new Error('marks 500'))));
+  prepareMediaComment.mockImplementationOnce(async () => { await gate; return { images: [], anchor: {} }; });
+  const { r, store, setActive } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = r.container.querySelector('img')!;
+  Object.defineProperty(img, 'naturalWidth', { value: 10 });
+  Object.defineProperty(img, 'naturalHeight', { value: 10 });
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:p.png', SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  fireEvent.change(screen.getByPlaceholderText('Comment…'), { target: { value: 'keep me' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  setActive(false);
+  await act(async () => fail());
+  expect(store.getState().comments.items).toEqual([]);
+  setActive(true);
+  expect(screen.getByPlaceholderText('Comment…')).toHaveValue('keep me');
+  expect(screen.getByText(/Could not save the drawing.*marks 500/)).toBeInTheDocument();
 });
 
 it('Comment pressed before the version request answers: the comment still gets the version', async () => {

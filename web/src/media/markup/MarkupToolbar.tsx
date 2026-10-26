@@ -43,7 +43,7 @@ function Btn({ label, tip, pressed, disabled, onClick, className = '', children 
   );
 }
 
-const shell = 'pointer-events-auto flex items-center gap-0.5 rounded-lg border border-border bg-chrome/90 p-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.35)] backdrop-blur';
+const shell = 'pointer-events-auto flex max-w-full flex-wrap items-center justify-end gap-0.5 rounded-lg border border-border bg-chrome/90 p-0.5 shadow-[0_4px_16px_rgba(0,0,0,0.35)] backdrop-blur';
 
 /** The media tab's top-right overlay: the "Mark up" toggle, or, while marking, tools, colours, undo, Comment, ✕. */
 export function MarkupToolbar({ draft, onEnter, onTool, onColor, onUndo, onComment, onLeave }: {

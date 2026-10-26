@@ -831,3 +831,25 @@ test('4K-ish drawing stays responsive: a 300-point pen stroke, the pointer-move 
   await page.getByRole('button', { name: /^(Discard|Выбросить)$/ }).click();
   await expect(layer).toHaveCount(0);
 });
+
+test('in a narrow pane the markup toolbar wraps inside the pane instead of running off its left edge @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the media fixtures with it');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await start(page);
+  await clearPending(page);
+  await openFromTree(page, 'media/wide.png');
+  await page.setViewportSize({ width: 520, height: 900 });
+  await markUpBtn(page).click();
+  const pane = mediaPane(page, 'media/wide.png');
+  const bar = page.getByRole('toolbar', { name: /^(Markup|Разметка)$/ });
+  await expect(bar).toBeVisible();
+  const p = (await pane.boundingBox())!;
+  expect(p.width).toBeLessThan(400); // the docked panels leave a narrow pane: the toolbar does not fit on one line
+  await page.screenshot({ path: test.info().outputPath('narrow-toolbar.png') });
+  for (const b of await bar.getByRole('button').all()) {
+    const r = (await b.boundingBox())!;
+    expect(r.x).toBeGreaterThanOrEqual(p.x);
+    expect(r.x + r.width).toBeLessThanOrEqual(p.x + p.width);
+  }
+  await bar.getByRole('button', { name: /^(Leave|Выйти)/ }).click();
+});
