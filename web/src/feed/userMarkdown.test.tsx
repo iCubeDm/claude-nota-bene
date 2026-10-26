@@ -63,24 +63,25 @@ it('anchors: plain text offsets are unchanged, a new comment on rendered text re
 });
 
 it('an old anchor on the raw text re-anchors by quote or orphans, never marks other text', () => {
-  const { root } = setup('say **bold** now and again now');
-  const text = textOf(root);
-  const raw = 'say **bold** now and again now';
-  const rawAt = (q: string, n = 0) => { let i = -1; for (let k = 0; k <= n; k++) i = raw.indexOf(q, i + 1); return i; };
-  const old = (q: string, n = 0): Anchor => ({ source: { kind: 'message', id: 'u1' }, start: rawAt(q, n), end: rawAt(q, n) + q.length, quote: q, prefix: raw.slice(Math.max(0, rawAt(q, n) - 32), rawAt(q, n)), suffix: raw.slice(rawAt(q, n) + q.length, rawAt(q, n) + q.length + 32) });
+  const raw = '**ab** now now';
+  const { root } = setup(raw);
+  const at = (q: string, n = 0) => { let i = -1; for (let k = 0; k <= n; k++) i = raw.indexOf(q, i + 1); return i; };
+  // as the raw-text model of the prototype made them: offsets and context on the raw source
+  const old = (q: string, n = 0): Anchor => makeAnchor({ kind: 'message', id: 'u1' }, raw, at(q, n), at(q, n) + q.length);
+  expect(textOf(root)).toContain('ab now now');
+  // the first "now" sat at raw 7..10; the rendered text has the SECOND "now" there: it must mark the first one
+  const first = rangeForAnchor(root, old('now', 0))!;
+  expect(first.toString()).toBe('now');
+  expect([first.startContainer.textContent, first.startOffset]).toEqual([' now now', 1]);
+  const second = rangeForAnchor(root, old('now', 1))!;
+  expect([second.startContainer.textContent, second.startOffset]).toEqual([' now now', 5]);
   // the quote contained markdown syntax: gone from the rendered text -> orphan
-  expect(rangeForAnchor(root, old('**bold**'))).toBeNull();
-  // the second "now": the prefix/suffix context picks it, and what is marked equals the quote
-  const second = rangeForAnchor(root, old('now', 1));
-  expect(second?.toString()).toBe('now');
-  expect(second && textOf(root).indexOf('now')).toBeGreaterThan(-1);
+  expect(rangeForAnchor(root, old('**ab**'))).toBeNull();
   // ambiguous, no usable context: orphan rather than a guess
-  const amb = rangeForAnchor(root, { ...old('now', 1), prefix: '', suffix: '' });
-  if (amb) expect(amb.toString()).toBe('now');
-  expect(text).toContain('say bold now and again now');
+  expect(rangeForAnchor(root, { ...old('now', 1), prefix: '', suffix: '' })).toBeNull();
 });
 
-it('the batch details render comment text and quotes as markdown; the raw text is untouched', () => {
+it('the batch details render comment text as markdown and the quote as plain text; the raw text is untouched', () => {
   const c: Comment = {
     id: 'c1', anchor: { source: { kind: 'message', id: 'a1' }, start: 0, end: 3, quote: 'the *q*', prefix: '', suffix: '' },
     text: 'use **this** `code`', status: 'sent', sentIn: 'u1', createdAt: 1,
@@ -88,7 +89,8 @@ it('the batch details render comment text and quotes as markdown; the raw text i
   const { root } = setup('go', [c]);
   const d = root.querySelector('details')!;
   expect(d.querySelector('strong')).toHaveTextContent('this');
-  expect(d.querySelector('blockquote em')).toHaveTextContent('q');
+  expect(d.querySelector('blockquote em')).toBeNull();
+  expect(d.querySelector('blockquote')).toHaveTextContent('the *q*');
   expect(composeBatch('go', [c], 'en', () => '', () => 'x', () => undefined)).toContain('→ use **this** `code`');
 });
 
@@ -110,4 +112,18 @@ it('a comment card renders its text as markdown; editing shows the raw source', 
   box.textContent = 'a **bold** [link](https://example.com) more';
   fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
   expect(store.getState().comments.items[0].text).toBe('a **bold** [link](https://example.com) more');
+});
+
+it('text in angle brackets stays visible in a user message, a comment card and the batch details', () => {
+  const c: Comment = {
+    id: 'c1', anchor: { source: { kind: 'message', id: 'a1' }, start: 0, end: 3, quote: 'x', prefix: '', suffix: '' },
+    text: 'rename <Composer> to <Editor/>', status: 'sent', sentIn: 'u1', createdAt: 1,
+  };
+  const { root } = setup('fix <Composer> and <b>this</b>\n\n<div>block</div>', [c]);
+  const bubble = root.querySelector('.md')!;
+  expect(bubble.textContent).toContain('fix <Composer> and <b>this</b>');
+  expect(bubble.textContent).toContain('<div>block</div>');
+  expect(bubble.querySelector('b')).toBeNull();
+  expect(root.querySelector('details')!.textContent).toContain('rename <Composer> to <Editor/>');
+  expect(textOf(root)).toContain('fix <Composer> and');
 });

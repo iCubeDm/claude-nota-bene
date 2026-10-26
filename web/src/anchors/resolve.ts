@@ -27,9 +27,26 @@ function commonPrefix(a: string, b: string): number {
   return n;
 }
 
+const FAST_CONTEXT = 8;
+
+/**
+ * The stored offsets still hold only when the text around them still reads as it did: the quote alone is not enough
+ * (an old anchor on a user message's raw text, now rendered as markdown, can find the same word at its old offset
+ * and mark the wrong one). A context shorter than CONTEXT means the text began or ended there, so it must still.
+ */
+function offsetsHold(a: Anchor, text: string): boolean {
+  if (a.end > text.length || text.slice(a.start, a.end) !== a.quote) return false;
+  const p = a.prefix.slice(-FAST_CONTEXT);
+  const s = a.suffix.slice(0, FAST_CONTEXT);
+  if (a.start < p.length || text.slice(a.start - p.length, a.start) !== p || text.slice(a.end, a.end + s.length) !== s) return false;
+  if (a.prefix.length < CONTEXT && a.start !== a.prefix.length) return false;
+  if (a.suffix.length < CONTEXT && a.end + a.suffix.length !== text.length) return false;
+  return true;
+}
+
 export function resolveAnchor(a: Anchor, text: string): { start: number; end: number } | null {
   const { quote } = a;
-  if (text.slice(a.start, a.end) === quote && a.end <= text.length) return { start: a.start, end: a.end };
+  if (offsetsHold(a, text)) return { start: a.start, end: a.end };
   if (quote === '') return null;
 
   let best = -1;

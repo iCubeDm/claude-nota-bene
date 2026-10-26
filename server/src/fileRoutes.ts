@@ -226,7 +226,8 @@ export function fileRoutes(o: {
 
     '/git-status': (req, res) => {
       if (!getOnly(req, res)) return;
-      gitStatus(o.root()).then((st) => json(req, res, 200, st), () => json(req, res, 200, null));
+      // 503 = git did not answer in time: the header keeps what it shows
+      gitStatus(o.root()).then((st) => json(req, res, 200, st), () => plain(res, 503, 'git status timed out'));
     },
 
     '/tree': (req, res) => {

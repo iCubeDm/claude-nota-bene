@@ -91,7 +91,7 @@ describe('gitStatus', () => {
     expect((await gitStatus(repo))?.dirty).toBe(true);
     git(repo, 'checkout', '-q', '--', 'a.md');
   });
-  it('GET /git-status answers the current root: object in a repo, null outside, never 500', async () => {
+  it('GET /git-status answers the current root: object in a repo, null outside, never 500 (a git timeout is a 503)', async () => {
     clearStatusCache();
     current = repo;
     const a = await get();

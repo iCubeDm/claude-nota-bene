@@ -81,9 +81,10 @@ it('only one list at a time: ":smi" after "@a" shows the emoji list, "@a" alone 
   expect(await screen.findAllByRole('listbox')).toHaveLength(1);
   expect(screen.getAllByRole('option')[0].textContent).toMatch(/:smi/);
   await userEvent.clear(box);
+  vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(['src/app.ts'])));
   await userEvent.keyboard('@a');
-  await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
-  expect(screen.queryAllByRole('option').length).toBeLessThanOrEqual(0);
+  expect(await screen.findAllByRole('listbox')).toHaveLength(1);
+  expect(screen.getAllByRole('option')[0].textContent).toBe('app.tssrc/'); // name, then its folder
 });
 
 it('a `:` that is not at a word start (a path, a time) opens nothing', async () => {

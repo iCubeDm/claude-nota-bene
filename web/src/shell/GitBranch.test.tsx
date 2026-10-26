@@ -8,13 +8,15 @@ import { Header } from './Header.tsx';
 
 let answer: unknown;
 let calls: number;
+let timedOut = false;
 beforeEach(() => {
   vi.useFakeTimers();
   setLang('en');
   answer = { branch: 'main', detached: false, dirty: false };
   calls = 0;
+  timedOut = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url === '/git-status') { calls++; return new Response(JSON.stringify(answer)); }
+    if (url === '/git-status') { calls++; return timedOut ? new Response('git status timed out', { status: 503 }) : new Response(JSON.stringify(answer)); }
     return new Response('nope', { status: 404 });
   }));
 });
@@ -83,4 +85,17 @@ it('refetches on window focus, and on a root change', async () => {
   await wait(3000);
   await ev(session('/p/other'));
   expect(calls).toBe(3);
+});
+
+it('git timing out (503) keeps what is shown', async () => {
+  answer = { branch: 'main', detached: false, dirty: true };
+  const { ev, el, wait } = await setup();
+  await ev(session('/p/proj'));
+  expect(el()).toHaveTextContent('(main ✗)');
+  timedOut = true;
+  await wait(3000);
+  await ev(result);
+  await wait(3000);
+  expect(calls).toBeGreaterThan(1);
+  expect(el()).toHaveTextContent('(main ✗)');
 });

@@ -22,6 +22,8 @@ const escAttr = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<':
 // marked renderers are global and parse is synchronous, so the current render's baseDir and source live here
 let currentBase: string | undefined;
 let currentSrc: string | undefined;
+let currentNoHtml = false;
+const escHtml = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
 
 marked.use({
   gfm: true,
@@ -31,6 +33,10 @@ marked.use({
       if (VIDEO.test(href)) return `<video controls preload="metadata" src="${src}"></video>`;
       if (AUDIO.test(href)) return `<audio controls src="${src}"></audio>`;
       return `<img src="${src}" alt="${escAttr(text || '')}">`;
+    },
+    // what a person typed (user messages, comments): `<Composer>` is text, not a tag the sanitizer would drop
+    html(html: string) {
+      return currentNoHtml ? escHtml(html) : html;
     },
     // <input> is forbidden by the sanitizer: a task-list box is a CSS-drawn span (no text, so anchors read the same)
     checkbox(checked: boolean) {
@@ -95,9 +101,10 @@ export const Markdown = memo(
   /**
    * `src`: the source of the file being shown (M3-16): its relative images load from that source.
    * `breaks`: a single newline is a line break (what the user typed in the composer). `mentions`: `@path` in the text
-   * becomes a clickable ref (user messages; the text must have gone through `escapeMentions`).
+   * becomes a clickable ref (user messages; the text must have gone through `escapeMentions`). `noHtml`: raw HTML in
+   * the text is shown as typed (what a person wrote: `<Tag>` stays visible), not passed to the sanitizer.
    */
-  function Markdown({ text, final, baseDir, src, breaks, mentions }: { text: string; final: boolean; baseDir?: string; src?: string; breaks?: boolean; mentions?: boolean }) {
+  function Markdown({ text, final, baseDir, src, breaks, mentions, noHtml }: { text: string; final: boolean; baseDir?: string; src?: string; breaks?: boolean; mentions?: boolean; noHtml?: boolean }) {
     const ref = useRef<HTMLDivElement>(null);
     // absolute paths become refs only inside a known source's dir: re-mark when the list arrives or changes
     const sources = useSources();
@@ -105,6 +112,7 @@ export const Markdown = memo(
       () => {
         currentBase = baseDir;
         currentSrc = src;
+        currentNoHtml = !!noHtml;
         try {
           return DOMPurify.sanitize(marked.parse(text, { async: false, breaks }) as string, {
             ADD_TAGS: ['video', 'audio'],
@@ -114,9 +122,10 @@ export const Markdown = memo(
         } finally {
           currentBase = undefined;
           currentSrc = undefined;
+          currentNoHtml = false;
         }
       },
-      [text, baseDir, src, breaks],
+      [text, baseDir, src, breaks, noHtml],
     );
     useLayoutEffect(() => {
       if (!ref.current || !final) return;
@@ -128,5 +137,5 @@ export const Markdown = memo(
     }, [html, final]);
     return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
   },
-  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src && a.breaks === b.breaks && a.mentions === b.mentions,
+  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src && a.breaks === b.breaks && a.mentions === b.mentions && a.noHtml === b.noHtml,
 );

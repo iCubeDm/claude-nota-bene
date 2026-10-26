@@ -202,7 +202,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
         className={`-ml-1 mt-1.5 rounded px-1 py-0.5 outline-none focus:bg-muted ${editing ? 'whitespace-pre-wrap' : 'md-tight'}`}
       >
         {/* editing shows the raw markdown source as plain text; otherwise it is rendered (not final: no refs, no mermaid) */}
-        {editing ? c.text : <Markdown text={c.text} final={false} breaks />}
+        {editing ? c.text : <Markdown text={c.text} final={false} breaks noHtml />}
       </div>
       {c.images?.length ? <Attachments ids={c.images} /> : null}
       {label && (

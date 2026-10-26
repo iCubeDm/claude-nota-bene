@@ -38,7 +38,7 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
       </div>
       {general && (
         <div className="md-tight">
-          <Markdown text={escapeMentions(general)} final breaks mentions />
+          <Markdown text={escapeMentions(general)} final breaks mentions noHtml />
         </div>
       )}
       {item.images && <Attachments ids={item.images.map((i) => i.id)} />}
@@ -48,15 +48,16 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
           {sent.length
             ? sent.map((c) => (
                 <div key={c.id} className="mt-1.5">
-                  <blockquote className="md-tight border-l-2 border-nb-accent pl-2"><Markdown text={c.anchor.quote} final={false} breaks /></blockquote>
-                  <div className="md-tight">
-                    →{' '}
-                    {c.label && <span className="mr-1 rounded bg-muted px-1">{labelOf(c)}</span>}
-                    <Markdown text={c.text} final={false} breaks />
+                  {/* the quote is text the user selected in rendered output: plain, never re-read as markdown */}
+                  <blockquote className="whitespace-pre-wrap border-l-2 border-nb-accent pl-2">{c.anchor.quote}</blockquote>
+                  <div className="md-tight flex items-baseline gap-1">
+                    <span className="flex-none">→</span>
+                    {c.label && <span className="flex-none rounded bg-muted px-1">{labelOf(c)}</span>}
+                    <div className="min-w-0 flex-1"><Markdown text={c.text} final={false} breaks noHtml /></div>
                   </div>
                 </div>
               ))
-            : <div className="md-tight mt-1.5"><Markdown text={raw} final={false} breaks /></div>}
+            : <div className="md-tight mt-1.5"><Markdown text={raw} final={false} breaks noHtml /></div>}
         </details>
       )}
     </div>

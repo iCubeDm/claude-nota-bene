@@ -55,9 +55,10 @@ describe('resolveAnchor', () => {
     expect(resolveAnchor(a, 'xxxxaxxx')).toEqual({ start: 4, end: 5 });
   });
   it('empty quote resolves only by exact position', () => {
-    const a = { source: src, start: 2, end: 2, quote: '', prefix: '', suffix: '' };
+    const a = makeAnchor(src, 'abcd', 2, 2);
     expect(resolveAnchor(a, 'abcd')).toEqual({ start: 2, end: 2 });
     expect(resolveAnchor(a, 'a')).toBeNull();
+    expect(resolveAnchor(a, 'xbcd')).toBeNull(); // the context moved: an empty quote cannot be searched for
   });
 
   it('never returns a range whose text differs from quote (property)', () => {

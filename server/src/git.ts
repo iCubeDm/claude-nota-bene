@@ -227,34 +227,39 @@ export type GitStatus = { branch: string | null; detached: boolean; dirty: boole
 const STATUS_TTL = 3_000;
 const STATUS_TIMEOUT = 3_000;
 
+/** null: not a repo (or no git). Throws when git did not answer in time: the caller keeps what it showed. */
 async function readStatus(root: string): Promise<GitStatus | null> {
   const run = async (args: string[]) => (await git(root, ['-c', 'core.fsmonitor=false', ...args], 1 << 20, STATUS_TIMEOUT)).toString('utf8');
   try {
-    let branch: string | null;
-    let detached = false;
-    try {
-      const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-      detached = head === 'HEAD';
-      branch = detached ? null : head;
-    } catch {
-      // a repo without commits has no HEAD to resolve, but its branch name is known
-      branch = (await run(['symbolic-ref', '--short', '-q', 'HEAD'])).trim() || null;
-    }
-    // new files the agent made count too (not the ignored ones); a huge untracked tree that times out falls back to
-    // the tracked files only, so the header still shows something
-    const status = (u: string) => run(['status', '--porcelain=v1', u, '--ignore-submodules']).then((o) => o.trim() !== '');
-    const dirty = await status('-unormal').catch(() => status('-uno'));
-    return { branch, detached, dirty };
+    await run(['rev-parse', '--is-inside-work-tree']);
   } catch {
-    return null; // not a repo, no git, a timeout
+    return null;
   }
+  let branch: string | null;
+  let detached = false;
+  try {
+    const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    detached = head === 'HEAD';
+    branch = detached ? null : head;
+  } catch {
+    // a repo without commits has no HEAD to resolve, but its branch name is known
+    branch = (await run(['symbolic-ref', '--short', '-q', 'HEAD'])).trim() || null;
+  }
+  // new files the agent made count too (not the ignored ones); a huge untracked tree that times out falls back to
+  // the tracked files only, so the header still shows something
+  const status = (u: string) => run(['status', '--porcelain=v1', u, '--ignore-submodules']).then((o) => o.trim() !== '');
+  const dirty = await status('-unormal').catch(() => status('-uno'));
+  return { branch, detached, dirty };
 }
 
 const statusCache = new Map<string, { at: number; p: Promise<GitStatus | null> }>();
 /** Test hook. */
 export const clearStatusCache = () => statusCache.clear();
 
-/** The current branch (or detached) and whether there are uncommitted changes or new files; null outside a repo. Cached per root for 3 s. */
+/**
+ * The current branch (or detached) and whether there are uncommitted changes or new files; null outside a repo;
+ * rejects when git timed out. Cached per root for 3 s (a rejection too, so a slow repo is not asked again at once).
+ */
 export function gitStatus(root: string): Promise<GitStatus | null> {
   const hit = statusCache.get(root);
   if (hit && Date.now() - hit.at < STATUS_TTL) return hit.p;

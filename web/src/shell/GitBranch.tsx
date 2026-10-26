@@ -28,7 +28,8 @@ function useGitStatus(root: string | undefined, turnSeq: number): GitStatus | nu
       last.current = Date.now();
       try {
         const r = await fetch('/git-status');
-        const v: unknown = r.ok ? await r.json() : null;
+        if (!r.ok) return; // git timed out (503): keep what is shown
+        const v: unknown = await r.json();
         if (mine === gen.current) setStatus(isStatus(v) ? v : null);
       } catch {
         // offline: keep what is shown
