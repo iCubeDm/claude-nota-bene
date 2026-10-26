@@ -28,9 +28,9 @@ export class SourceError extends Error {
   }
 }
 
-function git(cwd: string, args: string[], maxBuffer = 16 << 20): Promise<Buffer> {
+function git(cwd: string, args: string[], maxBuffer = 16 << 20, timeout = TIMEOUT): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, env: gitEnv(), timeout: TIMEOUT, maxBuffer, encoding: 'buffer' }, (err, out) => (err ? reject(err) : resolve(out)));
+    execFile('git', args, { cwd, env: gitEnv(), timeout, maxBuffer, encoding: 'buffer' }, (err, out) => (err ? reject(err) : resolve(out)));
   });
 }
 const gitText = async (cwd: string, args: string[]) => (await git(cwd, args)).toString('utf8');
@@ -220,4 +220,43 @@ export async function branchFiles(root: string, src: Source): Promise<string[]> 
   const files = out.toString('utf8').split('\0').filter(Boolean).map((p) => p.slice(cut))
     .filter((p) => !p.split('/').some((seg) => HIDDEN.has(seg)));
   return withDirs(files.slice(0, FILES_CAP));
+}
+
+/** Branch and dirty state of the root for the header. */
+export type GitStatus = { branch: string | null; detached: boolean; dirty: boolean };
+const STATUS_TTL = 3_000;
+const STATUS_TIMEOUT = 3_000;
+
+async function readStatus(root: string): Promise<GitStatus | null> {
+  const run = async (args: string[]) => (await git(root, ['-c', 'core.fsmonitor=false', ...args], 1 << 20, STATUS_TIMEOUT)).toString('utf8');
+  try {
+    let branch: string | null;
+    let detached = false;
+    try {
+      const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+      detached = head === 'HEAD';
+      branch = detached ? null : head;
+    } catch {
+      // a repo without commits has no HEAD to resolve, but its branch name is known
+      branch = (await run(['symbolic-ref', '--short', '-q', 'HEAD'])).trim() || null;
+    }
+    // -uno: untracked files are not "dirty" for this indicator, and a big untracked tree is the costly case
+    const dirty = (await run(['status', '--porcelain=v1', '-uno', '--ignore-submodules'])).trim() !== '';
+    return { branch, detached, dirty };
+  } catch {
+    return null; // not a repo, no git, a timeout
+  }
+}
+
+const statusCache = new Map<string, { at: number; p: Promise<GitStatus | null> }>();
+/** Test hook. */
+export const clearStatusCache = () => statusCache.clear();
+
+/** The current branch (or detached) and whether tracked files have uncommitted changes; null outside a repo. Cached per root for 3 s. */
+export function gitStatus(root: string): Promise<GitStatus | null> {
+  const hit = statusCache.get(root);
+  if (hit && Date.now() - hit.at < STATUS_TTL) return hit.p;
+  const p = readStatus(root);
+  statusCache.set(root, { at: Date.now(), p });
+  return p;
 }

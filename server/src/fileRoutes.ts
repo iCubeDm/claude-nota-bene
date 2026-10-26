@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream';
 import type { EventHub } from './hub.ts';
 import { reportError } from './errors.ts';
 import { listDir, listFiles, resolveInRoot } from './files.ts';
-import { blobSize, branchFiles, listSources, readFile, readTree, SourceError, type Source } from './git.ts';
+import { blobSize, branchFiles, gitStatus, listSources, readFile, readTree, SourceError, type Source } from './git.ts';
 import { fuzzyScore } from './fuzzy.ts';
 import type { AgentSession } from './agent/types.ts';
 import { parseRange } from './range.ts';
@@ -222,6 +222,11 @@ export function fileRoutes(o: {
     '/sources': (req, res) => {
       if (!getOnly(req, res)) return;
       listSources(o.root()).then((list) => json(req, res, 200, list), (e) => fail(req, res, e));
+    },
+
+    '/git-status': (req, res) => {
+      if (!getOnly(req, res)) return;
+      gitStatus(o.root()).then((st) => json(req, res, 200, st), () => json(req, res, 200, null));
     },
 
     '/tree': (req, res) => {

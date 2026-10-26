@@ -103,6 +103,10 @@ export const ru = {
   readOnly: 'только чтение',
   sourceGone: 'Этой ветки или worktree больше нет',
   fileTree: 'Дерево файлов',
+  gitBranch: 'ветка git',
+  gitDirty: 'есть незакоммиченные изменения',
+  gitClean: 'чисто',
+  gitDetached: 'detached',
   // file viewers (M3-08)
   tooLarge: 'Файл слишком большой для показа (больше 2 МБ)',
   binary: 'Бинарный файл, не показан',

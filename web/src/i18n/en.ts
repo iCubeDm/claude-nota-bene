@@ -106,6 +106,10 @@ export const en: Dict = {
   readOnly: 'read-only',
   sourceGone: 'This branch or worktree no longer exists',
   fileTree: 'File tree',
+  gitBranch: 'git branch',
+  gitDirty: 'uncommitted changes',
+  gitClean: 'clean',
+  gitDetached: 'detached',
   // file viewers (M3-08)
   tooLarge: 'File is too large to show (over 2 MB)',
   binary: 'Binary file, not shown',
