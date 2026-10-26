@@ -163,7 +163,8 @@ The hotkey list appears in the `?` help.
   - No prototype port scan: the prototype is retired (2026-10-26) and no prototype window is left.
   - Logs: only the detached launcher's `$TMPDIR/nota-bene-PORT.log` is a file; a foreground window's log is its Claude Code task, said so in About.
   - The Settings tab is not saved with the file tabs.
+  - After the security review: an action carries the row the user saw (root, pid, startedAt) and is refused (409) if the port's registry entry changed; a trashed attachment is restored on its next read and a reused one counts as fresh, so Clean is reversible; any action on a busy window asks first and the row's buttons are off while one is in flight; probe and relay never follow redirects; the token file appears atomically (tmp + link).
 
 ### M6-16: e2e and real smoke
-- [ ] e2e for the strips, tab overflow, Cmd+E, the hotkeys and the Settings tab.
+- [x] e2e for the strips, tab overflow, Cmd+E, the hotkeys and the Settings tab (`e2e/workspace.spec.ts`).
 - [ ] A smoke in the user's real window happens after the merge: the user reloads, and we go through the list together.

@@ -25,9 +25,16 @@ export const TabIcon = ({ tab }: { tab: Tab }) =>
 
 const basename = (p: string) => p.split('/').pop() || p;
 
-/** After a pick in a list (▾, Cmd+E): the focus goes to the tab it activated, not back to a now-hidden pane. */
+/**
+ * After a pick in a list (▾, Cmd+E): the tab it activated is scrolled into view (also when it was active already, so
+ * the activation effect did not run) and takes the focus, not a now-hidden pane.
+ */
 export const focusTab = (id: string) =>
-  requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[role="tablist"] [data-tab]')].find((n) => n.dataset.tab === id)?.focus({ preventScroll: true }));
+  requestAnimationFrame(() => {
+    const el = [...document.querySelectorAll<HTMLElement>('[role="tablist"] [data-tab]')].find((n) => n.dataset.tab === id);
+    el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    el?.focus({ preventScroll: true });
+  });
 
 function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; last: boolean; playing: boolean }) {
   const t = useT();

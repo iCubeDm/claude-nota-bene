@@ -15,7 +15,8 @@ type WindowRow = {
 type About = { version: string; stateDir: string; logs: string[]; node: string; pid: number };
 type Action = 'restart-agent' | 'restart-server' | 'stop';
 
-const short = (d: string) => d.replace(/^\/Users\/[^/]+/, '~');
+// macOS and Linux home folders
+const short = (d: string) => d.replace(/^\/(Users|home)\/[^/]+/, '~');
 const uptime = (since: number, now = Date.now()) => {
   const m = Math.max(0, Math.round((now - since) / 60000));
   return m < 60 ? tNow('upMin', m) : m < 1440 ? tNow('upHMin', Math.floor(m / 60), m % 60) : tNow('upD', Math.floor(m / 1440));
@@ -73,22 +74,55 @@ export function SettingsView({ active }: { active: boolean }) {
   const about = useLoad<About>('/system/about', active);
   const prefs = useLoad<{ defaultMode: Mode }>('/system/prefs', active);
   const [ask, setAsk] = useState<{ title: string; body: string; confirm: string; run: () => Promise<void> } | null>(null);
+  // the port whose action is in flight: that row's buttons are off until it settles (no double relays)
+  const [pending, setPending] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [lang, setLangState] = useState(getLang());
 
   const act = (w: WindowRow, action: Action) => async () => {
     setNote(null);
-    const r = await postJson('/system/windows/action', { port: w.port, action }).catch(() => null);
-    setNote(r && r.ok ? t('winDone') : t('setLoadFail', r ? `${r.status}` : 'network'));
-    setTimeout(windows.reload, action === 'restart-agent' ? 500 : 1500);
+    setPending(w.port);
+    try {
+      // the row's identity: the server refuses if another window has taken the port since this list was loaded
+      const r = await postJson('/system/windows/action', { port: w.port, action, root: w.root, pid: w.pid, startedAt: w.startedAt }).catch(() => null);
+      if (r?.ok) return setNote(t('winSent'));
+      const body = r ? await r.text().catch(() => '') : '';
+      const inner = r?.status === 502 ? (JSON.parse(body || '{}') as { status?: number }).status : undefined;
+      setNote(!r ? t('setLoadFail', 'network')
+        : body === 'window changed' ? t('winChanged')
+        : inner === 403 || inner === 404 ? t('winOld') // a window started before the control route existed
+        : t('setLoadFail', inner ? `${r.status} (${inner})` : `${r.status} ${body}`.trim()));
+    } catch (e) {
+      setNote(t('setLoadFail', e instanceof Error ? e.message : String(e)));
+    } finally {
+      setTimeout(() => { setPending(null); windows.reload(); }, action === 'restart-agent' ? 500 : 1500);
+    }
+  };
+  // every action on another window ends its running turn: ask first when it is working, and always for Stop
+  const confirmAct = (w: WindowRow, action: Action, label: string) => {
+    if (action !== 'stop' && !w.busy) return void act(w, action)();
+    const body = action === 'stop' ? t('winStopQ', w.port, short(w.root)) : t('winBusyQ', label, w.port, short(w.root));
+    setAsk({ title: label, body: w.busy && action === 'stop' ? `${body}\n${t('winBusyNote')}` : body, confirm: label, run: act(w, action) });
   };
   const clean = async () => {
-    const r = await postJson('/system/storage/clean', {}).catch(() => null);
-    if (r?.ok) {
-      const j = (await r.json()) as { moved: number; bytes: number; trash: string };
-      setNote(t('stCleaned', j.moved, kb(j.bytes), short(j.trash)));
-    } else setNote(t('setLoadFail', r ? `${r.status}` : 'network'));
+    try {
+      const r = await postJson('/system/storage/clean', {});
+      if (!r.ok) throw new Error(`${r.status}`);
+      const j = (await r.json()) as { moved: number; bytes: number; trash: string; errors?: string[] };
+      setNote(t('stCleaned', j.moved, kb(j.bytes), short(j.trash)) + (j.errors?.length ? ` · ${t('stErrors', j.errors.length, j.errors[0]!)}` : ''));
+    } catch (e) {
+      setNote(t('setLoadFail', e instanceof Error ? e.message : String(e)));
+    }
     storage.reload();
+  };
+  const saveMode = async (mode: string) => {
+    try {
+      const r = await postJson('/system/prefs', { defaultMode: mode });
+      if (!r.ok) throw new Error(`${r.status}`);
+    } catch (e) {
+      setNote(t('setLoadFail', e instanceof Error ? e.message : String(e)));
+    }
+    prefs.reload();
   };
   const fail = (e: string | null) => e && <div role="alert" className="text-xs text-warn">{t('setLoadFail', e)}</div>;
 
@@ -117,12 +151,9 @@ export function SettingsView({ active }: { active: boolean }) {
               {!w.current && w.state === 'live' && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Button asChild variant="outline" size="sm"><a href={`http://127.0.0.1:${w.port}/`} target="_blank" rel="noopener noreferrer">{t('winOpen')}</a></Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => void act(w, 'restart-agent')()}>{t('winRestartAgent')}</Button>
-                  {w.supervised && <Button type="button" variant="outline" size="sm" onClick={() => void act(w, 'restart-server')()}>{t('winRestartServer')}</Button>}
-                  <Button type="button" variant="outline" size="sm"
-                    onClick={() => setAsk({ title: t('winStop'), body: t('winStopQ', w.port, short(w.root)), confirm: t('winStop'), run: act(w, 'stop') })}>
-                    {t('winStop')}
-                  </Button>
+                  <Button type="button" variant="outline" size="sm" disabled={pending === w.port} onClick={() => confirmAct(w, 'restart-agent', t('winRestartAgent'))}>{t('winRestartAgent')}</Button>
+                  {w.supervised && <Button type="button" variant="outline" size="sm" disabled={pending === w.port} onClick={() => confirmAct(w, 'restart-server', t('winRestartServer'))}>{t('winRestartServer')}</Button>}
+                  <Button type="button" variant="outline" size="sm" disabled={pending === w.port} onClick={() => confirmAct(w, 'stop', t('winStop'))}>{t('winStop')}</Button>
                 </div>
               )}
             </div>
@@ -162,7 +193,7 @@ export function SettingsView({ active }: { active: boolean }) {
           {fail(prefs.error)}
           {prefs.data && (
             <select aria-label={t('defMode')} value={prefs.data.defaultMode}
-              onChange={(e) => void postJson('/system/prefs', { defaultMode: e.target.value }).then(prefs.reload)}
+              onChange={(e) => void saveMode(e.target.value)}
               className="rounded-md border border-border-soft bg-transparent px-2 py-1 text-[13px] text-foreground">
               {MODES.map((m) => <option key={m} value={m}>{t(`mode_${m}`)}</option>)}
             </select>

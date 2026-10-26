@@ -35,6 +35,11 @@ async function boot(cwd = proj) {
   const port = Number(new URL(s.url).port);
   return { ...s, port, exits, origin: s.url };
 }
+/** The row identity the Settings page sends with an action (the registry entry of that port). */
+const rowOf = (port: number) => {
+  const w = JSON.parse(fs.readFileSync(path.join(home, 'windows', `${port}.json`), 'utf8')) as { root: string; pid: number; startedAt: number };
+  return { port, root: w.root, pid: w.pid, startedAt: w.startedAt };
+};
 const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 async function until(cond: () => boolean, ms = 4000): Promise<void> {
@@ -65,6 +70,27 @@ describe('control token', () => {
   it('a garbage token file is replaced', () => {
     fs.writeFileSync(path.join(home, 'control-token'), 'nope');
     expect(controlToken()).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('trash is reversible', () => {
+  it('a reused attachment counts as fresh; a trashed one comes back on its next read', async () => {
+    const { AttachmentStore } = await import('./attachments.ts');
+    const store = new AttachmentStore({ dir: path.join(home, 'attachments') });
+    const bytes = Buffer.from('png-ish bytes');
+    const idA = store.put(bytes, 'image/png');
+    const f = path.join(home, 'attachments', `${idA}.png`);
+    const old = (Date.now() - CLEAN_MIN_AGE_MS - 60_000) / 1000;
+    fs.utimesSync(f, old, old);
+    expect(cleanCandidates().files).toEqual([`${idA}.png`]);
+    store.put(bytes, 'image/png'); // re-pasted: fresh again
+    expect(cleanCandidates().files).toEqual([]);
+    fs.utimesSync(f, old, old);
+    expect(cleanAttachments()).toMatchObject({ moved: 1, errors: [] });
+    expect(fs.existsSync(f)).toBe(false);
+    // a draft still holding the id: the read restores it
+    expect(store.get(idA)?.bytes.equals(bytes)).toBe(true);
+    expect(fs.existsSync(f)).toBe(true);
   });
 });
 
@@ -106,6 +132,23 @@ describe('storage', () => {
     expect((await post(`${s.url}/system/storage/clean`, {})).status).toBe(403); // no Origin
     const r = await post(`${s.url}/system/storage/clean`, {}, { origin: s.origin });
     expect(await r.json()).toMatchObject({ moved: 1, bytes: 20 });
+  });
+});
+
+describe('the row the user saw', () => {
+  it('a port taken by a newer window after the list was loaded is not touched (409 window changed)', async () => {
+    const a = await boot();
+    const b = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-b-')));
+    const bRoot = ((await (await fetch(`${b.url}/info`)).json()) as { root: string }).root;
+    registerWindow(b.port, bRoot, process.pid);
+    const seen = rowOf(b.port);
+    await new Promise((r) => setTimeout(r, 5));
+    registerWindow(b.port, bRoot, process.pid); // re-registered: another start on the same port (a new startedAt)
+    const r = await post(`${a.url}/system/windows/action`, { ...seen, action: 'stop' }, { origin: a.origin });
+    expect(r.status).toBe(409);
+    expect(await r.text()).toBe('window changed');
+    await new Promise((res) => setTimeout(res, 150));
+    expect(b.exits).toEqual([]);
   });
 });
 
@@ -160,26 +203,35 @@ describe('windows', () => {
     expect((await post(`${b.url}/control/stop`, {})).status).toBe(403);
     expect((await post(`${b.url}/control/stop`, {}, { [CONTROL_HEADER]: 'f'.repeat(64) })).status).toBe(403);
     // A's own window and bad input
-    expect((await post(`${a.url}/system/windows/action`, { port: a.port, action: 'stop' }, { origin: a.origin })).status).toBe(409);
-    expect((await post(`${a.url}/system/windows/action`, { port: b.port, action: 'rm -rf' }, { origin: a.origin })).status).toBe(400);
+    expect((await post(`${a.url}/system/windows/action`, { ...rowOf(a.port), action: 'stop' }, { origin: a.origin })).status).toBe(409);
+    expect((await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'rm -rf' }, { origin: a.origin })).status).toBe(400);
     expect((await post(`${a.url}/system/windows/action`, { port: 2, action: 'stop' }, { origin: a.origin })).status).toBe(404);
+    // a page of another origin, a missing Origin, a null or array body
+    expect((await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'stop' }, { origin: 'http://evil.test' })).status).toBe(403);
+    expect((await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'stop' })).status).toBe(403);
+    for (const body of [null, [1]]) expect((await post(`${a.url}/system/windows/action`, body, { origin: a.origin })).status).toBe(400);
+    // a header with a non-ASCII byte is a 403, not a 500
+    expect((await post(`${b.url}/control/stop`, {}, { [CONTROL_HEADER]: 'é'.repeat(32) + 'a'.repeat(31) })).status).toBe(403);
     // restart-server on an unsupervised window: B says 409, A reports it
-    const rs = await post(`${a.url}/system/windows/action`, { port: b.port, action: 'restart-server' }, { origin: a.origin });
+    const rs = await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'restart-server' }, { origin: a.origin });
     expect(await rs.json()).toEqual({ status: 409 });
     expect(b.exits).toEqual([]);
     // the real thing: B exits with 0 (the launcher's "stop")
-    const r = await post(`${a.url}/system/windows/action`, { port: b.port, action: 'stop' }, { origin: a.origin });
+    const r = await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'stop' }, { origin: a.origin });
     expect(r.status).toBe(200);
     await until(() => b.exits.length > 0);
     expect(b.exits).toEqual([0]);
     expect(a.exits).toEqual([]);
+    // the server closes its port on the way out (no second action can land); the exit happens once
+    await new Promise((r) => setTimeout(r, 300));
+    expect(b.exits).toEqual([0]);
   });
 
   it('a registered port that answers with another root gets no token', async () => {
     const a = await boot();
     const b = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-b-')));
     registerWindow(b.port, '/some/other/root', process.pid); // the port was reused by another window/app
-    const r = await post(`${a.url}/system/windows/action`, { port: b.port, action: 'stop' }, { origin: a.origin });
+    const r = await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'stop' }, { origin: a.origin });
     expect(r.status).toBe(409);
     await new Promise((res) => setTimeout(res, 150));
     expect(b.exits).toEqual([]);

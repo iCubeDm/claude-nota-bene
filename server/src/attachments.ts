@@ -33,7 +33,15 @@ export class AttachmentStore {
    */
   put(bytes: Buffer, mediaType: ImageType): string {
     const id = createHash('sha256').update(bytes).digest('hex');
-    if (this.find(id)) return id;
+    const have = this.find(id);
+    if (have) {
+      // a reuse (a re-paste, a replay) counts as fresh: Settings → Storage → Clean keeps files younger than a day
+      try {
+        const now = new Date();
+        fs.utimesSync(path.join(this.dir, `${id}.${EXT[have]}`), now, now);
+      } catch { /* best effort */ }
+      return id;
+    }
     const file = path.join(this.dir, `${id}.${EXT[mediaType]}`);
     fs.mkdirSync(this.dir, { recursive: true });
     const tmp = `${file}.tmp${process.pid}-${Math.random().toString(36).slice(2)}`;
@@ -51,17 +59,53 @@ export class AttachmentStore {
     return IMAGE_TYPES.find((t) => fs.existsSync(path.join(this.dir, `${id}.${EXT[t]}`))) ?? null;
   }
 
-  /** null when absent or the id is malformed; other disk errors are thrown. */
+  /** null when absent or the id is malformed; other disk errors are thrown. A file "Clean" moved to the trash comes back. */
   get(id: string): { bytes: Buffer; mediaType: ImageType } | null {
     if (!ID_RE.test(id)) return null;
-    for (const mediaType of IMAGE_TYPES) {
-      try {
-        return { bytes: fs.readFileSync(path.join(this.dir, `${id}.${EXT[mediaType]}`)), mediaType };
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    const read = () => {
+      for (const mediaType of IMAGE_TYPES) {
+        try {
+          return { bytes: fs.readFileSync(path.join(this.dir, `${id}.${EXT[mediaType]}`)), mediaType };
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+        }
+      }
+      return null;
+    };
+    const got = read();
+    if (got) return got;
+    this.restore(id); // false, or another reader brought it back first: read again either way
+    return read();
+  }
+
+  /**
+   * Settings → Storage → Clean moves files to `<state>/trash/attachments/<stamp>/` (system.ts): an id still in use (an
+   * open draft, a pending comment of another window) is moved back on its next read, so the clean loses nothing.
+   */
+  private restore(id: string): boolean {
+    const trash = path.join(path.dirname(this.dir), 'trash', 'attachments');
+    let stamps: string[];
+    try {
+      stamps = fs.readdirSync(trash).sort().reverse();
+    } catch {
+      return false;
+    }
+    for (const s of stamps) {
+      for (const t of IMAGE_TYPES) {
+        const name = `${id}.${EXT[t]}`;
+        const from = path.join(trash, s, name);
+        if (!fs.existsSync(from)) continue;
+        fs.mkdirSync(this.dir, { recursive: true });
+        try {
+          fs.renameSync(from, path.join(this.dir, name));
+          return true;
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue; // another reader restored it first
+          throw e;
+        }
       }
     }
-    return null;
+    return false;
   }
 }
 

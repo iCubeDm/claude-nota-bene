@@ -88,7 +88,10 @@ export async function startServer(o: {
     const root = () => manager.info().root;
     let ownPort = 0; // set after listen
     // the exit after a reply (restart-server 75, stop 0): close what can be closed, but never hang on it
+    let exiting = false;
     const exitWith = (code: number) => {
+      if (exiting) return; // the first exit wins
+      exiting = true;
       void Promise.race([close(), new Promise<void>((r) => setTimeout(r, 2000))]).then(() => {
         setTimeout(() => (o.exit ?? process.exit)(code), 100);
       });
@@ -130,9 +133,9 @@ export async function startServer(o: {
             res.end('method not allowed');
             return;
           }
-          if (!supervised()) {
+          if (!supervised() || exiting) {
             res.writeHead(409, { 'content-type': 'text/plain; charset=utf-8' });
-            res.end('not supervised');
+            res.end(exiting ? 'exiting' : 'not supervised');
             return;
           }
           // answer first: the exit must not cut the reply; 75 tells the launcher to relaunch with --continue
@@ -143,6 +146,7 @@ export async function startServer(o: {
           hub, root, port: () => ownPort, repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..'),
           control: {
             supervised,
+            exiting: () => exiting,
             restartAgent: () => void manager.restart().catch(switchFailed),
             restartServer: () => exitWith(75),
             stop: () => exitWith(0), // the launcher treats 0 as "stop" and unregisters the window

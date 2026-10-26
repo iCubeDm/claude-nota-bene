@@ -41,23 +41,30 @@ export function controlToken(): string {
   const have = read();
   if (have) return have;
   const t = randomBytes(32).toString('hex');
+  // written whole to a tmp file, then linked in: the name appears only with its content (no reader sees it empty),
+  // and the link fails if another server got there first
+  const tmp = `${file}.tmp${process.pid}-${randomBytes(4).toString('hex')}`;
+  fs.writeFileSync(tmp, t, { mode: 0o600 });
   try {
-    fs.writeFileSync(file, t, { flag: 'wx', mode: 0o600 });
+    fs.linkSync(tmp, file);
     return t;
-  } catch {
-    // another server wrote it first (use that one), or the file is unreadable/garbage (replace it atomically)
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     const again = read();
-    if (again) return again;
-    const tmp = `${file}.tmp${process.pid}`;
-    fs.writeFileSync(tmp, t, { mode: 0o600 });
-    fs.renameSync(tmp, file);
+    if (again) return again; // the other server's
+    fs.renameSync(tmp, file); // a garbage file: replaced atomically
     return t;
+  } finally {
+    fs.rmSync(tmp, { force: true });
   }
 }
 
 export function tokenOk(header: string | string[] | undefined, token: string): boolean {
-  if (typeof header !== 'string' || header.length !== token.length) return false;
-  return timingSafeEqual(Buffer.from(header), Buffer.from(token));
+  if (typeof header !== 'string') return false;
+  // latin1: one byte per char as Node decoded the header, so a stray non-ASCII byte cannot make the lengths differ
+  const a = Buffer.from(header, 'latin1');
+  const b = Buffer.from(token, 'latin1');
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** Bytes and file count under `dir`; symlinks are counted as links, never followed. A missing dir is zero. */
@@ -136,13 +143,17 @@ export function cleanCandidates(now = Date.now()): { files: string[]; bytes: num
   return { files, bytes };
 }
 
-/** Moves the candidates to `<stateDir>/trash/attachments/<stamp>/` (never deletes). */
-export function cleanAttachments(now = Date.now()): { moved: number; bytes: number; trash: string } {
+/**
+ * Moves the candidates to `<stateDir>/trash/attachments/<stamp>/` (never deletes; AttachmentStore.get brings one back
+ * when it is read again). A file gone meanwhile is skipped; any other failure is reported, not swallowed.
+ */
+export function cleanAttachments(now = Date.now()): { moved: number; bytes: number; trash: string; errors: string[] } {
   const { files } = cleanCandidates(now);
   const src = path.join(stateDir(), 'attachments');
   const trash = path.join(stateDir(), 'trash', 'attachments', new Date(now).toISOString().replace(/[:.]/g, '-'));
   let moved = 0;
   let bytes = 0;
+  const errors: string[] = [];
   if (files.length) fs.mkdirSync(trash, { recursive: true });
   for (const n of files) {
     try {
@@ -150,9 +161,12 @@ export function cleanAttachments(now = Date.now()): { moved: number; bytes: numb
       fs.renameSync(path.join(src, n), path.join(trash, n));
       moved++;
       bytes += size;
-    } catch { /* vanished or re-referenced meanwhile: skipped */ }
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') errors.push(`${n}: ${code ?? String(e)}`); // e.g. EXDEV: attachments/ on another volume
+    }
   }
-  return { moved, bytes, trash };
+  return { moved, bytes, trash, errors };
 }
 
 export type WindowInfo = { root: string; session?: string | null; title?: string | null; supervised?: boolean; busy?: boolean; clients?: number };
@@ -165,7 +179,8 @@ export type WindowRow = {
 
 export async function probeWindow(port: number, timeoutMs = 700): Promise<WindowInfo | null> {
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/info`, { signal: AbortSignal.timeout(timeoutMs) });
+    // never follow a redirect: the answer must be that port's own
+    const r = await fetch(`http://127.0.0.1:${port}/info`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
     if (!r.ok) return null;
     const j = (await r.json()) as WindowInfo;
     return j && typeof j.root === 'string' ? j : null;
@@ -192,9 +207,12 @@ export async function listWindows(own: number, probe = probeWindow): Promise<Win
   return rows.sort((a, b) => a.port - b.port);
 }
 
-const gitDescribe = (dir: string): Promise<string> => new Promise((resolve) => {
+// once per process: the checkout does not change under a running server in a way About must follow, and a page
+// looping requests at /system/about must not spawn a git per request
+let version: Promise<string> | null = null;
+const gitDescribe = (dir: string): Promise<string> => (version ??= new Promise((resolve) => {
   execFile('git', ['describe', '--tags', '--always', '--dirty'], { cwd: dir, timeout: 3000 }, (e, out) => resolve(e ? 'unknown' : out.trim()));
-});
+}));
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -218,7 +236,9 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
     if (size > MAX_BODY) throw new Error('body too large');
     chunks.push(c);
   }
-  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+  const v: unknown = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('not an object');
+  return v;
 }
 
 export function systemRoutes(o: {
@@ -230,13 +250,14 @@ export function systemRoutes(o: {
   /** the checkout the server runs from, for the version */
   repoDir: string;
   /** run after the reply is out; `supervised` says whether restart-server can be caught by a launcher */
-  control: { supervised(): boolean; restartAgent(): void; restartServer(): void; stop(): void };
+  control: { supervised(): boolean; exiting(): boolean; restartAgent(): void; restartServer(): void; stop(): void };
   probe?: (port: number) => Promise<WindowInfo | null>;
   relay?: (port: number, action: ControlAction, token: string) => Promise<number>;
 }): Record<string, RequestListener> {
   const probe = o.probe ?? probeWindow;
   const relay = o.relay ?? (async (port, action, token) => {
-    const r = await fetch(`http://127.0.0.1:${port}/control/${action}`, { method: 'POST', headers: { [CONTROL_HEADER]: token }, signal: AbortSignal.timeout(3000) });
+    // redirect: 'error': a 307/308 would carry the token on to wherever it points
+    const r = await fetch(`http://127.0.0.1:${port}/control/${action}`, { method: 'POST', headers: { [CONTROL_HEADER]: token }, signal: AbortSignal.timeout(3000), redirect: 'error' });
     return r.status;
   });
   const fail = (res: ServerResponse, where: string, e: unknown) => {
@@ -302,11 +323,14 @@ export function systemRoutes(o: {
     '/system/windows/action': (req, res) => {
       if (!only('POST', req, res)) return;
       void readJson(req).then(async (b) => {
-        const { port, action } = b as { port?: unknown; action?: unknown };
+        const { port, action, root, pid, startedAt } = b as { port?: unknown; action?: unknown; root?: unknown; pid?: unknown; startedAt?: unknown };
         if (!Number.isInteger(port) || !(CONTROL_ACTIONS as readonly unknown[]).includes(action)) return text(res, 400, 'bad request');
         if (port === o.port()) return text(res, 409, 'this window'); // its own controls are in its header
         const w = readWindows()[String(port)];
         if (!w || !pidAlive(w.pid)) return text(res, 404, 'no such window');
+        // the window the user saw (and confirmed) must still be the one on that port: a port reused by a newer window
+        // after the list was loaded is not touched
+        if (w.root !== root || w.pid !== pid || w.startedAt !== startedAt) return text(res, 409, 'window changed');
         const info = await probe(port as number);
         if (!info || info.root !== w.root) return text(res, 409, 'window not answering');
         const status = await relay(port as number, action as ControlAction, controlToken());
@@ -319,6 +343,7 @@ export function systemRoutes(o: {
       if (!only('POST', req, res)) return;
       const action = (req.url ?? '').split('?')[0]!.slice('/control/'.length) as ControlAction;
       if (!CONTROL_ACTIONS.includes(action)) return text(res, 404, 'not found');
+      if (o.control.exiting()) return text(res, 409, 'exiting'); // a stop or restart is already under way
       if (action === 'restart-server' && !o.control.supervised()) return text(res, 409, 'not supervised');
       // answer first: a restart or stop must not cut the reply
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });

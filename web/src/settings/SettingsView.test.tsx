@@ -13,18 +13,22 @@ const WINDOWS = [
   { port: 4779, root: '/Users/me/c', pid: 3, startedAt: now, current: false, state: 'stale', session: null, title: null, supervised: false, busy: false, clients: 0 },
 ];
 let posts: { url: string; body: unknown }[];
+let actionReply: () => Response;
+let prefsReply: () => Response;
 let storage: { unreferenced: { files: number; bytes: number } };
 beforeEach(() => {
   localStorage.clear();
   setLang('en');
   posts = [];
+  actionReply = () => Response.json({ status: 200 });
+  prefsReply = () => Response.json({ defaultMode: 'plan' });
   storage = { unreferenced: { files: 3, bytes: 3_000_000 } };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST') {
       posts.push({ url, body: JSON.parse(String(init.body)) });
       if (url === '/system/storage/clean') return Response.json({ moved: 3, bytes: 3_000_000, trash: '/Users/me/.nota-bene/trash/attachments/x' });
-      if (url === '/system/prefs') return Response.json({ defaultMode: 'plan' });
-      return Response.json({ status: 200 });
+      if (url === '/system/prefs') return prefsReply();
+      return actionReply();
     }
     if (url === '/system/windows') return Response.json(WINDOWS);
     if (url === '/system/storage') return Response.json({ attachments: { bytes: 5e6, files: 9 }, comments: { bytes: 2e4, files: 3 }, trash: { bytes: 0, files: 0 }, marks: { bytes: 1e6, files: 4, root: '/Users/me/a' }, ...storage });
@@ -53,7 +57,7 @@ it('⚙ opens one Settings tab; a second click activates the same one; it closes
   expect(selectTabs(store.getState()).open.map((t) => t.id)).toEqual(['chat']);
 });
 
-it('Windows: this window has no actions; another live one can be restarted or stopped (after a confirmation); a stale one only says so', async () => {
+it('Windows: this window has no actions; another one can be restarted or stopped, sending the row it showed; a stale one only says so', async () => {
   setup();
   expect(within(await win(4777)).getByText('this window')).toBeInTheDocument();
   expect(within(await win(4777)).queryByRole('button')).toBeNull();
@@ -61,15 +65,40 @@ it('Windows: this window has no actions; another live one can be restarted or st
   expect(other).toHaveTextContent('Other · working · no tab · up 5 min');
   expect(within(await win(4779)).getByText('gone')).toBeInTheDocument();
   expect(within(await win(4779)).queryByRole('button')).toBeNull();
+  const row = { port: 4778, root: '/Users/me/b', pid: 2, startedAt: WINDOWS[1]!.startedAt };
+  // B is working: even a restart asks first, and says the running turn is interrupted
   fireEvent.click(within(other).getByRole('button', { name: 'Restart agent' }));
-  await waitFor(() => expect(posts).toContainEqual({ url: '/system/windows/action', body: { port: 4778, action: 'restart-agent' } }));
+  let dialog = await screen.findByRole('dialog');
+  expect(dialog).toHaveTextContent('Its agent is working: the running turn is interrupted.');
+  expect(posts).toEqual([]);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Restart agent' }));
+  await waitFor(() => expect(posts).toContainEqual({ url: '/system/windows/action', body: { ...row, action: 'restart-agent' } }));
+  // while it is in flight the row's buttons are off: no double relay
+  expect(within(other).getByRole('button', { name: 'Stop' })).toBeDisabled();
+  expect(await screen.findByText('Sent')).toHaveAttribute('role', 'status');
+  await waitFor(() => expect(within(other).getByRole('button', { name: 'Stop' })).toBeEnabled(), { timeout: 3000 });
   fireEvent.click(within(other).getByRole('button', { name: 'Stop' }));
-  const dialog = await screen.findByRole('dialog');
+  dialog = await screen.findByRole('dialog');
   expect(dialog).toHaveTextContent('Stop the window on port 4778 (~/b)?');
-  expect(posts.some((p) => (p.body as { action: string }).action === 'stop')).toBe(false); // not before the yes
   fireEvent.click(within(dialog).getByRole('button', { name: 'Stop' }));
-  await waitFor(() => expect(posts).toContainEqual({ url: '/system/windows/action', body: { port: 4778, action: 'stop' } }));
-  expect(await screen.findByText('Done')).toHaveAttribute('role', 'status');
+  await waitFor(() => expect(posts).toContainEqual({ url: '/system/windows/action', body: { ...row, action: 'stop' } }));
+});
+
+it('Windows: a changed window and a window too old for the control route say so', async () => {
+  WINDOWS[1]!.busy = false;
+  try {
+    setup();
+    const other = await win(4778);
+    actionReply = () => new Response('window changed', { status: 409 });
+    fireEvent.click(within(other).getByRole('button', { name: 'Restart agent' }));
+    expect(await screen.findByText(/That window has changed since the list was loaded/)).toBeInTheDocument();
+    await waitFor(() => expect(within(other).getByRole('button', { name: 'Restart agent' })).toBeEnabled(), { timeout: 3000 });
+    actionReply = () => Response.json({ status: 403 }, { status: 502 });
+    fireEvent.click(within(other).getByRole('button', { name: 'Restart agent' }));
+    expect(await screen.findByText(/was started before Settings could control it/)).toBeInTheDocument();
+  } finally {
+    WINDOWS[1]!.busy = true;
+  }
 });
 
 it('Storage: sizes, and the clean asks first, then reports where the files went', async () => {
@@ -89,6 +118,10 @@ it('Defaults: the mode is saved on the server; About shows the version', async (
   fireEvent.change(mode, { target: { value: 'plan' } });
   await waitFor(() => expect(posts).toContainEqual({ url: '/system/prefs', body: { defaultMode: 'plan' } }));
   expect(await screen.findByText('v0.9-12-gabc')).toBeInTheDocument();
+  // a failed save says so (the select snaps back to the stored value)
+  prefsReply = () => new Response('no', { status: 500 });
+  fireEvent.change(mode, { target: { value: 'default' } });
+  expect(await screen.findByText('Could not load: 500')).toBeInTheDocument();
   expect(screen.getByText(/in the Claude Code task/)).toBeInTheDocument();
   act(() => void fireEvent.change(screen.getByRole('combobox', { name: 'Interface language' }), { target: { value: 'ru' } }));
   expect(await screen.findByText('Окна')).toBeInTheDocument();
