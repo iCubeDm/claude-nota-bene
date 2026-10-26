@@ -14,6 +14,7 @@ import { httpHandler, isAllowedHost } from './http.ts';
 import { SwitchError, createSessionManager } from './session.ts';
 import { listSessionsView } from './sessions.ts';
 import { stateDir } from './state.ts';
+import { registerWindow } from './windows.ts';
 
 // Process-wide handlers are registered once; each running server's hub is in this set.
 const hubs = new Set<EventHub>();
@@ -68,7 +69,9 @@ export async function startServer(o: {
       if (!restart) store.set(null, []);
       broadcastComments(store.get(id));
     });
-    const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1';
+    // supervised = our launcher is still our parent: an orphan (launcher killed) must not offer a restart nobody catches
+    const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1'
+      && process.ppid === Number(process.env.NOTA_BENE_LAUNCHER_PID);
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -137,6 +140,9 @@ export async function startServer(o: {
         else done(false, 403, 'forbidden');
       },
     });
+    // the wss re-emits the http server's errors; unhandled, a listen error (EADDRINUSE) would throw out of the
+    // server's emit before the listen promise below could reject. The listen promise reports it
+    wss.on('error', () => {});
 
     wss.on('connection', (ws) => {
       const detach = hub.attach({ send: (d) => ws.send(d) });
@@ -216,15 +222,30 @@ export async function startServer(o: {
       }));
     });
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(o.port, '127.0.0.1', () => {
-        server.off('error', reject);
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(o.port, '127.0.0.1', () => {
+          server.off('error', reject);
+          resolve();
+        });
       });
-    });
+    } catch (e) {
+      manager.close();
+      wss.close();
+      throw e; // syscall 'listen': main exits with 98, the launcher's "port taken" code
+    }
 
     const port = (server.address() as AddressInfo).port;
+    // a supervised window keeps its registry entry's root current, so a relaunch reopens the folder it switched to
+    manager.onSwitch((_id, { restart }) => {
+      if (restart || !supervised()) return;
+      try {
+        registerWindow(port, root(), process.pid, process.ppid);
+      } catch (e) {
+        reportError(hub, 'windows', e);
+      }
+    });
     allowedHosts.push(`127.0.0.1:${port}`, `localhost:${port}`);
     allowedOrigins.push(`http://127.0.0.1:${port}`, `http://localhost:${port}`);
 

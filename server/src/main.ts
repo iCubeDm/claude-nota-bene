@@ -70,6 +70,9 @@ export function invocationCwd(env: NodeJS.ProcessEnv, cwd: string): string {
   return env.INIT_CWD || cwd;
 }
 
+/** Exit code for a failed listen (port taken): the launcher retries its first start on another port. */
+export const LISTEN_FAILED = 98;
+
 async function main(): Promise<void> {
   let args: ReturnType<typeof parseArgs>;
   try {
@@ -82,14 +85,22 @@ async function main(): Promise<void> {
     ? fakeFromScript(JSON.parse(fs.readFileSync(args.fake, 'utf8')), args.dir)
     : sdkBackend();
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
-  const { url, close } = await startServer({
-    cwd: args.dir,
-    port: args.port,
-    backend,
-    ...launchTarget(args),
-    webDist,
-    allowedOrigins: args.allowOrigins,
-  });
+  let started: Awaited<ReturnType<typeof startServer>>;
+  try {
+    started = await startServer({
+      cwd: args.dir,
+      port: args.port,
+      backend,
+      ...launchTarget(args),
+      webDist,
+      allowedOrigins: args.allowOrigins,
+    });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).syscall !== 'listen') throw e;
+    console.error(`Nota Bene: cannot listen on 127.0.0.1:${args.port}: ${(e as Error).message}`);
+    process.exit(LISTEN_FAILED);
+  }
+  const { url, close } = started;
   console.log(`Nota Bene: ${url}  project: ${args.dir}`);
   const stop = () => {
     close().then(
@@ -103,6 +114,9 @@ async function main(): Promise<void> {
 
 const self = fileURLToPath(import.meta.url);
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(self)) {
+  // TEST-ONLY: bin/nota-bene.test.ts injects exit loops with it: exit with this code (1 = crash, 75 = restart) before
+  // anything starts. Never set it otherwise.
+  if (process.env.NOTA_BENE_TEST_CRASH) process.exit(Number(process.env.NOTA_BENE_TEST_CRASH) || 1);
   main().catch((e) => {
     console.error(e);
     process.exit(1);

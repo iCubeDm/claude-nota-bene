@@ -127,24 +127,45 @@ describe('server', () => {
     expect(seen[0]).toBe(true); // a plain allow: the adapter echoes the ORIGINAL input
   });
 
-  it('/info.supervised follows NOTA_BENE_SUPERVISED', async () => {
+  const prevSup = process.env.NOTA_BENE_SUPERVISED;
+  const prevLauncher = process.env.NOTA_BENE_LAUNCHER_PID;
+  const restoreSup = () => {
+    if (prevSup === undefined) delete process.env.NOTA_BENE_SUPERVISED; else process.env.NOTA_BENE_SUPERVISED = prevSup;
+    if (prevLauncher === undefined) delete process.env.NOTA_BENE_LAUNCHER_PID; else process.env.NOTA_BENE_LAUNCHER_PID = prevLauncher;
+  };
+  // supervised = the env says so AND the launcher named in it is still our parent
+  const supervise = (launcher = process.ppid) => {
+    process.env.NOTA_BENE_SUPERVISED = '1';
+    process.env.NOTA_BENE_LAUNCHER_PID = String(launcher);
+  };
+
+  it('/info.supervised follows NOTA_BENE_SUPERVISED, and only while the launcher is the parent', async () => {
     const s = await boot();
-    const prev = process.env.NOTA_BENE_SUPERVISED;
+    const sup = async () => ((await (await fetch(`${s.url}/info`)).json()) as { supervised: boolean }).supervised;
     try {
       delete process.env.NOTA_BENE_SUPERVISED;
-      expect(await (await fetch(`${s.url}/info`)).json()).toMatchObject({ supervised: false });
-      process.env.NOTA_BENE_SUPERVISED = '1';
-      expect(await (await fetch(`${s.url}/info`)).json()).toMatchObject({ supervised: true });
+      expect(await sup()).toBe(false);
+      supervise();
+      expect(await sup()).toBe(true);
+      supervise(process.ppid + 100000); // an orphan: its launcher is gone, init/launchd adopted it
+      expect(await sup()).toBe(false);
     } finally {
-      if (prev === undefined) delete process.env.NOTA_BENE_SUPERVISED; else process.env.NOTA_BENE_SUPERVISED = prev;
+      restoreSup();
     }
   });
 
+  it('a taken port rejects startServer with the listen error (instead of hanging)', async () => {
+    const s = await boot();
+    const port = Number(new URL(s.url).port);
+    const err = await startServer({ cwd: '/proj', port, backend: fakeBackend([]), webDist: dist }).then(
+      () => null,
+      (e: NodeJS.ErrnoException) => e,
+    );
+    expect(err).toMatchObject({ code: 'EADDRINUSE', syscall: 'listen' });
+  });
+
   describe('POST /restart-server', () => {
-    const prev = process.env.NOTA_BENE_SUPERVISED;
-    afterEach(() => {
-      if (prev === undefined) delete process.env.NOTA_BENE_SUPERVISED; else process.env.NOTA_BENE_SUPERVISED = prev;
-    });
+    afterEach(restoreSup);
     const post = (url: string, origin?: string) =>
       fetch(`${url}/restart-server`, { method: 'POST', ...(origin ? { headers: { origin } } : {}) });
 
@@ -159,7 +180,7 @@ describe('server', () => {
     });
 
     it('403 for a foreign Origin (and for none), even when supervised', async () => {
-      process.env.NOTA_BENE_SUPERVISED = '1';
+      supervise();
       const codes: number[] = [];
       const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
       closers.push(s.close);
@@ -170,7 +191,7 @@ describe('server', () => {
     });
 
     it('supervised: answers 200, then exits with 75', async () => {
-      process.env.NOTA_BENE_SUPERVISED = '1';
+      supervise();
       const codes: number[] = [];
       const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist, exit: (c) => { codes.push(c); } });
       closers.push(s.close);

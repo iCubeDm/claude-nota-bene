@@ -2,6 +2,12 @@
   "name": "nota-bene",
   "private": true,
   "type": "module",
+  "bin": {
+    "nota-bene": "bin/nota-bene.mjs"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
   "workspaces": [
     "shared",
     "server",
