@@ -7,6 +7,7 @@ import { selectPending } from '@/comments/slice.ts';
 import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
 import { nextMode, pickMode, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
+import { ShortcodePicker } from '@/comments/ShortcodePicker.tsx';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Meters } from '@/stats/Meters.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
@@ -173,6 +174,7 @@ export function Composer() {
         )}
         </div>
         <MentionPicker target={ref} />
+        <ShortcodePicker target={ref} />
         <span className="inline-flex" title={switching ? t('switching') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>
             {nPending ? t('sendN', nPending) : t('send')}

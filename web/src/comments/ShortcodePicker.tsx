@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { loadEmoji, searchShortcodes } from './emoji.ts';
 import { setValueAndCaret } from './insertText.ts';
+import { AT_RE } from '@/composer/MentionPicker.tsx';
 import { placeListFor, revealSelected } from '@/composer/placeList.ts';
 
 // `:` at a word start + >=2 chars, up to the caret; optionally already closed by a second colon
@@ -41,6 +42,9 @@ export function ShortcodePicker({ target }: { target: RefObject<HTMLTextAreaElem
       if (!m) return set(null);
       const code = m[2].toLowerCase();
       const start = before.length - m[0].length + m[1].length;
+      // the closer trigger wins (MentionPicker has the mirror rule): an `@` after the `:` owns the keys
+      const at = AT_RE.exec(before);
+      if (at && before.length - at[2].length - 1 > start) return set(null);
       if (m[3]) { // closing colon: replace at once if the code exists, otherwise leave the text alone
         set(null);
         if (!typed) return; // only typing the closing colon replaces, never a caret jump
