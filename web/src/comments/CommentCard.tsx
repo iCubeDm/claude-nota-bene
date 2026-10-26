@@ -6,6 +6,7 @@ import { rangeForAnchor } from '@/anchors/text.ts';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { selectSwitching } from '@/controls/slice.ts';
+import { Markdown } from '@/feed/Markdown.tsx';
 import { jumpToFileComment, selectFileLoad } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
 import { activate } from '@/tabs/slice.ts';
@@ -198,9 +199,10 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
         suppressContentEditableWarning
         onKeyDown={editing ? onKeyDown : undefined}
         onBlur={editing ? () => finish(true) : undefined}
-        className="-ml-1 mt-1.5 whitespace-pre-wrap rounded px-1 py-0.5 outline-none focus:bg-muted"
+        className={`-ml-1 mt-1.5 rounded px-1 py-0.5 outline-none focus:bg-muted ${editing ? 'whitespace-pre-wrap' : 'md-tight'}`}
       >
-        {c.text}
+        {/* editing shows the raw markdown source as plain text; otherwise it is rendered (not final: no refs, no mermaid) */}
+        {editing ? c.text : <Markdown text={c.text} final={false} breaks />}
       </div>
       {c.images?.length ? <Attachments ids={c.images} /> : null}
       {label && (

@@ -2,7 +2,8 @@ import { Attachments } from '@/attachments/Attachments.tsx';
 import { getLang, useT } from '@/i18n/index.ts';
 import { en } from '@/i18n/en.ts';
 import { ru } from '@/i18n/ru.ts';
-import { splitMentionsRaw } from '@/refs/refs.ts';
+import { Markdown } from './Markdown.tsx';
+import { escapeMentions } from '@/refs/refs.ts';
 import { labelOf } from '@/comments/labels.ts';
 import { selectSentFor } from '@/comments/slice.ts';
 import type { FeedItem } from '@/store/feed.ts';
@@ -28,19 +29,17 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
     <div
       data-kind="user"
       data-item-id={item.id}
-      className="my-2.5 whitespace-pre-wrap rounded-[10px] border border-border-soft bg-muted/55 px-3 py-2"
+      className="my-2.5 rounded-[10px] border border-border-soft bg-muted/55 px-3 py-2"
     >
       <div data-anchor-skip className="mb-0.5 font-mono text-[10.5px] text-muted-foreground">
         {t('you')}
         {time}
         {mode}
       </div>
-      {splitMentionsRaw(general).map((p, i) =>
-        'mention' in p ? (
-          <span key={i} className="ref mention" data-path={p.mention}>{p.raw}</span>
-        ) : (
-          p.text
-        ),
+      {general && (
+        <div className="md-tight">
+          <Markdown text={escapeMentions(general)} final breaks mentions />
+        </div>
       )}
       {item.images && <Attachments ids={item.images.map((i) => i.id)} />}
       {(sent.length > 0 || raw) && (
@@ -49,15 +48,15 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
           {sent.length
             ? sent.map((c) => (
                 <div key={c.id} className="mt-1.5">
-                  <blockquote className="border-l-2 border-nb-accent pl-2">{c.anchor.quote}</blockquote>
-                  <div>
+                  <blockquote className="md-tight border-l-2 border-nb-accent pl-2"><Markdown text={c.anchor.quote} final={false} breaks /></blockquote>
+                  <div className="md-tight">
                     →{' '}
                     {c.label && <span className="mr-1 rounded bg-muted px-1">{labelOf(c)}</span>}
-                    {c.text}
+                    <Markdown text={c.text} final={false} breaks />
                   </div>
                 </div>
               ))
-            : <div className="mt-1.5">{raw}</div>}
+            : <div className="md-tight mt-1.5"><Markdown text={raw} final={false} breaks /></div>}
         </details>
       )}
     </div>

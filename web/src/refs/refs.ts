@@ -87,6 +87,47 @@ export function splitMentionsRaw(text: string): ({ text: string } | { mention: s
   return out;
 }
 
+/**
+ * A user message goes through markdown, which would eat `__init__` or `*` inside `@src/__init__.py`: the mention
+ * tokens (outside code spans and fences) get their markdown punctuation backslash-escaped, so they render as typed.
+ */
+export function escapeMentions(text: string): string {
+  return text
+    .split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/)
+    .map((seg, i) =>
+      i % 2 ? seg : splitMentionsRaw(seg).map((p) => ('mention' in p ? p.raw.replace(/[\\`*_~[\]<>|&]/g, '\\$&') : p.text)).join(''),
+    )
+    .join('');
+}
+
+/**
+ * Makes `@path` in the rendered text of a user message a ref span (`.ref.mention`, `data-path`), as the plain-text
+ * bubble did. Text inside code, pre and links is left alone. Only splits text nodes and wraps, so the rendered text
+ * (comment anchors) is unchanged.
+ */
+export function markMentions(root: HTMLElement): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (!(n.parentElement?.closest('code, pre, a, .mention'))) nodes.push(n as Text);
+  }
+  for (const node of nodes) {
+    const parts = splitMentionsRaw(node.data);
+    if (!parts.some((p) => 'mention' in p)) continue;
+    const frag = document.createDocumentFragment();
+    for (const p of parts) {
+      if ('mention' in p) {
+        const span = document.createElement('span');
+        span.className = 'ref mention';
+        span.dataset.path = p.mention;
+        span.textContent = p.raw;
+        frag.append(span);
+      } else frag.append(p.text);
+    }
+    node.replaceWith(frag);
+  }
+}
+
 export function splitMentions(text: string): Part[] {
   return splitMentionsRaw(text).map((p) => ('mention' in p ? { mention: p.mention } : p));
 }

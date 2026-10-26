@@ -137,6 +137,18 @@ test('typing ":smi" in the composer opens the emoji list; Enter inserts 😄 and
   await composer(page).fill('');
 });
 
+// M6-06: the user's message is markdown (and a single newline stays a line break)
+test('a user message renders markdown @chat', async ({ page }) => {
+  await open(page);
+  const tag = uniq('md');
+  await send(page, `**${tag}**\nsecond \`code\``);
+  const b = bubble(page, tag);
+  await expect(b.locator('strong')).toHaveText(tag);
+  await expect(b.locator('br')).toHaveCount(1);
+  await expect(b.locator('code')).toHaveText('code');
+  await expect(donesAfter(page, tag).first()).toBeVisible();
+});
+
 test('language toggle switches the placeholder @chat', async ({ page }) => {
   await open(page);
   await expect(page.getByPlaceholder(en.composerPh)).toBeVisible();

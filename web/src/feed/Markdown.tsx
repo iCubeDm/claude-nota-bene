@@ -6,7 +6,7 @@ import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { t } from '@/i18n/index.ts';
 import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
 import { useSources } from '@/files/sources.ts';
-import { markRefs } from '@/refs/refs.ts';
+import { markMentions, markRefs } from '@/refs/refs.ts';
 import './markdown.css';
 
 // external links in agent replies open in a new browser tab instead of replacing the app
@@ -92,8 +92,12 @@ function postProcess(root: HTMLElement, final: boolean) {
 }
 
 export const Markdown = memo(
-  /** `src`: the source of the file being shown (M3-16): its relative images load from that source. */
-  function Markdown({ text, final, baseDir, src }: { text: string; final: boolean; baseDir?: string; src?: string }) {
+  /**
+   * `src`: the source of the file being shown (M3-16): its relative images load from that source.
+   * `breaks`: a single newline is a line break (what the user typed in the composer). `mentions`: `@path` in the text
+   * becomes a clickable ref (user messages; the text must have gone through `escapeMentions`).
+   */
+  function Markdown({ text, final, baseDir, src, breaks, mentions }: { text: string; final: boolean; baseDir?: string; src?: string; breaks?: boolean; mentions?: boolean }) {
     const ref = useRef<HTMLDivElement>(null);
     // absolute paths become refs only inside a known source's dir: re-mark when the list arrives or changes
     const sources = useSources();
@@ -102,7 +106,7 @@ export const Markdown = memo(
         currentBase = baseDir;
         currentSrc = src;
         try {
-          return DOMPurify.sanitize(marked.parse(text, { async: false }) as string, {
+          return DOMPurify.sanitize(marked.parse(text, { async: false, breaks }) as string, {
             ADD_TAGS: ['video', 'audio'],
             ADD_ATTR: ['controls', 'preload'],
             ...HARDEN,
@@ -112,15 +116,17 @@ export const Markdown = memo(
           currentSrc = undefined;
         }
       },
-      [text, baseDir, src],
+      [text, baseDir, src, breaks],
     );
     useLayoutEffect(() => {
-      if (ref.current && final) markRefs(ref.current, baseDir);
-    }, [html, final, baseDir, sources]);
+      if (!ref.current || !final) return;
+      markRefs(ref.current, baseDir);
+      if (mentions) markMentions(ref.current);
+    }, [html, final, baseDir, sources, mentions]);
     useLayoutEffect(() => {
       if (ref.current) postProcess(ref.current, final);
     }, [html, final]);
     return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
   },
-  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src,
+  (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src && a.breaks === b.breaks && a.mentions === b.mentions,
 );
