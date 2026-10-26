@@ -6,7 +6,7 @@ import type { ClientMessage, Mode, ServerEvent } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { Composer } from '@/composer/Composer.tsx';
 import { setLang } from '@/i18n/index.ts';
-import { makeStore } from '@/store/store.ts';
+import { connState, makeStore } from '@/store/store.ts';
 import { planApproved, restartAgent, selectRestarting, selectSwitching, switchSession } from './slice.ts';
 
 // Radix popper measures with ResizeObserver, which jsdom lacks
@@ -15,7 +15,7 @@ globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {
 beforeEach(() => setLang('en'));
 afterEach(cleanup);
 
-function setup() {
+function setup(hello = true) {
   const sent: ClientMessage[] = [];
   let ev!: (e: ServerEvent) => void;
   const connect = vi.fn((_u: string, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
@@ -32,6 +32,7 @@ function setup() {
     </Provider>,
   );
   const echo = (mode: Mode) => act(() => ev({ kind: 'mode', mode }));
+  if (hello) act(() => ev({ kind: 'hello', protocol: 2 }));
   return { sent, store, echo, ev: () => ev, box: screen.getByRole('textbox') as HTMLTextAreaElement };
 }
 const raw = (sent: ClientMessage[]) => sent.filter((m) => m.type === 'mode');
@@ -220,4 +221,22 @@ it('a replay drops the changes in flight, so the next echo applies', async () =>
   act(() => ev()({ kind: 'replay', events: [] }));
   act(() => ev()({ kind: 'mode', mode: 'plan' }));
   expect(store.getState().controls.mode).toBe('plan');
+});
+
+it('an older server (no hello) gets no ids, and its echoes apply as they come', async () => {
+  const { sent, echo, box, store } = setup(false);
+  echo('default');
+  box.focus();
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(raw(sent)).toEqual([{ type: 'mode', mode: 'acceptEdits' }]);
+  expect(store.getState().controls.modeInFlight).toEqual([]);
+  echo('plan');
+  expect(store.getState().controls.mode).toBe('plan');
+});
+
+it('a dropped socket forgets the protocol until the next hello', () => {
+  const { store } = setup();
+  expect(store.getState().controls.protocol).toBe(2);
+  act(() => void store.dispatch(connState('closed')));
+  expect(store.getState().controls.protocol).toBe(0);
 });

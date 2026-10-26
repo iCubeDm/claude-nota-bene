@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { ServerEvent } from '@nota-bene/shared';
+import { PROTOCOL, type ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
 import { startServer } from './server.ts';
 
@@ -95,6 +95,15 @@ describe('server', () => {
     const first = b.events[0]!;
     expect(first.kind).toBe('replay');
     if (first.kind === 'replay') expect(first.events.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(true);
+  });
+
+  it('every new socket hears hello with the protocol, after the state it is sent on connect', async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    await until(() => a.events.some((e) => e.kind === 'hello'));
+    const kinds = a.events.map((e) => e.kind);
+    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL });
+    expect(kinds.indexOf('hello')).toBeGreaterThan(kinds.indexOf('stats'));
   });
 
   it('every new socket gets the mode, and a mode message is applied and broadcast', async () => {

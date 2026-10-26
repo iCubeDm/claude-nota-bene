@@ -2,7 +2,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
-import { parseClientMessage } from '@nota-bene/shared';
+import { parseClientMessage, PROTOCOL } from '@nota-bene/shared';
 import type { Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
@@ -172,6 +172,12 @@ export async function startServer(o: {
         ws.send(JSON.stringify({ kind: 'stats', stats: manager.stats() }));
       } catch (e) {
         reportError(hub, 'stats', e);
+      }
+      // what this server understands (see PROTOCOL); last, so the state above keeps its order
+      try {
+        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL }));
+      } catch (e) {
+        reportError(hub, 'hello', e);
       }
       ws.on('close', detach);
       ws.on('error', (e) => reportError(hub, 'ws', e));

@@ -2,7 +2,7 @@ import { createAction, type PayloadAction, createListenerMiddleware, createSlice
 import { MODES, type IdleCompact, type Mode } from '@nota-bene/shared';
 import { t } from '../i18n/index.ts';
 import { toast } from '../shell/toast.ts';
-import { serverEvent, type AppThunk, type RootState } from '../store/store.ts';
+import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
 
 /**
  * `switching`: a `switch` we sent is in flight. `asked` from the click until the reset's `replay` (the server accepted
@@ -20,10 +20,12 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
   seen: { id: string | null; root: string } | null;
   /** idle compaction of this project, as the server last said (null until it has) */
   idleCompact: IdleCompact | null;
+  /** what the connected server announced in `hello` (0: an older server, or none yet); see PROTOCOL */
+  protocol: number;
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null, protocol: 0 };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -53,8 +55,11 @@ export const controlsSlice = createSlice({
     b.addCase(modeSet, (s, a) => setMode(s, a.payload));
     b.addCase(modeSent, (s, a) => void s.modeInFlight.push(a.payload));
     b.addCase(idleCompactSet, (s, a) => void (s.idleCompact && (s.idleCompact.on = a.payload)));
+    // a dropped socket may come back to another server (a restart): until its hello, assume an old one
+    b.addCase(connState, (s, a) => void (a.payload === 'closed' && (s.protocol = 0)));
     b.addCase(serverEvent, (s, a) => {
       const ev = a.payload;
+      if (ev.kind === 'hello') s.protocol = ev.protocol;
       if (ev.kind === 'mode') {
         // Two quick Shift+Tabs: the echo of the first lands after the second was shown, and applying it would put the
         // pill (and the next Shift+Tab's starting point) one mode back. So while our own changes are in flight, echoes
@@ -111,6 +116,8 @@ export const pickMode = (mode: Mode): AppThunk => (dispatch, getState, { send })
   // mid-switch the server ignores it and announces the new session's mode: an optimistic pill would lie
   if (c.mode === mode || c.switching) return;
   dispatch(modeSet(mode));
+  // an older server answers no ack: then echoes apply as they come (the quick Shift+Tab race comes back, nothing hangs)
+  if (c.protocol < 2) return void send({ type: 'mode', mode });
   const id = crypto.randomUUID();
   if (send({ type: 'mode', mode, id })) dispatch(modeSent(id));
 };
@@ -128,8 +135,9 @@ export const toggleIdleCompact = (): AppThunk => (dispatch, getState, { send }) 
 export const ACTIVITY_THROTTLE_MS = 30_000;
 let lastActivity = -Infinity;
 /** The user touched the UI: tell the server at most once per ACTIVITY_THROTTLE_MS (the idle clock is minutes). */
-export const reportActivity = (now = Date.now()): AppThunk => (_d, _g, { send }) => {
+export const reportActivity = (now = Date.now()): AppThunk => (_d, getState, { send }) => {
   if (now - lastActivity < ACTIVITY_THROTTLE_MS) return;
+  if (getState().controls.protocol < 1) return; // an older server has no idle compaction and refuses `activity`
   if (send({ type: 'activity' })) lastActivity = now;
 };
 /** tests */
