@@ -25,7 +25,7 @@ it('the first root merges: a draft made before the root was known stays', () => 
   expect(s.drafts['file:x.png']!.shapes).toEqual([shape]);
 });
 
-it('dropShapes removes only the submitted shapes (by value, once each); nothing left leaves the mode', () => {
+it('dropShapes removes only the submitted shapes (by value, once each); the mode stays on', () => {
   const other = { ...shape, x: 0.6 };
   let s: MarkupState = r(undefined, setMode('t', true));
   s = r(s, addShape('t', shape));
@@ -33,5 +33,5 @@ it('dropShapes removes only the submitted shapes (by value, once each); nothing 
   s = r(s, dropShapes('t', [{ ...shape }]));
   expect(s.drafts.t).toMatchObject({ on: true, shapes: [other] });
   s = r(s, dropShapes('t', [other]));
-  expect(s.drafts.t).toMatchObject({ on: false, shapes: [] });
+  expect(s.drafts.t).toMatchObject({ on: true, shapes: [] });
 });

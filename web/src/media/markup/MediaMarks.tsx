@@ -41,8 +41,9 @@ function usePausedAt(media: Media): number | null {
 
 /**
  * The marks of a media tab's comments, over its content box: each shape in its own colour with the dark halo, sent
- * ones dimmed (and not drawn at all once the file has changed since). A video shows a comment's marks only while paused at its time (never over moving frames). Hidden while
- * the markup mode is on in this tab (the draft is what is seen then).
+ * ones dimmed (and not drawn at all once the file has changed since). A video shows a comment's marks only while paused at its time (never over moving frames). While
+ * the markup mode is on in this tab they stay drawn (the mode stays on after an Add, so the comments made so far stay
+ * in view) but take no clicks: the pointer belongs to the drawing then.
  *
  * Clicks: the svg takes no pointer events; only an invisible wider stroke along each shape does (a click opens the
  * comment's card), so the media's own clicks (the image's zoom, the video's play) pass through a shape's inside. Over a
@@ -63,12 +64,12 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref }: {
   const at = usePausedAt(media);
   const video = media instanceof HTMLVideoElement;
   const shown = useMemo(() => {
-    if (marking || at === null) return [];
+    if (at === null) return [];
     // a sent mark drawn on another version of the file points at what is no longer there (a pending one stays, flagged)
     const live = all.filter((c) => !(c.status === 'sent' && changedSince(c, current)));
     const list = video ? live.filter((c) => c.anchor.time !== undefined && Math.abs(c.anchor.time - at) <= TIME_TOLERANCE) : live;
     return list.some((c) => c.status === 'sent') ? [...list].sort((a, b) => (a.status === b.status ? 0 : a.status === 'sent' ? -1 : 1)) : list;
-  }, [all, at, marking, video, current]);
+  }, [all, at, video, current]);
 
   // the paths of a comment, per comment object (an edit of the text makes a new object; that is rare and cheap)
   const cache = useRef(new WeakMap<MediaComment, { els: ReturnType<typeof shapeEls>; ds: string[] }>());
@@ -124,7 +125,7 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref }: {
       {shown.map((c) => (
         <g key={c.id} data-mark={c.id} opacity={c.status === 'sent' ? SENT_OPACITY : undefined}>{drawn(c).els}</g>
       ))}
-      {shown.map((c) => {
+      {!marking && shown.map((c) => {
         const changed = changedSince(c, current);
         return (
           <g key={c.id} data-hit={c.id} clipPath={`url(#${clipId})`} onClick={open(c.id)} className="cursor-pointer">

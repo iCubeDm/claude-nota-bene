@@ -98,14 +98,15 @@ it('a click on a mark opens its card', () => {
   expect(store.getState().comments.ui.card).toEqual({ id: 'mine', x: 120, y: 300 });
 });
 
-it('marks are hidden while the markup mode is on for that tab', () => {
+it('marks stay drawn while the markup mode is on for that tab, but take no clicks', () => {
   const { store } = setup(image(), [comment('mine', media('p.png', [RED]))]);
   expect(ids()).toEqual(['mine']);
+  expect(pane.querySelector('[data-hit="mine"]')).not.toBeNull();
   act(() => void store.dispatch(setMode(TAB, true)));
-  expect(ids()).toEqual([]);
-  act(() => void store.dispatch(setMode('file:other.png', false)));
-  act(() => void store.dispatch(setMode(TAB, false)));
   expect(ids()).toEqual(['mine']);
+  expect(pane.querySelector('[data-hit]')).toBeNull();
+  act(() => void store.dispatch(setMode(TAB, false)));
+  expect(pane.querySelector('[data-hit="mine"]')).not.toBeNull();
 });
 
 it('video marks hidden while playing or away from the time, shown when paused at it', () => {

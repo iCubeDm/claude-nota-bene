@@ -35,7 +35,7 @@ export const markupSlice = createSlice({
     undo: (s, a: PayloadAction<string>) => void s.drafts[a.payload]?.shapes.pop(),
     /**
      * The comment made of `shapes` was added: those shapes leave the draft (one match each, by value); a stroke drawn
-     * while it was being saved stays. Nothing left: the mode is left too, like `clear`.
+     * while it was being saved stays. The mode stays on, with its tool and colour, for the next comment (Esc or ✕ leaves).
      */
     dropShapes: {
       reducer: (s, a: PayloadAction<{ tabId: string; shapes: MediaShape[] }>) => {
@@ -48,7 +48,6 @@ export const markupSlice = createSlice({
           if (i >= 0) left.splice(i, 1);
         }
         d.shapes = left;
-        if (!left.length) d.on = false;
       },
       prepare: (tabId: string, shapes: MediaShape[]) => ({ payload: { tabId, shapes } }),
     },

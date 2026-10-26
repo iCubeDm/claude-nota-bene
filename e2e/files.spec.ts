@@ -583,8 +583,12 @@ test('mark up an image: rect + pen, comment, files in the project, coordinates i
   await expect(layer.locator('[data-shape="pen"]')).toHaveCount(1);
   const text = uniq('wide');
   const id = await addMarkComment(page, text);
-  await expect(layer).toHaveCount(0); // added: the mode is left, the mark shows instead
+  // added: the mode stays on for the next comment, the draft is empty, the comment's mark shows under it
+  await expect(layer).toBeVisible();
+  await expect(layer.locator('[data-shape]')).toHaveCount(0);
   await expect(mediaPane(page, 'media/wide.png').locator(`[data-media-marks] [data-mark="${id}"]`)).toHaveCount(1);
+  await page.keyboard.press('Escape'); // nothing drawn: leaves without asking
+  await expect(layer).toHaveCount(0);
   await expect(cards(page).filter({ hasText: text }).locator('[data-media-thumb] img')).toBeVisible();
 
   // the two files, in the fixture project; the layer at the natural size, the rect's top edge opaque, the rest clear
@@ -683,6 +687,9 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   await drag(page, at(b, fx0, fy0), at(b, fx1, fy1));
   const text = uniq('frame');
   const id = await addMarkComment(page, text);
+  await expect(layer).toBeVisible(); // the mode stays on after an Add; Esc with nothing drawn leaves it
+  await page.keyboard.press('Escape');
+  await expect(layer).toHaveCount(0);
   await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(true);
   const mark = pane.locator(`[data-media-marks] [data-mark="${id}"]`);
   await expect(mark).toHaveCount(1);
@@ -755,10 +762,23 @@ test('deleting the comment removes its folder @files', async ({ page }) => {
   const id = await addMarkComment(page, text);
   const dir = markDir(await projectRoot(page), id);
   expect(fs.existsSync(nodePath.join(dir, 'layer.png'))).toBe(true);
+  // the mode stays on: a second comment right away, with the same tool (the ellipse); deleting the first keeps it
+  const layer = markupLayer(page, 'media/wide.png');
+  await drag(page, at(b, 0.1, 0.1), at(b, 0.3, 0.3));
+  await expect(layer.locator('[data-shape="ellipse"]')).toHaveCount(1);
+  const text2 = uniq('delete2');
+  const id2 = await addMarkComment(page, text2);
+  const dir2 = markDir(await projectRoot(page), id2);
+  await expect(mediaPane(page, 'media/wide.png').locator(`[data-media-marks] [data-mark="${id}"], [data-media-marks] [data-mark="${id2}"]`)).toHaveCount(2);
+  await page.keyboard.press('Escape');
+  await expect(layer).toHaveCount(0);
   await cards(page).filter({ hasText: text }).getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
   await expect(cards(page).filter({ hasText: text })).toHaveCount(0);
   await expect.poll(() => fs.existsSync(dir)).toBe(false);
   await expect(mediaPane(page, 'media/wide.png').locator(`[data-mark="${id}"]`)).toHaveCount(0);
+  expect(fs.existsSync(nodePath.join(dir2, 'layer.png'))).toBe(true);
+  await cards(page).filter({ hasText: text2 }).getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
+  await expect.poll(() => fs.existsSync(dir2)).toBe(false);
 });
 
 test('4K-ish drawing stays responsive: a 300-point pen stroke, the pointer-move handler median under 4 ms @files', async ({ page }) => {

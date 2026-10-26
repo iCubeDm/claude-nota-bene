@@ -280,7 +280,7 @@ it('while marking, the video has no controls; leaving restores them', () => {
 const SHAPE = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 } as const;
 const UUID = /^[0-9a-f-]{36}$/;
 
-it('Comment on an image opens the popup; Add renders the files and adds the comment, then clears the draft', async () => {
+it('Comment on an image opens the popup; Add renders the files and adds the comment, then clears the draft (the mode stays on)', async () => {
   spec = { body: 'x', etag: 'W/"5-1729.5"' };
   prepareMediaComment.mockClear();
   const { r, store } = setup('media/p.png');
@@ -301,7 +301,7 @@ it('Comment on an image opens the popup; Add renders the files and adds the comm
   expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), img, anchor, { version: expect.any(Promise) });
   const [c] = store.getState().comments.items;
   expect(c).toMatchObject({ id: prepareMediaComment.mock.calls[0]![0], text: 'sit here', anchor: { ...anchor, version: 'W/"5-1729.5"' }, images: ['1'.repeat(64), '2'.repeat(64)] });
-  expect(selectDraft(store.getState(), tab)).toMatchObject({ on: false, shapes: [] });
+  expect(selectDraft(store.getState(), tab)).toMatchObject({ on: true, shapes: [] });
   expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
 });
 
@@ -346,11 +346,10 @@ it('a tab switch while Add saves: the save finishes and the comment is added; th
   await act(async () => release());
   await waitFor(() => expect(store.getState().comments.items).toHaveLength(1));
   expect(store.getState().comments.items[0]).toMatchObject({ text: 'keep me' });
-  expect(selectDraft(store.getState(), 'file:p.png')).toMatchObject({ on: false, shapes: [] });
+  expect(selectDraft(store.getState(), 'file:p.png')).toMatchObject({ on: true, shapes: [] });
   expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
   // the save is over: the next popup closes on a tab switch as before
-  setActive(true);
-  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  setActive(true); // still in the mode: the next drawing needs no Mark up
   act(() => { store.dispatch(addShape('file:p.png', SHAPE)); });
   fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
   expect(screen.getByPlaceholderText('Comment…')).toBeInTheDocument();
