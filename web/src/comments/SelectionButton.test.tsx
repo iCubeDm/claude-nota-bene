@@ -333,3 +333,14 @@ it('a selection made while switching shows no button', async () => {
   await up(el);
   expect(screen.queryByRole('button')).toBeNull();
 });
+
+it('the button has no transition, so it appears in place instead of flying in from 0,0 (M6-02)', async () => {
+  const { q } = setup('<div data-item-id="a" data-kind="assistant" data-final="true">hello world</div>');
+  const t = q('a').firstChild!;
+  select(t, 0, t, 5);
+  await up(q('a'));
+  const b = screen.getByRole('button', { name: /comment/i });
+  expect(b.className).toContain('transition-none');
+  expect(b.className).not.toContain('transition-all');
+  expect(b.style.visibility).toBe('visible');
+});
