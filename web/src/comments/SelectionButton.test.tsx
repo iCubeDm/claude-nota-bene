@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ClientMessage } from '@nota-bene/shared';
+import type { ClientMessage, TextAnchor } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { Composer } from '@/composer/Composer.tsx';
 import { setLang } from '@/i18n/index.ts';
@@ -81,7 +81,7 @@ it('a selection spanning two items is clipped to the first', async () => {
   fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
   const sel = onComment.mock.calls[0][0];
   expect(sel.anchor.source).toEqual({ kind: 'message', id: 'a1' });
-  expect(sel.anchor.quote).toBe('brave world');
+  expect((sel.anchor as TextAnchor).quote).toBe('brave world');
   expect(sel.rect.bottom).toBe(40);
 });
 
@@ -188,7 +188,7 @@ it('a whole user bubble yields a quote without the meta header', async () => {
   select(u, 0, u, u.childNodes.length);
   await up(u);
   fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
-  expect(onComment.mock.calls[0][0].anchor.quote).toBe('do the thing');
+  expect((onComment.mock.calls[0][0].anchor as TextAnchor).quote).toBe('do the thing');
 });
 
 it('Esc dismissing the button does not interrupt a busy agent; the next Esc does', async () => {
@@ -246,7 +246,7 @@ it('a selection in an md file view gives an anchor on that file', async () => {
   select(t, 6, t, 11);
   await up(root);
   fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
-  const { anchor } = onComment.mock.calls[0][0];
+  const anchor = onComment.mock.calls[0][0].anchor as TextAnchor;
   expect(anchor.source).toEqual({ kind: 'file', path: 'docs/n.md' });
   expect(anchor.quote).toBe('brave');
   expect(anchor.prefix).toBe('Title hello '); // offsets in the rendered text of the whole file root
@@ -259,7 +259,7 @@ it('a selection from a file root into something outside is clipped to the file',
   select(t, 6, o, 3);
   await up(root);
   fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
-  expect(onComment.mock.calls[0][0].anchor.quote).toBe('brave world');
+  expect((onComment.mock.calls[0][0].anchor as TextAnchor).quote).toBe('brave world');
 });
 
 it('scrolling the active file pane follows the selection; Esc then a scroll keeps it hidden', async () => {
@@ -286,7 +286,7 @@ it('an md file whose content has its own data-file-path: the selection still anc
   select(t, 7, t, 12);
   await up(root);
   fireEvent.click(screen.getByRole('button', { name: '💬 Comment' }));
-  const { anchor } = onComment.mock.calls[0][0];
+  const anchor = onComment.mock.calls[0][0].anchor as TextAnchor;
   expect(anchor.source).toEqual({ kind: 'file', path: 'docs/n.md' });
   expect(anchor.quote).toBe('brave');
   expect(anchor.prefix).toBe('hello nested '); // offsets in the whole file root, not the nested element

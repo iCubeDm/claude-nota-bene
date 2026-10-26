@@ -1,4 +1,4 @@
-import type { Comment } from '@nota-bene/shared';
+import { isMediaAnchor, type Comment } from '@nota-bene/shared';
 import { tIn, type Lang } from '../i18n/index.ts';
 
 /**
@@ -20,7 +20,8 @@ export function composeBatch(
 ): string {
   if (!items.length) return general;
   const blocks = items.map((c, i) => {
-    const quote = c.anchor.quote.split('\n').map((l) => '> ' + l).join('\n');
+    // placeholder: a media comment carries no quote yet (its batch text arrives with media handling)
+    const quote = isMediaAnchor(c.anchor) ? '' : c.anchor.quote.split('\n').map((l) => '> ' + l).join('\n');
     const body = [labelOf(c), c.text.trim()].filter(Boolean).join(' ');
     const instr = instructionOf(c);
     return `${i + 1}. [${whereOf(c)}]\n${quote}\n→ ${body}${instr ? `\n   ${instr}` : ''}${refs[i]?.length ? '\n' + tIn(lang, 'imgRef', refs[i]) : ''}`;

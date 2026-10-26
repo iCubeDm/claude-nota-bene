@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { Comment } from '@nota-bene/shared';
+import { isMediaAnchor, type Comment } from '@nota-bene/shared';
 import { rangeForAnchor } from '@/anchors/text.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { fileKey } from '@/files/sources.ts';
@@ -59,6 +59,7 @@ const keyOf = (src: Source) => (src.kind === 'message' ? `m:${src.id}` : `f:${fi
  * (Markdown sets innerHTML, CodeText sets textContent), so `isConnected` drops the stale range; an unchanged text keeps them.
  */
 function rangeOf(roots: Map<string, HTMLElement>, cache: Map<string, Cached>, c: Comment): Range | null {
+  if (isMediaAnchor(c.anchor)) return null; // media marks are drawn over the media, not as text highlights
   const root = roots.get(keyOf(c.anchor.source));
   if (!root || (root.dataset.kind === 'assistant' && root.dataset.final !== 'true')) return null;
   const hit = cache.get(c.id);

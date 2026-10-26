@@ -1,9 +1,9 @@
-import type { Anchor, AnchorSource } from '@nota-bene/shared';
+import type { AnchorSource, TextAnchor } from '@nota-bene/shared';
 
 // Pure string logic over the normalised text from ./text.
 export const CONTEXT = 32;
 
-export function makeAnchor(source: AnchorSource, text: string, start: number, end: number): Anchor {
+export function makeAnchor(source: AnchorSource, text: string, start: number, end: number): TextAnchor {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > text.length || start > end) {
     throw new RangeError(`bad anchor range ${start}..${end} for text of length ${text.length}`);
   }
@@ -34,7 +34,7 @@ const FAST_CONTEXT = 8;
  * (an old anchor on a user message's raw text, now rendered as markdown, can find the same word at its old offset
  * and mark the wrong one). A context shorter than CONTEXT means the text began or ended there, so it must still.
  */
-function offsetsHold(a: Anchor, text: string): boolean {
+function offsetsHold(a: TextAnchor, text: string): boolean {
   if (a.end > text.length || text.slice(a.start, a.end) !== a.quote) return false;
   const p = a.prefix.slice(-FAST_CONTEXT);
   const s = a.suffix.slice(0, FAST_CONTEXT);
@@ -44,7 +44,7 @@ function offsetsHold(a: Anchor, text: string): boolean {
   return true;
 }
 
-export function resolveAnchor(a: Anchor, text: string): { start: number; end: number } | null {
+export function resolveAnchor(a: TextAnchor, text: string): { start: number; end: number } | null {
   const { quote } = a;
   if (offsetsHold(a, text)) return { start: a.start, end: a.end };
   if (quote === '') return null;

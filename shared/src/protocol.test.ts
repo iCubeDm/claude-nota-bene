@@ -116,3 +116,46 @@ test('activity and idle-compact (only a boolean on; extra keys dropped)', () => 
   expect(parseClientMessage('{"type":"idle-compact","on":false,"x":1}')).toEqual({ type: 'idle-compact', on: false });
   expect(parseClientMessage('{"type":"idle-compact","on":"no"}')).toHaveProperty('error');
 });
+
+const mediaAnchor = (over: Record<string, unknown> = {}) => ({
+  kind: 'media', source: { kind: 'file', path: 'img/a.png' }, width: 640, height: 480,
+  shapes: [{ kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 }], ...over,
+});
+const parseMedia = (a: unknown) => parseClientMessage(comments(comment({ anchor: a })));
+
+test('parses a comment with a media anchor (rect, ellipse, arrow, pen; time; version)', () => {
+  const a = mediaAnchor({
+    time: 12.345, version: '"abc"',
+    source: { kind: 'file', path: 'v/a.mp4', ref: 'main' },
+    shapes: [
+      { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
+      { kind: 'ellipse', color: '#ffcc00', x: 0, y: 0, w: 1, h: 1 },
+      { kind: 'arrow', color: '#0a84ff', x1: 0, y1: 0.5, x2: 1, y2: 0.5 },
+      { kind: 'pen', color: '#ffffff', points: [0, 0, 0.5, 0.5, 1, 1] },
+    ],
+  });
+  expect(parseMedia(a)).toEqual({ type: 'comments', sessionId: null, items: [comment({ anchor: a })] });
+});
+
+test('rejects media anchors that are out of range or malformed', () => {
+  const rect = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+  const bad = [
+    mediaAnchor({ shapes: [{ ...rect, x: 1.5 }] }),
+    mediaAnchor({ shapes: [{ ...rect, w: 0 }] }),
+    mediaAnchor({ shapes: [{ kind: 'arrow', color: '#ff3b30', x1: 0, y1: 0, x2: 2, y2: 0 }] }),
+    mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, 0.5] }] }),
+    mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: new Array(20002).fill(0.5) }] }),
+    mediaAnchor({ shapes: [{ ...rect, color: '#123456' }] }),
+    mediaAnchor({ shapes: [] }),
+    mediaAnchor({ width: 0 }),
+    mediaAnchor({ source: { kind: 'message', id: 'm1' } }),
+  ];
+  for (const a of bad) expect(parseMedia(a)).toHaveProperty('error');
+});
+
+test('toAnchor copies a media anchor deeply', () => {
+  const a = mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, 1, 1] }] });
+  const r = parseMedia(a) as { items: { anchor: { shapes: { points: number[] }[] } }[] };
+  r.items[0].anchor.shapes[0].points[0] = 0.9;
+  expect((a.shapes[0] as unknown as { points: number[] }).points[0]).toBe(0);
+});

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { QuickLabelId } from '@nota-bene/shared';
+import { isMediaAnchor, type QuickLabelId } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
@@ -121,7 +121,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       }}
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
-      <div className="mb-1.5 truncate border-l-2 border-nb-accent pl-1.5 text-[11px] text-muted-foreground">«{pending.anchor.quote.trim()}»</div>
+      <div className="mb-1.5 truncate border-l-2 border-nb-accent pl-1.5 text-[11px] text-muted-foreground">«{isMediaAnchor(pending.anchor) ? '' : pending.anchor.quote.trim()}»</div>
       <textarea
         ref={area}
         value={text}

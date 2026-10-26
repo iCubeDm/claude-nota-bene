@@ -3,7 +3,7 @@
 // ends trimmed; script/style/aria-hidden/[data-anchor-skip] subtrees are skipped. All three
 // functions share one model (`build`), so round-trips are exact.
 
-import type { Anchor } from '@nota-bene/shared';
+import { isMediaAnchor, type Anchor } from '@nota-bene/shared';
 import { resolveAnchor } from './resolve.ts';
 
 type Pt = [Text, number];
@@ -138,6 +138,7 @@ export function rangeFromOffsets(root: Element, start: number, end: number): Ran
 
 /** Resolves an anchor against the root's current text and maps it to a DOM range, building the text model once. */
 export function rangeForAnchor(root: Element, anchor: Anchor): Range | null {
+  if (isMediaAnchor(anchor)) return null; // a mark on an image or video frame has no text range
   const m = build(root);
   const hit = resolveAnchor(anchor, m.text);
   return hit ? rangeIn(root, m, hit.start, hit.end) : null;

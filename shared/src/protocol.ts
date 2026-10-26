@@ -2,7 +2,28 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
 export type AnchorSource = { kind: 'message'; id: string } | { kind: 'file'; path: string; ref?: string };
-export type Anchor = { source: AnchorSource; start: number; end: number; quote: string; prefix: string; suffix: string };
+export type FileSource = Extract<AnchorSource, { kind: 'file' }>;
+export const MARK_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff'] as const;
+export type MarkColor = (typeof MARK_COLORS)[number];
+/** the largest mark image (`/marks`) the server takes */
+export const MARK_MAX_BYTES = 25 * 1024 * 1024;
+const PEN_MAX_VALUES = 20000;
+/** all coordinates are relative to the media's natural size, 0..1 */
+export type MediaShape =
+  | { kind: 'rect' | 'ellipse'; color: MarkColor; x: number; y: number; w: number; h: number }
+  | { kind: 'arrow'; color: MarkColor; x1: number; y1: number; x2: number; y2: number }
+  | { kind: 'pen'; color: MarkColor; points: number[] };
+export type MediaAnchor = {
+  kind: 'media'; source: FileSource; width: number; height: number;
+  /** seconds at the pause (video only), ms precision */
+  time?: number;
+  /** the /file ETag when drawn */
+  version?: string;
+  shapes: MediaShape[];
+};
+export type TextAnchor = { source: AnchorSource; start: number; end: number; quote: string; prefix: string; suffix: string };
+export type Anchor = TextAnchor | MediaAnchor;
+export const isMediaAnchor = (a: Anchor): a is MediaAnchor => (a as MediaAnchor).kind === 'media';
 export const QUICK_LABEL_IDS = ['looks-good', 'fire', 'clarify', 'verify', 'example', 'overview', 'patterns',
   'alternatives', 'no-regression', 'out-of-scope', 'needs-tests'] as const;
 export type QuickLabelId = (typeof QUICK_LABEL_IDS)[number];
@@ -31,9 +52,9 @@ export type Comment = {
 /**
  * What this server understands beyond the base protocol, announced in `hello` on connect. Every window serves the one
  * shared `web/dist`, so a reloaded page can be newer than its server (until "Restart the server"): the page sends a newer
- * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label.
+ * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label; 4: media anchors and `/marks`.
  */
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 
 export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type Mode = (typeof MODES)[number];
@@ -127,11 +148,44 @@ function isOffset(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0;
 }
 
-function isAnchor(v: unknown): v is Anchor {
-  if (!isObj(v) || !isObj(v.source)) return false;
-  const s = v.source;
+function isFileSource(s: Obj): boolean {
   const refOk = s.ref === undefined || (typeof s.ref === 'string' && s.ref.length > 0 && s.ref.length <= 200);
-  const sourceOk = (s.kind === 'message' && typeof s.id === 'string') || (s.kind === 'file' && typeof s.path === 'string' && refOk);
+  return s.kind === 'file' && typeof s.path === 'string' && refOk;
+}
+
+const isRel = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+const isPos = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+const isMarkColor = (v: unknown): v is MarkColor => (MARK_COLORS as readonly unknown[]).includes(v);
+
+function isMediaShape(v: unknown): v is MediaShape {
+  if (!isObj(v) || !isMarkColor(v.color)) return false;
+  switch (v.kind) {
+    case 'rect':
+    case 'ellipse':
+      return isRel(v.x) && isRel(v.y) && isRel(v.w) && isRel(v.h) && v.w > 0 && v.h > 0;
+    case 'arrow':
+      return isRel(v.x1) && isRel(v.y1) && isRel(v.x2) && isRel(v.y2);
+    case 'pen':
+      return Array.isArray(v.points) && v.points.length >= 2 && v.points.length <= PEN_MAX_VALUES
+        && v.points.length % 2 === 0 && v.points.every(isRel);
+    default:
+      return false;
+  }
+}
+
+function isMediaAnchorShape(v: Obj): boolean {
+  return isObj(v.source) && isFileSource(v.source) && isPos(v.width) && isPos(v.height)
+    && (v.time === undefined || (typeof v.time === 'number' && Number.isFinite(v.time) && v.time >= 0))
+    && (v.version === undefined || (typeof v.version === 'string' && v.version.length <= 200))
+    && Array.isArray(v.shapes) && v.shapes.length > 0 && v.shapes.every(isMediaShape);
+}
+
+function isAnchor(v: unknown): v is Anchor {
+  if (!isObj(v)) return false;
+  if (v.kind === 'media') return isMediaAnchorShape(v);
+  if (!isObj(v.source)) return false;
+  const s = v.source;
+  const sourceOk = (s.kind === 'message' && typeof s.id === 'string') || isFileSource(s);
   return sourceOk && isOffset(v.start) && isOffset(v.end) && v.end >= v.start
     && typeof v.quote === 'string' && typeof v.prefix === 'string' && typeof v.suffix === 'string';
 }
@@ -159,7 +213,24 @@ function toSource(s: AnchorSource): AnchorSource {
   return s.ref === undefined ? { kind: 'file', path: s.path } : { kind: 'file', path: s.path, ref: s.ref };
 }
 
+function toShape(s: MediaShape): MediaShape {
+  switch (s.kind) {
+    case 'rect':
+    case 'ellipse': return { kind: s.kind, color: s.color, x: s.x, y: s.y, w: s.w, h: s.h };
+    case 'arrow': return { kind: 'arrow', color: s.color, x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2 };
+    case 'pen': return { kind: 'pen', color: s.color, points: [...s.points] };
+  }
+}
+
 function toAnchor(a: Anchor): Anchor {
+  if (isMediaAnchor(a)) {
+    return {
+      kind: 'media', source: toSource(a.source) as FileSource, width: a.width, height: a.height,
+      ...(a.time === undefined ? {} : { time: a.time }),
+      ...(a.version === undefined ? {} : { version: a.version }),
+      shapes: a.shapes.map(toShape),
+    };
+  }
   return { source: toSource(a.source), start: a.start, end: a.end, quote: a.quote, prefix: a.prefix, suffix: a.suffix };
 }
 

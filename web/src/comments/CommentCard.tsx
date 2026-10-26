@@ -1,4 +1,4 @@
-import type { Comment } from '@nota-bene/shared';
+import { isMediaAnchor, type Comment } from '@nota-bene/shared';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { scrollRangeIntoView } from '@/anchors/scroll.ts';
@@ -76,6 +76,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   useEffect(() => {
     const src = c?.anchor.source;
     if (!c || src?.kind !== 'file') return;
+    if (isMediaAnchor(c.anchor)) return setOrphan(false); // placeholder: media orphaning arrives with media handling
     if (!fileLoad || fileLoad.s === 'loading') return setOrphan(false);
     if (fileLoad.s === 'gone') return setOrphan(true);
     const root = fileRoot(src.path, src.ref);
@@ -189,7 +190,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
         onClick={popover ? undefined : jump}
         className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
       >
-        {c.anchor.quote}
+        {isMediaAnchor(c.anchor) ? '' : c.anchor.quote}
       </div>
       {orphan && <div className="mt-1 text-[11px] text-destructive">({t('orphaned')})</div>}
       <div
