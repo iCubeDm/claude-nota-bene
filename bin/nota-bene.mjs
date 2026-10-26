@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
+import { importPrototypeStateSafely } from '../server/src/migrate.ts';
 import {
   liveWindows, pidAlive, probeInfo, readWindows, registerWindow, restartingWindows, unregisterWindow,
 } from '../server/src/windows.ts';
@@ -554,6 +555,8 @@ async function main(argv) {
   }
   try {
     if (o.find !== undefined) return await find(o.find);
+    // the prototype's state first (idempotent; the server runs it too), so the first --last after the switch sees it
+    importPrototypeStateSafely(process.env, (msg) => say(msg));
     if (o.last !== undefined) return last(o.last);
     o.dir = realDir(o.dir ?? '.');
   } catch (e) {

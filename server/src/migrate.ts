@@ -18,7 +18,9 @@ const realDir = (p: string): string | undefined => {
  * R-M5-4: one-time import of the prototype's folder→session and per-port mode state. Never overwrites rebuild
  * state; the marker in prefs.json (written even when the file is absent or corrupt) makes it run once.
  */
-export function importPrototypeState(o: { prototypeSessions: string | URL }): { sessions: number; modes: number } {
+export function importPrototypeState(
+  o: { prototypeSessions: string | URL; log?: (msg: string) => void },
+): { sessions: number; modes: number } {
   if (prototypeImported()) return { sessions: 0, modes: 0 };
   let data: Record<string, unknown> = {};
   try {
@@ -62,16 +64,19 @@ export function importPrototypeState(o: { prototypeSessions: string | URL }): { 
     raw.modes = modes;
     raw.importedPrototype = true;
   });
-  if (sessionsAdded || modesAdded) console.log(`imported from prototype: ${sessionsAdded} sessions, ${modesAdded} modes`);
+  if (sessionsAdded || modesAdded) (o.log ?? console.log)(`imported from prototype: ${sessionsAdded} sessions, ${modesAdded} modes`);
   return { sessions: sessionsAdded, modes: modesAdded };
 }
 
-/** Startup entry: the NOTA_BENE_PROTOTYPE_SESSIONS override ('off' skips); a failure never blocks the start. */
-export function importPrototypeStateSafely(env: NodeJS.ProcessEnv = process.env): void {
+/**
+ * Startup entry: the NOTA_BENE_PROTOTYPE_SESSIONS override ('off' skips); a failure never blocks the start.
+ * `log` gets the "imported" line (the launcher sends it to stderr: its stdout is the --last/--detach answer).
+ */
+export function importPrototypeStateSafely(env: NodeJS.ProcessEnv = process.env, log?: (msg: string) => void): void {
   const o = env.NOTA_BENE_PROTOTYPE_SESSIONS;
   if (o === 'off') return;
   try {
-    importPrototypeState({ prototypeSessions: o || PROTOTYPE_SESSIONS });
+    importPrototypeState({ prototypeSessions: o || PROTOTYPE_SESSIONS, ...(log ? { log } : {}) });
   } catch (e) {
     console.error(`[migrate] skipped: ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -467,6 +467,17 @@ describe('nota-bene launcher', () => {
     }
   });
 
+  it('--last imports the prototype state first, and stdout stays the bare id', () => {
+    const id = '0123abcd-0000-4000-8000-000000000001';
+    const proto = path.join(tmp, 'proto-sessions.json');
+    fs.writeFileSync(proto, JSON.stringify({ [project]: id }));
+    fs.mkdirSync(path.join(tmp, 'claude/projects/x'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'claude/projects/x', `${id}.jsonl`), '');
+    const r = bin(['--last', project], { NOTA_BENE_PROTOTYPE_SESSIONS: proto });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe(`${id}\n`);
+  });
+
   it('--last prints the saved session only while its transcript exists', () => {
     const id = '0123abcd-0000-4000-8000-000000000000';
     fs.writeFileSync(path.join(home, 'sessions.json'), JSON.stringify({ [project]: id }));
