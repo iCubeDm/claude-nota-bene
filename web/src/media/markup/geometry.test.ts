@@ -39,7 +39,7 @@ it('simplify keeps first/last, drops near duplicates, never empties a 2-point st
   expect(simplify([0.2, 0.2])).toEqual([0.2, 0.2]);
   expect(simplify([0, 0, 0.1, 0.1, 0.2, 0.2])).toEqual([0, 0, 0.1, 0.1, 0.2, 0.2]);
 });
-const C = 'red' as const;
+const C = '#ff3b30' as const;
 it('describeShape rect', () => {
   expect(describeShape({ kind: 'rect', color: C, x: 0.42, y: 0.4, w: 0.16, h: 0.24 }, 1920, 1080))
     .toBe('rect x=0.42 y=0.4 w=0.16 h=0.24 (px 806,432 307×259)');
