@@ -27,7 +27,6 @@ export const en: Dict = {
   closeRight: 'Close to the right',
   closeAll: 'Close all',
   copyPath: 'Copy path',
-  revealInTree: 'Reveal in tree',
   comments: 'Comments',
   commentsN: (n) => `Comments · ${n}`,
   emptyComments: 'Select text in the chat or an open file and press “Comment”.\nComments collect here and go to the agent as one batch.',
@@ -104,6 +103,9 @@ export const en: Dict = {
   toolsRight: 'Right tool windows',
   files: 'Files',
   refresh: 'Refresh',
+  revealOpened: 'Select opened file',
+  collapseAll: 'Collapse all',
+  expandAll: 'Expand all',
   filterPh: 'Filter files…',
   // branches and worktrees (M3-16)
   sourcePick: 'Source',

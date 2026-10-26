@@ -48,14 +48,13 @@ it('the × button closes and has an accessible name', () => {
   expect(ids(s)).toEqual(['chat']);
 });
 
-it('Copy path writes the project-relative path; Reveal raises tree/reveal', () => {
+it('Copy path writes the project-relative path; Reveal is not in the menu (it is in the tree header, M6-10)', () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-  const s = setup(['src/a/x.ts']);
+  setup(['src/a/x.ts']);
   fireEvent.click(within(menu(tab('x.ts'))).getByRole('menuitem', { name: 'Copy path' }));
   expect(writeText).toHaveBeenCalledWith('src/a/x.ts');
-  fireEvent.click(within(menu(tab('x.ts'))).getByRole('menuitem', { name: 'Reveal in tree' }));
-  expect(s.getState().tree.reveal).toBe('src/a/x.ts');
+  expect(within(menu(tab('x.ts'))).queryByRole('menuitem', { name: /reveal/i })).toBeNull();
 });
 
 it('labels are basenames with the full path in title; aria-selected follows the active tab', () => {

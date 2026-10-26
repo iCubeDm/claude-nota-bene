@@ -116,11 +116,11 @@ The hotkey list appears in the `?` help.
 - [ ] The header's Comments button is removed. The Files header button from today's fix is removed too: the strip replaces it.
 
 ### M6-10: Tree header actions
-- [ ] Next to ↻ in the tree header, add three buttons:
+- [x] Next to ↻ in the tree header, add three buttons:
   - "Reveal current file" (the IntelliJ "Select Opened File");
   - "Collapse all";
-  - "Expand all". It expands the loaded folders and lazy-loads one level at a time, with a cap of 2000 rows.
-- [ ] Remove "Reveal in tree" from the tab context menu (the user: it belongs in the tree header).
+  - "Expand all". It expands the loaded folders and lazy-loads one level at a time, with a cap of 2000 rows. Ruling (2026-10-26): "Expand all" never opens `node_modules` or `.git` (they would eat the cap before the project's own folders; a click still opens them).
+- [x] Remove "Reveal in tree" from the tab context menu (the user: it belongs in the tree header).
 
 ### M6-11: File-type icons
 - [ ] Use a small built-in icon set by extension and well-known names, in the tree, tabs, the `@` picker and Cmd+E:

@@ -5,7 +5,7 @@ import type { ServerEvent, TreeEntry } from '@nota-bene/shared';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { revealInTree, setTreeOpen } from '@/tree/slice.ts';
-import { selectTabs } from '@/tabs/slice.ts';
+import { openFile, selectTabs } from '@/tabs/slice.ts';
 import { FileTree } from './FileTree.tsx';
 
 let fs: Record<string, TreeEntry[]>;
@@ -161,4 +161,47 @@ it('a refresh that resolves after a switch to another root does not prune that r
   expect(store.getState().tree.dirs).toEqual(['docs']);
   expect(localStorage.getItem('tree:/r2')).toBe(JSON.stringify(['docs']));
   expect(JSON.parse(localStorage.getItem('tree:/r1')!)).toEqual(['src']);
+});
+
+it('Select opened file reveals the active file tab; it is off while the chat is active (M6-10)', async () => {
+  const store = setup();
+  const btn = await screen.findByRole('button', { name: 'Select opened file' });
+  expect(btn).toBeDisabled();
+  act(() => { store.dispatch(openFile({ path: 'src/lib/deep.ts', src: 'here' })); });
+  fireEvent.click(btn);
+  await row('deep.ts');
+  expect(store.getState().tree.dirs).toEqual(expect.arrayContaining(['src', 'src/lib']));
+});
+
+it('Expand all opens every folder level by level, skipping node_modules and .git; Collapse all closes them (M6-10)', async () => {
+  fs[''] = [{ name: '.git', dir: true }, { name: 'node_modules', dir: true }, { name: 'src', dir: true }, { name: 'docs', dir: true }];
+  fs.docs = [{ name: 'a.md', dir: false }];
+  const store = setup();
+  await row('src');
+  fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+  await row('deep.ts');
+  await row('a.md');
+  expect([...store.getState().tree.dirs].sort()).toEqual(['docs', 'src', 'src/lib']);
+  expect(calls.some((u) => u.includes('node_modules') || u.includes('.git'))).toBe(false);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
+  expect(store.getState().tree.dirs).toEqual([]);
+  expect(screen.queryByRole('button', { name: /^deep\.ts/ })).toBeNull();
+});
+
+it('Expand all stops at the row cap (M6-10)', { timeout: 15000 }, async () => {
+  // 30 folders of 100 files each: the first level shows 30 rows, the second 3030, over the cap; no third round
+  fs[''] = Array.from({ length: 30 }, (_, i) => ({ name: `d${String(i).padStart(2, '0')}`, dir: true }));
+  for (let i = 0; i < 30; i++) {
+    const n = `d${String(i).padStart(2, '0')}`;
+    fs[n] = [{ name: 'sub', dir: true }, ...Array.from({ length: 100 }, (_, j) => ({ name: `f${j}.ts`, dir: false }))];
+    fs[`${n}/sub`] = [{ name: 'x.ts', dir: false }];
+  }
+  const store = setup();
+  await row('d00');
+  fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+  // 3000+ rows render slowly in jsdom under a full parallel run: a wider wait than the default 1 s
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).toBeEnabled(), { timeout: 8000 });
+  expect(store.getState().tree.dirs).toHaveLength(30);
+  expect(calls.some((u) => u.includes('sub'))).toBe(false);
 });

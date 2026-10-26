@@ -4,7 +4,6 @@ import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { AUDIO, IMAGE, VIDEO } from '@/files/kinds.ts';
 import { fileKey } from '@/files/sources.ts';
 import { SourceChip } from '@/files/SourcePicker.tsx';
-import { revealFile } from '@/tree/slice.ts';
 import { selectSession, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu.tsx';
 import { activate, closeAll, closeOthers, closeRight, closeTab, selectTabs, type Tab } from './slice.ts';
@@ -78,7 +77,6 @@ function TabItem({ tab, active, last, playing }: { tab: Tab; active: boolean; la
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => void navigator.clipboard?.writeText(tab.path)}>{t('copyPath')}</ContextMenuItem>
-            <ContextMenuItem onSelect={() => d(revealFile(tab.path, tab.src))}>{t('revealInTree')}</ContextMenuItem>
           </>
         )}
       </ContextMenuContent>

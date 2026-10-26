@@ -4,7 +4,7 @@ import { useT } from '@/i18n/index.ts';
 import { selectPendingCountByPath } from '@/comments/slice.ts';
 import { selectActiveTab, openFile } from '@/tabs/slice.ts';
 import { ICONS, Svg, iconForPath } from '@/tabs/TabStrip.tsx';
-import { clearReveal, pickSource, selectTree, setDirs, setTreeOpen, toggleDir } from '@/tree/slice.ts';
+import { clearReveal, pickSource, revealFile, selectTree, setDirs, setTreeOpen, toggleDir } from '@/tree/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { useStore } from 'react-redux';
 import { fileKey, isFixed, loadSources, useSources } from './sources.ts';
@@ -26,6 +26,10 @@ async function loadDir(rel: string, src: string): Promise<Loaded> {
 }
 
 const TREE_MIN = 200;
+/** "Expand all" stops once the tree shows this many rows (a huge folder never freezes the sheet). */
+export const EXPAND_CAP = 2000;
+/** Never opened by "Expand all": dependency and VCS folders would eat the cap before the project's own (a click still opens them). */
+const NO_EXPAND = new Set(['node_modules', '.git']);
 
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
@@ -59,9 +63,12 @@ export function FileTree() {
   }, [open]);
   // the source the loaded entries belong to: a switch drops them, and an answer for the previous source is ignored
   const shown = useRef(src);
+  // "Expand all" in progress: each loaded level opens the next, until EXPAND_CAP rows or nothing is left
+  const [expanding, setExpanding] = useState(false);
   if (shown.current !== src) {
     shown.current = src;
     requested.current = new Set();
+    if (expanding) setExpanding(false);
   }
   useEffect(() => setEntries({}), [src]);
 
@@ -134,6 +141,29 @@ export function FileTree() {
     if (!isFixed(src, sources) && (open || requested.current.size > 0)) void refresh();
   }, [turnSeq, open, src, sources, refresh]);
 
+  // "Expand all": once every open folder is loaded, open the closed folders it shows, one level per round. Stops at the
+  // cap, when no closed folder is left, or on a load error (that folder would never load and stall the rounds)
+  useEffect(() => {
+    if (!expanding) return;
+    if (failed || !open) return void setExpanding(false);
+    if (['', ...dirs].some((p) => !entries[p])) return; // this level is still loading
+    const open_ = new Set(dirs);
+    const closed: string[] = [];
+    let rows = 0;
+    const walk = (dir: string) => {
+      for (const e of entries[dir] ?? []) {
+        rows++;
+        const p = join(dir, e.name);
+        if (!e.dir) continue;
+        if (open_.has(p)) walk(p);
+        else if (!NO_EXPAND.has(e.name)) closed.push(p);
+      }
+    };
+    walk('');
+    if (rows >= EXPAND_CAP || !closed.length) return void setExpanding(false);
+    d(setDirs([...dirs, ...closed]));
+  }, [expanding, entries, dirs, failed, open, d]);
+
   // a reveal clears the filter, so the revealed row is not filtered away
   useEffect(() => {
     if (reveal) setFilter('');
@@ -158,7 +188,7 @@ export function FileTree() {
         const isOpen = dirs.includes(p);
         return (
           <div key={p}>
-            <button type="button" data-path={p} aria-expanded={isOpen} onClick={() => d(toggleDir(p))} style={pad}
+            <button type="button" data-path={p} aria-expanded={isOpen} onClick={() => { setExpanding(false); d(toggleDir(p)); }} style={pad}
               className={`flex h-6 w-full items-center gap-1.5 rounded pr-2 text-left text-xs text-foreground/85 hover:bg-muted/50 hover:text-foreground${dot}`}>
               <Svg size={12}><path d="m9 6 6 6-6 6" className={isOpen ? 'origin-center rotate-90' : ''} style={{ transformBox: 'fill-box' }} /></Svg>
               <Svg>{ICONS.dir}</Svg>
@@ -193,8 +223,22 @@ export function FileTree() {
       className="relative flex flex-none flex-col border-r border-border-soft bg-chrome"
     >
       <PanelResizer edge="right" width={size.width} onWidth={size.set} onReset={size.reset} min={TREE_MIN} label={t('resizeFiles')} />
-      <div className="flex h-10 flex-none items-center justify-between border-b border-border-soft pr-2 pl-3.5 text-[13px] font-medium text-foreground">
-        {t('files')}
+      <div className="flex h-10 flex-none items-center gap-0.5 border-b border-border-soft pr-2 pl-3.5 text-[13px] font-medium text-foreground">
+        <span className="min-w-0 flex-1 truncate">{t('files')}</span>
+        {/* IntelliJ's "Select Opened File": the active file tab's row, in that tab's source */}
+        <button type="button" aria-label={t('revealOpened')} title={t('revealOpened')} disabled={active.kind !== 'file'}
+          onClick={() => { if (active.kind === 'file') d(revealFile(active.path, active.src)); }}
+          className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent">
+          <Svg><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></Svg>
+        </button>
+        <button type="button" aria-label={t('expandAll')} title={t('expandAll')} disabled={expanding} onClick={() => setExpanding(true)}
+          className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">
+          <Svg><path d="m7 15 5 5 5-5M7 9l5-5 5 5" /></Svg>
+        </button>
+        <button type="button" aria-label={t('collapseAll')} title={t('collapseAll')} onClick={() => { setExpanding(false); d(setDirs([])); }}
+          className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground">
+          <Svg><path d="m7 20 5-5 5 5M7 4l5 5 5-5" /></Svg>
+        </button>
         <button type="button" aria-label={t('refresh')} title={t('refresh')} onClick={() => { void refresh(); void loadSources(true); }}
           className="grid size-[26px] place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground">
           <span className={loading > 0 ? 'animate-spin' : ''}>
