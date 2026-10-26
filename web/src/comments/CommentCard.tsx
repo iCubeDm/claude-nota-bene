@@ -6,11 +6,13 @@ import { rangeForAnchor } from '@/anchors/text.ts';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { selectSwitching } from '@/controls/slice.ts';
+import { Markdown } from '@/feed/Markdown.tsx';
 import { jumpToFileComment, selectFileLoad } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
 import { activate } from '@/tabs/slice.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { labelText, QUICK_LABELS } from './labels.ts';
+import { LabelTip } from './LabelTip.tsx';
 import { whereOfFile } from './send.ts';
 import { closeCommentCard, editComment, removeComment, selectComments, selectPending, selectSentFor } from './slice.ts';
 
@@ -185,7 +187,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
       </div>
       <div
         onClick={popover ? undefined : jump}
-        className={`line-clamp-3 border-l-2 border-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
+        className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
       >
         {c.anchor.quote}
       </div>
@@ -197,15 +199,26 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
         suppressContentEditableWarning
         onKeyDown={editing ? onKeyDown : undefined}
         onBlur={editing ? () => finish(true) : undefined}
-        className="-ml-1 mt-1.5 whitespace-pre-wrap rounded px-1 py-0.5 outline-none focus:bg-muted"
+        className={`-ml-1 mt-1.5 rounded px-1 py-0.5 outline-none focus:bg-muted ${editing ? 'whitespace-pre-wrap' : 'md-tight'}`}
       >
-        {c.text}
+        {/* editing shows the raw markdown source as plain text; otherwise it is rendered (not final: no refs, no mermaid) */}
+        {editing ? c.text : <Markdown text={c.text} final={false} breaks noHtml />}
       </div>
       {c.images?.length ? <Attachments ids={c.images} /> : null}
       {label && (
-        <span className="mt-1.5 inline-block rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80">
-          {label.emoji} {labelText(label.id)}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              tabIndex={0}
+              aria-label={labelText(label.id)}
+              className="mt-1.5 inline-flex min-h-7 min-w-7 cursor-default items-center justify-center rounded-full border border-border-soft px-1.5 text-sm leading-none"
+            >
+              {label.emoji}
+            </span>
+          </TooltipTrigger>
+          <LabelTip id={label.id} />
+        </Tooltip>
       )}
     </div>
   );

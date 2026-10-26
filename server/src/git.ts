@@ -28,9 +28,9 @@ export class SourceError extends Error {
   }
 }
 
-function git(cwd: string, args: string[], maxBuffer = 16 << 20): Promise<Buffer> {
+function git(cwd: string, args: string[], maxBuffer = 16 << 20, timeout = TIMEOUT): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, env: gitEnv(), timeout: TIMEOUT, maxBuffer, encoding: 'buffer' }, (err, out) => (err ? reject(err) : resolve(out)));
+    execFile('git', args, { cwd, env: gitEnv(), timeout, maxBuffer, encoding: 'buffer' }, (err, out) => (err ? reject(err) : resolve(out)));
   });
 }
 const gitText = async (cwd: string, args: string[]) => (await git(cwd, args)).toString('utf8');
@@ -220,4 +220,50 @@ export async function branchFiles(root: string, src: Source): Promise<string[]> 
   const files = out.toString('utf8').split('\0').filter(Boolean).map((p) => p.slice(cut))
     .filter((p) => !p.split('/').some((seg) => HIDDEN.has(seg)));
   return withDirs(files.slice(0, FILES_CAP));
+}
+
+/** Branch and dirty state of the root for the header. */
+export type GitStatus = { branch: string | null; detached: boolean; dirty: boolean };
+const STATUS_TTL = 3_000;
+const STATUS_TIMEOUT = 3_000;
+
+/** null: not a repo (or no git). Throws when git did not answer in time: the caller keeps what it showed. */
+async function readStatus(root: string): Promise<GitStatus | null> {
+  const run = async (args: string[]) => (await git(root, ['-c', 'core.fsmonitor=false', ...args], 1 << 20, STATUS_TIMEOUT)).toString('utf8');
+  try {
+    await run(['rev-parse', '--is-inside-work-tree']);
+  } catch {
+    return null;
+  }
+  let branch: string | null;
+  let detached = false;
+  try {
+    const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    detached = head === 'HEAD';
+    branch = detached ? null : head;
+  } catch {
+    // a repo without commits has no HEAD to resolve, but its branch name is known
+    branch = (await run(['symbolic-ref', '--short', '-q', 'HEAD'])).trim() || null;
+  }
+  // new files the agent made count too (not the ignored ones); a huge untracked tree that times out falls back to
+  // the tracked files only, so the header still shows something
+  const status = (u: string) => run(['status', '--porcelain=v1', u, '--ignore-submodules']).then((o) => o.trim() !== '');
+  const dirty = await status('-unormal').catch(() => status('-uno'));
+  return { branch, detached, dirty };
+}
+
+const statusCache = new Map<string, { at: number; p: Promise<GitStatus | null> }>();
+/** Test hook. */
+export const clearStatusCache = () => statusCache.clear();
+
+/**
+ * The current branch (or detached) and whether there are uncommitted changes or new files; null outside a repo;
+ * rejects when git timed out. Cached per root for 3 s (a rejection too, so a slow repo is not asked again at once).
+ */
+export function gitStatus(root: string): Promise<GitStatus | null> {
+  const hit = statusCache.get(root);
+  if (hit && Date.now() - hit.at < STATUS_TTL) return hit.p;
+  const p = readStatus(root);
+  statusCache.set(root, { at: Date.now(), p });
+  return p;
 }

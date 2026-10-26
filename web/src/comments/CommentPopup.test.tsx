@@ -8,6 +8,7 @@ import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
 import { switchSession } from '@/controls/slice.ts';
 import { CommentPopup } from './CommentPopup.tsx';
+import { labelText, QUICK_LABELS } from './labels.ts';
 import type { PendingSelection } from './SelectionButton.tsx';
 
 const pending: PendingSelection = {
@@ -94,8 +95,7 @@ it('an empty ⌘Enter adds nothing and closes', () => {
 it('a chip adds a labelled comment in one click', () => {
   const { comments, onClose } = setup();
   fireEvent.change(box(), { target: { value: 'why' } });
-  const chip = screen.getByRole('button', { name: /Verify this/ });
-  expect(chip).toHaveAttribute('title', expect.stringContaining('Verify by reading the actual code'));
+  const chip = screen.getByRole('button', { name: 'Verify this' });
   fireEvent.click(chip);
   expect(comments()).toHaveLength(1);
   expect(comments()[0]).toMatchObject({ label: 'verify', text: 'why' });
@@ -167,9 +167,37 @@ it('while switching: Add and the quick labels are disabled with the switching to
   expect(add).toHaveAttribute('title', 'switching…');
   const chips = screen.getAllByRole('button').filter((b) => b.closest('.flex-wrap'));
   expect(chips.length).toBeGreaterThan(0);
-  for (const chip of chips) { expect(chip).toBeDisabled(); expect(chip).toHaveAttribute('title', 'switching…'); }
+  for (const chip of chips) expect(chip).toBeDisabled();
   fireEvent.change(box(), { target: { value: 'x' } });
   fireEvent.keyDown(box(), { key: 'Enter', metaKey: true });
   expect(comments()).toEqual([]);
   expect(onClose).not.toHaveBeenCalled();
+});
+
+it('quick-label chips show only the emoji; the label is the accessible name; at least 28px to click (M6-07)', () => {
+  setup();
+  const chip = screen.getByRole('button', { name: 'Looks good' });
+  expect(chip).toHaveTextContent(/^👍$/);
+  expect(chip.className).toMatch(/min-h-7/);
+  expect(chip.className).toMatch(/min-w-7/);
+  for (const l of QUICK_LABELS) {
+    const b = screen.getByRole('button', { name: labelText(l.id) });
+    expect(b.textContent).toBe(l.emoji);
+  }
+});
+
+it('hovering a chip shows the label and the instruction in a tooltip', async () => {
+  setup();
+  fireEvent.focus(screen.getByRole('button', { name: 'Verify this' }));
+  const tip = await screen.findByRole('tooltip');
+  expect(tip).toHaveTextContent('Verify this');
+  expect(tip).toHaveTextContent('Verify by reading the actual code');
+});
+
+it('while switching, a hovered chip explains why it is off', async () => {
+  const { store } = setup();
+  act(() => void store.dispatch(switchSession('x', '/r')));
+  const chip = screen.getByRole('button', { name: 'Verify this' });
+  fireEvent.focus(chip.parentElement!);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('switching…');
 });

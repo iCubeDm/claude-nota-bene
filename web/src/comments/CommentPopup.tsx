@@ -4,7 +4,9 @@ import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { instructionOf, labelText, QUICK_LABELS } from './labels.ts';
+import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
+import { labelText, QUICK_LABELS } from './labels.ts';
+import { LabelTip } from './LabelTip.tsx';
 import { EmojiMenu } from './EmojiMenu.tsx';
 import type { PendingSelection } from './SelectionButton.tsx';
 import { MentionPicker } from '@/composer/MentionPicker.tsx';
@@ -115,7 +117,7 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       }}
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
-      <div className="mb-1.5 truncate border-l-2 border-accent pl-1.5 text-[11px] text-muted-foreground">«{pending.anchor.quote.trim()}»</div>
+      <div className="mb-1.5 truncate border-l-2 border-nb-accent pl-1.5 text-[11px] text-muted-foreground">«{pending.anchor.quote.trim()}»</div>
       <textarea
         ref={area}
         value={text}
@@ -137,16 +139,22 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       <MentionPicker target={area} />
       <div className="mt-1.5 flex flex-wrap gap-1">
         {QUICK_LABELS.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            title={switching ? t('switching') : instructionOf({ label: l.id })}
-            disabled={uploading || switching}
-            onClick={() => add(l.id)}
-            className="rounded-full border border-border-soft px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
-          >
-            {l.emoji} {labelText(l.id)}
-          </button>
+          <Tooltip key={l.id}>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  aria-label={labelText(l.id)}
+                  disabled={uploading || switching}
+                  onClick={() => add(l.id)}
+                  className="inline-flex min-h-7 min-w-7 items-center justify-center rounded-full border border-border-soft px-1.5 text-sm leading-none hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                >
+                  {l.emoji}
+                </button>
+              </span>
+            </TooltipTrigger>
+            <LabelTip id={l.id} note={switching ? t('switching') : undefined} />
+          </Tooltip>
         ))}
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2 text-[10.5px] text-muted-foreground">

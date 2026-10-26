@@ -88,7 +88,8 @@ it('a replayed batch without known comments shows the raw tail', () => {
   const { store } = setup();
   act(() => void store.dispatch(serverEvent({ kind: 'user', id: 'u2', text: 'hi\n\nКомментарии к фрагментам:\n\n1. [x]\n> q', ts: 0, historic: true })));
   const bubble = document.querySelector('[data-item-id="u2"]')!;
-  expect(bubble.querySelector('details')).toHaveTextContent('1. [x]');
+  expect(bubble.querySelector('details')).toHaveTextContent('[x]'); // the raw tail is rendered as markdown now
+  expect(bubble.querySelector('details blockquote')).toHaveTextContent('q');
   expect(bubble.querySelector('details')).toHaveAttribute('data-anchor-skip');
 });
 

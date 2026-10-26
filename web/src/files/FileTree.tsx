@@ -172,7 +172,7 @@ export function FileTree() {
           <span className="w-3 flex-none" />
           <Svg>{iconForPath(e.name)}</Svg>
           <span className="min-w-0 flex-1 truncate">{e.name}</span>
-          {n > 0 && <span data-badge className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{n}</span>}
+          {n > 0 && <span data-badge className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{n}</span>}
         </button>
       );
     });

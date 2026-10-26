@@ -149,7 +149,7 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
     <Button
       ref={btn}
       size="sm"
-      className="fixed z-10 shadow-[0_6px_20px_rgba(0,0,0,0.4)]"
+      className="fixed z-10 transition-none shadow-[0_6px_20px_rgba(0,0,0,0.4)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
       onMouseDown={(e) => e.preventDefault()} // keep the text selected through the click
       onClick={() => {

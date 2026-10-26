@@ -8,7 +8,7 @@ import { selectStats } from './slice.ts';
 export type Level = '' | 'warn' | 'hot';
 export const meterLevel = (pct: number): Level => (pct >= 85 ? 'hot' : pct >= 60 ? 'warn' : '');
 
-const FILL: Record<Level, string> = { '': 'bg-primary', warn: 'bg-[var(--accent)]', hot: 'bg-destructive' };
+const FILL: Record<Level, string> = { '': 'bg-primary', warn: 'bg-nb-accent', hot: 'bg-destructive' };
 
 function Meter({ label, pct, tip }: { label: string; pct: number; tip: string }) {
   const level = meterLevel(pct);

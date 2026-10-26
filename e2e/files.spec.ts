@@ -144,6 +144,43 @@ test('tree: the Cyrillic md renders, its relative image loads, the path is a ref
   await expect(tabOf(page, 'docs/pic.png')).toHaveAttribute('aria-selected', 'true');
 });
 
+// M6-04 (R-M6-2): widths follow the viewport; large media is fitted to the pane; every pane has the chat's grid.
+test('widths follow the viewport; a large image fits the pane and a click toggles its natural size @files', async ({ page }) => {
+  const prose = (vw: number) => Math.min(vw, Math.min(Math.max(860, 0.62 * vw), 1280));
+  const widthOf = (sel: string) => page.locator(sel).evaluate((el) => el.getBoundingClientRect().width);
+  await start(page);
+  await openFromTree(page, MD);
+  await openFromTree(page, 'src/a.ts');
+  await openFromTree(page, 'docs/big.png');
+  for (const vw of [1440, 2560]) {
+    await page.setViewportSize({ width: vw, height: 900 });
+    await tabOf(page, MD).click();
+    await expect.poll(() => widthOf(`[data-file-path="${MD}"] > .nb-prose`)).toBeCloseTo(Math.min(prose(vw), vw - 2), 0);
+    await tabOf(page, 'src/a.ts').click();
+    const code = Math.min(Math.max(960, 0.78 * vw), 1600);
+    await expect.poll(() => widthOf('[data-file-path="src/a.ts"] > pre.nb-code')).toBeCloseTo(Math.min(code, vw), 0);
+    await chatTab(page).click();
+    await expect.poll(() => widthOf('#items')).toBeCloseTo(Math.min(prose(vw), vw), 0);
+  }
+  // the grid background is on every pane
+  for (const sel of ['[data-pane="chat"]', `[data-pane="file:${MD}"]`, '[data-pane="file:src/a.ts"]', '[data-pane="file:docs/big.png"]']) {
+    expect(await page.locator(sel).evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('linear-gradient');
+  }
+  await tabOf(page, 'docs/big.png').click();
+  const pane = page.locator('[data-pane="file:docs/big.png"]');
+  const img = pane.locator('img');
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth)).toBe(3000);
+  const fits = async () => {
+    const [p, i] = [await pane.boundingBox(), await img.boundingBox()];
+    return !!p && !!i && i.width <= p.width + 1 && i.height <= p.height - 31;
+  };
+  expect(await fits()).toBe(true);
+  await img.click();
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.getBoundingClientRect().width)).toBe(3000);
+  await img.click();
+  await expect.poll(fits).toBe(true);
+});
+
 test('tab menu: Close others keeps chat and the current tab, Close all leaves the chat, the chat has no Close @files', async ({ page }) => {
   await start(page);
   await openFromTree(page, MD);

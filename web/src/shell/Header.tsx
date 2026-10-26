@@ -5,6 +5,7 @@ import { selectTree, setTreeOpen } from '@/tree/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { SessionPicker } from '@/controls/SessionPicker.tsx';
+import { GitBranch } from './GitBranch.tsx';
 import { RestartMenu } from './RestartMenu.tsx';
 import { selectRestarting, selectSwitching } from '@/controls/slice.ts';
 
@@ -41,6 +42,7 @@ export function Header() {
         {t('files')}
       </button>
       <span id="root-path" className="min-w-0 truncate font-mono text-[11px] opacity-70">{session?.root ?? ''}</span>
+      <GitBranch />
       <span className="flex-1" />
       <span id="conn" className="text-warn">{conn === 'connecting' ? t('connecting') : conn === 'closed' ? t('offline') : switching ? t(restarting ? 'restarting' : 'switching') : ''}</span>
       <SessionPicker />
@@ -56,7 +58,7 @@ export function Header() {
         className={`flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium hover:bg-muted hover:text-foreground ${panelOpen ? 'bg-primary/15 text-primary' : ''}`}
       >
         {t('comments')}
-        {pendingN > 0 && <span className="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{pendingN}</span>}
+        {pendingN > 0 && <span className="rounded-full bg-nb-accent/[.18] px-1.5 text-[10px] font-semibold leading-4 text-nb-accent">{pendingN}</span>}
       </button>
       <button
         type="button"

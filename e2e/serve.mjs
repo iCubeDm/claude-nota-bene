@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const [fixture, port] = process.argv.slice(2);
@@ -21,6 +22,20 @@ if (fixture === 'controls') {
   fs.writeFileSync(path.join(tmp, 'other/other.md'), '# Other project\n\nonly in the other folder\n');
 }
 
+// A w x h grey PNG, generated (a few KB compressed): M6-04 checks that a large image is fitted to the pane.
+function bigPng(w, h) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; // 8-bit grey
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.alloc((w + 1) * h, 0x80))), chunk('IEND', Buffer.alloc(0))]);
+}
+
 function hasFfmpeg() {
   if (process.env.NB_E2E_FFMPEG !== undefined) return process.env.NB_E2E_FFMPEG === '1';
   try {
@@ -36,6 +51,7 @@ function seedFiles(dir) {
   fs.cpSync(path.join(root, 'e2e/fixtures/project'), dir, { recursive: true });
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   fs.writeFileSync(path.join(dir, 'docs/pic.png'), Buffer.from(png, 'base64'));
+  fs.writeFileSync(path.join(dir, 'docs/big.png'), bigPng(3000, 2000));
   fs.mkdirSync(path.join(dir, 'media'));
   // the config sets NB_E2E_FFMPEG (1/0); run alone, serve.mjs asks ffmpeg itself. Without it the media tests skip
   if (hasFfmpeg()) {

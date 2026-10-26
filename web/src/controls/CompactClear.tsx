@@ -25,9 +25,11 @@ export function CompactClear() {
     <>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={t('compactTip')} onClick={() => dispatch(runCommand('compact'))}>
-            <svg {...ICON}><path d="m7 4 5 5 5-5M7 20l5-5 5 5" /></svg>
-          </Button>
+          <span className="inline-flex">
+            <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={t('compactTip')} onClick={() => dispatch(runCommand('compact'))}>
+              <svg {...ICON}><path d="M4 14h6v6" /><path d="M20 10h-6V4" /><path d="m14 10 7-7" /><path d="m3 21 7-7" /></svg>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-[300px] whitespace-pre-line">{t('compactTip')}</TooltipContent>
       </Tooltip>
@@ -57,9 +59,11 @@ export function CompactClear() {
       )}
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={t('clearTip')} onClick={() => setAsking(true)}>
-            <svg {...ICON}><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" /></svg>
-          </Button>
+          <span className="inline-flex">
+            <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={t('clearTip')} onClick={() => setAsking(true)}>
+              <svg {...ICON}><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" /><path d="M22 21H7" /><path d="m5 11 9 9" /></svg>
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-[300px] whitespace-pre-line">{t('clearTip')}</TooltipContent>
       </Tooltip>

@@ -119,6 +119,36 @@ test('reload replays the conversation @chat', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Hello' }).last()).toBeVisible();
 });
 
+// M6-05: real key events (the picker listens at window capture and writes through the native value setter)
+test('typing ":smi" in the composer opens the emoji list; Enter inserts 😄 and sends nothing @chat', async ({ page }) => {
+  await open(page);
+  const before = await userBubbles(page).count();
+  await composer(page).click();
+  await page.keyboard.type(':smi');
+  await expect(page.getByRole('listbox')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('listbox')).toBeHidden();
+  await expect(composer(page)).toHaveValue('😄');
+  await page.keyboard.type(' :smile');
+  await expect(page.getByRole('option').first()).toContainText(':smile');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox')).toBeHidden();
+  expect(await userBubbles(page).count()).toBe(before);
+  await composer(page).fill('');
+});
+
+// M6-06: the user's message is markdown (and a single newline stays a line break)
+test('a user message renders markdown @chat', async ({ page }) => {
+  await open(page);
+  const tag = uniq('md');
+  await send(page, `**${tag}**\nsecond \`code\``);
+  const b = bubble(page, tag);
+  await expect(b.locator('strong')).toHaveText(tag);
+  await expect(b.locator('br')).toHaveCount(1);
+  await expect(b.locator('code')).toHaveText('code');
+  await expect(donesAfter(page, tag).first()).toBeVisible();
+});
+
 test('language toggle switches the placeholder @chat', async ({ page }) => {
   await open(page);
   await expect(page.getByPlaceholder(en.composerPh)).toBeVisible();

@@ -26,6 +26,15 @@
 .mermaid-out, .svg-out { background: oklch(0.97 0.005 260); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
 .mermaid-out { background: oklch(0.19 0.02 260); border: 1px solid var(--border-soft); }
 
-.ref { text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.ref { text-decoration: underline dotted var(--nb-accent); text-underline-offset: 3px; cursor: pointer; }
 .ref.missing { text-decoration: line-through; cursor: not-allowed; opacity: 0.6; }
+/* a mention in the user bubble is plain until hovered (prototype `.user .mention`) */
+.mention.ref { text-decoration: none; }
+.mention.ref:hover { text-decoration: underline; }
 .mention { color: var(--primary); font-family: var(--font-mono); font-size: 0.92em; }
+
+/* markdown inside a bubble, a comment card or the batch details: the surrounding font and colour, no outer margins */
+.md-tight .md { color: inherit; font-size: inherit; line-height: inherit; }
+.md-tight .md > :first-child { margin-top: 0; }
+.md-tight .md > :last-child { margin-bottom: 0; }
+.md-tight .md pre { margin: 0.4em 0; }

@@ -62,7 +62,9 @@ it('adding a comment through the popup auto-opens the panel and persists 1', () 
   const anchor = { source: { kind: 'message' as const, id: 'a1' }, start: 0, end: 1, quote: 'x', prefix: '', suffix: '' };
   render(
     <Provider store={store}>
-      <CommentPopup pending={{ anchor, rect: new DOMRect(0, 0, 10, 10) } as never} onClose={() => {}} />
+      <TooltipProvider>
+        <CommentPopup pending={{ anchor, rect: new DOMRect(0, 0, 10, 10) } as never} onClose={() => {}} />
+      </TooltipProvider>
     </Provider>,
   );
   fireEvent.change(document.querySelector('textarea')!, { target: { value: 'hi' } });

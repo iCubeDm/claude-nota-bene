@@ -7,6 +7,7 @@ import { selectPending } from '@/comments/slice.ts';
 import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
 import { nextMode, pickMode, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
+import { ShortcodePicker } from '@/comments/ShortcodePicker.tsx';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Meters } from '@/stats/Meters.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
@@ -137,7 +138,7 @@ export function Composer() {
       <div className="flex min-h-0 items-center gap-2.5 pt-2 text-xs text-muted-foreground">
         {busy && (
           <>
-            <span className="animate-pulse text-accent">●</span>
+            <span className="animate-pulse text-nb-accent">●</span>
             {t('working')}
           </>
         )}
@@ -173,6 +174,7 @@ export function Composer() {
         )}
         </div>
         <MentionPicker target={ref} />
+        <ShortcodePicker target={ref} />
         <span className="inline-flex" title={switching ? t('switching') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>
             {nPending ? t('sendN', nPending) : t('send')}
@@ -180,6 +182,7 @@ export function Composer() {
         </span>
         <Tooltip>
           <TooltipTrigger asChild>
+            <span className="inline-flex">
             <Button
               type="button"
               variant="ghost"
@@ -192,6 +195,7 @@ export function Composer() {
                 <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
               </svg>
             </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent className="whitespace-pre-line">{t('stopTip')}</TooltipContent>
         </Tooltip>

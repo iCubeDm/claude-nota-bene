@@ -240,3 +240,11 @@ it('while switching, edit and delete are disabled with the switching tooltip and
   expect(store.getState().comments.items).toHaveLength(1);
   expect(document.querySelector('[contenteditable]')).toBeNull();
 });
+
+it('the label chip shows only the emoji; the label is its accessible name (M6-07)', () => {
+  setLang('en');
+  setup(comment({ label: 'verify' }));
+  const chip = screen.getByLabelText('Verify this');
+  expect(chip.textContent).toBe('🔍');
+  expect(chip.className).toMatch(/min-h-7/);
+});
