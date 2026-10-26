@@ -3,7 +3,8 @@ import type { MediaShape } from '@nota-bene/shared';
 export const round4 = (v: number): number => Math.round(v * 10000) / 10000;
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
-function box(x: number, y: number, width: number, height: number): DOMRect {
+/** A DOMRect-shaped plain object (jsdom has no DOMRect constructor). */
+export function box(x: number, y: number, width: number, height: number): DOMRect {
   return { x, y, width, height, left: x, top: y, right: x + width, bottom: y + height, toJSON() { return this; } } as DOMRect;
 }
 
@@ -101,4 +102,27 @@ export function shapePath(s: MediaShape, natW: number, natH: number): string {
       return d;
     }
   }
+}
+
+/** The relative box around all shapes (rect/ellipse boxes, arrow ends, pen points). */
+export function shapesBounds(shapes: MediaShape[]): { x: number; y: number; w: number; h: number } {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const at = (x: number, y: number) => {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x);
+    y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  };
+  for (const s of shapes) {
+    if (s.kind === 'pen') for (let i = 0; i + 1 < s.points.length; i += 2) at(s.points[i], s.points[i + 1]);
+    else if (s.kind === 'arrow') { at(s.x1, s.y1); at(s.x2, s.y2); }
+    else { at(s.x, s.y); at(s.x + s.w, s.y + s.h); }
+  }
+  if (x0 > x1) return { x: 0, y: 0, w: 0, h: 0 };
+  return { x: round4(x0), y: round4(y0), w: round4(x1 - x0), h: round4(y1 - y0) };
+}
+
+/** A video time as `m:ss.mmm` (what `ffmpeg -ss` takes), e.g. 4.24 → `0:04.240`. */
+export function mediaTime(t: number): string {
+  const ms = Math.round(t * 1000);
+  const m = Math.floor(ms / 60000), rest = ms - m * 60000;
+  return `${m}:${String(Math.floor(rest / 1000)).padStart(2, '0')}.${String(rest % 1000).padStart(3, '0')}`;
 }

@@ -1,14 +1,18 @@
 import hljs from 'highlight.js';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { MediaAnchor, MediaShape } from '@nota-bene/shared';
 import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
+import { CommentPopup, type PendingComment } from '@/comments/CommentPopup.tsx';
 import { flashRange, HighlightLayer } from '@/comments/HighlightLayer.tsx';
 import { selectComments } from '@/comments/slice.ts';
 import { Markdown } from '@/feed/Markdown.tsx';
 import { refClick } from '@/refs/refs.ts';
 import { useT } from '@/i18n/index.ts';
 import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
-import { selectDraft } from '@/media/markup/slice.ts';
+import { prepareMediaComment } from '@/media/markup/createMediaComment.ts';
+import { clear, selectDraft } from '@/media/markup/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
@@ -110,8 +114,42 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   }, [mediaCtl, tabId]);
   const imgRef = useCallback((el: HTMLImageElement | null) => setMarkable(el), []);
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
-  // markup (Task 6 turns the drawing into a comment and clears the draft)
-  const onMarkAdd = useCallback(() => {}, []);
+  // markup → comment. The version is the media's ETag when the mode is entered (absent for a branch source); nothing
+  // is written until Add (the popup runs `prepare` then), and the draft is cleared only once the comment exists.
+  const version = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    version.current = undefined;
+    if (!marking) return;
+    const ac = new AbortController();
+    fetch(mediaUrl, { method: 'HEAD', signal: ac.signal }).then(
+      (r) => void (r.ok && (version.current = r.headers.get('etag') ?? undefined)),
+      () => {}, // no version: the mark simply cannot tell "the file changed"
+    );
+    return () => ac.abort();
+  }, [marking, mediaUrl]);
+  const [markPopup, setMarkPopup] = useState<PendingComment | null>(null);
+  const onMarkAdd = useCallback((shapes: MediaShape[], at: DOMRect) => {
+    const el = markable;
+    if (!el) return;
+    const video = el instanceof HTMLVideoElement;
+    const [width, height] = video ? [el.videoWidth, el.videoHeight] : [el.naturalWidth, el.naturalHeight];
+    if (!width || !height) return; // not loaded: nothing to render the drawing on
+    const anchor: MediaAnchor = {
+      kind: 'media', source: ref === undefined ? { kind: 'file', path } : { kind: 'file', path, ref }, width, height,
+      // the native controls are hidden while marking, so the frame has not moved since the drawing
+      ...(video && { time: Math.round(el.currentTime * 1000) / 1000 }),
+      ...(version.current !== undefined && { version: version.current }),
+      shapes,
+    };
+    const id = crypto.randomUUID();
+    setMarkPopup({ anchor, rect: at, id, prepare: () => prepareMediaComment(id, el, anchor) });
+  }, [markable, path, ref]);
+  const closeMarkPopup = useCallback(() => setMarkPopup(null), []);
+  const markAdded = useCallback(() => void dispatch(clear(tabId)), [dispatch, tabId]);
+  // the popup belongs to a visible drawing: hiding the tab or leaving the mode closes it (the draft stays)
+  useEffect(() => {
+    if (!active || !marking) setMarkPopup(null);
+  }, [active, marking]);
   // image/media reload: a new cache-busting key; a video/audio resumes where it was (a new src starts at 0)
   const resumeAt = useRef(0);
   const reloadMedia = useCallback(() => {
@@ -268,7 +306,9 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         // the toolbar sits over the pane but outside its scroll, so it stays in the corner in natural size
         <div className="relative flex min-h-0 flex-1 flex-col">
           {body}
-          {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} />}
+          {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} held={!!markPopup} />}
+          {/* portalled with its own layer: above the markup toolbar, which it may open next to */}
+          {markPopup && createPortal(<div className="relative z-30"><CommentPopup pending={markPopup} onClose={closeMarkPopup} onAdded={markAdded} /></div>, document.body)}
         </div>
       ) : body}
     </div>

@@ -215,4 +215,6 @@ export const en: Dict = {
   markDiscardTitle: 'Discard the drawing?',
   markDiscardBody: (n) => `${n} shape${n === 1 ? '' : 's'} drawn. They will be lost.`,
   markDiscard: 'Discard',
+  markShapes: (n) => `${n} shape${n === 1 ? '' : 's'}`,
+  markSaveFailed: (e) => `Could not save the drawing: ${e}`,
 };

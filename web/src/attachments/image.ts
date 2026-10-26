@@ -23,7 +23,7 @@ export async function encode(c: OffscreenCanvas | HTMLCanvasElement, type: strin
  * Prototype `readImage` without base64: downscale to IMG_EDGE and re-encode when too big or in a format the API
  * does not take (heic, tiff…); small gif/webp/png/jpeg stay as they are. Png first (screenshots stay sharp), jpeg 0.9 when png is heavy.
  */
-export async function prepareImage(file: File): Promise<Blob> {
+export async function prepareImage(file: Blob): Promise<Blob> {
   const bmp = await createImageBitmap(file);
   try {
     const scale = Math.min(1, IMG_EDGE / Math.max(bmp.width, bmp.height));

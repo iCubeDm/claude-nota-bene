@@ -5,11 +5,17 @@ import type { ServerEvent } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
+import { addShape, selectDraft } from '@/media/markup/slice.ts';
 import { FileView } from './FileView.tsx';
 
+const prepareMediaComment = vi.fn(async (..._a: unknown[]) => ({ images: ['1'.repeat(64), '2'.repeat(64)] }));
+vi.mock('@/media/markup/createMediaComment.ts', () => ({
+  prepareMediaComment: (...a: unknown[]) => prepareMediaComment(...a),
+  deleteMarks: vi.fn(async () => {}),
+}));
 vi.mock('mermaid', () => ({ default: { initialize: vi.fn(), render: vi.fn(async () => ({ svg: '<svg></svg>' })) } }));
 
-type Spec = { status?: number; size?: number; body?: string; head?: Uint8Array };
+type Spec = { status?: number; size?: number; body?: string; head?: Uint8Array; etag?: string };
 let spec: Spec;
 let calls: { method: string; url: string; range?: string }[];
 beforeEach(() => {
@@ -23,7 +29,7 @@ beforeEach(() => {
     const status = spec.status ?? 200;
     if (status !== 200) return new Response('nope', { status });
     const size = spec.size ?? new TextEncoder().encode(spec.body ?? '').length;
-    if (method === 'HEAD') return new Response(null, { status, headers: { 'content-length': String(size) } });
+    if (method === 'HEAD') return new Response(null, { status, headers: { 'content-length': String(size), ...(spec.etag && { etag: spec.etag }) } });
     if (range) return new Response((spec.head ?? new TextEncoder().encode(spec.body ?? '')) as BodyInit, { status: 206 });
     return new Response(spec.body ?? '', { status });
   }));
@@ -252,4 +258,54 @@ it('while marking, the video has no controls; leaving restores them', () => {
   expect(v().controls).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: /leave/i }));
   expect(v().controls).toBe(true);
+});
+
+const SHAPE = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 } as const;
+const UUID = /^[0-9a-f-]{36}$/;
+
+it('Comment on an image opens the popup; Add renders the files and adds the comment, then clears the draft', async () => {
+  spec = { body: 'x', etag: 'W/"5-1729.5"' };
+  prepareMediaComment.mockClear();
+  const { r, store } = setup('media/p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = r.container.querySelector('img')!;
+  Object.defineProperty(img, 'naturalWidth', { value: 1000 });
+  Object.defineProperty(img, 'naturalHeight', { value: 500 });
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: 'HEAD', url: '/file?path=media%2Fp.png' })));
+  const tab = 'file:media/p.png';
+  act(() => { store.dispatch(addShape(tab, SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  expect(screen.getByText('p.png · 1 shape')).toBeInTheDocument();
+  expect(prepareMediaComment).not.toHaveBeenCalled(); // nothing is written until Add
+  fireEvent.change(screen.getByPlaceholderText('Comment…'), { target: { value: 'sit here' } });
+  await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Add' })));
+  const anchor = { kind: 'media', source: { kind: 'file', path: 'media/p.png' }, width: 1000, height: 500, version: 'W/"5-1729.5"', shapes: [SHAPE] };
+  expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), img, anchor);
+  const [c] = store.getState().comments.items;
+  expect(c).toMatchObject({ id: prepareMediaComment.mock.calls[0]![0], text: 'sit here', anchor, images: ['1'.repeat(64), '2'.repeat(64)] });
+  expect(selectDraft(store.getState(), tab)).toMatchObject({ on: false, shapes: [] });
+  expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
+});
+
+it('a paused video: the anchor has the time to the ms and no version without an ETag; cancelling keeps the draft', async () => {
+  prepareMediaComment.mockClear();
+  const { r, store } = setup('v.mp4');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const v = r.container.querySelector('video')!;
+  Object.defineProperty(v, 'videoWidth', { value: 640 });
+  Object.defineProperty(v, 'videoHeight', { value: 360 });
+  Object.defineProperty(v, 'paused', { value: true });
+  v.currentTime = 4.24049;
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:v.mp4', SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  expect(screen.getByText('v.mp4 @ 0:04.240 · 1 shape')).toBeInTheDocument();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
+  expect(selectDraft(store.getState(), 'file:v.mp4')).toMatchObject({ on: true, shapes: [SHAPE] }); // nothing lost
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Add' })));
+  expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), v,
+    { kind: 'media', source: { kind: 'file', path: 'v.mp4' }, width: 640, height: 360, time: 4.24, shapes: [SHAPE] });
 });

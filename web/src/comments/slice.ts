@@ -64,8 +64,9 @@ export const resyncComments = (): AppThunk => (d, getState, { send }) => {
   if (st.unsynced && send({ type: 'comments', sessionId: getState().feed.session?.id ?? null, items: st.items })) d(commentsSlice.actions.markResent());
 };
 
-export const addComment = (c: Omit<Comment, 'id' | 'status' | 'createdAt'>): AppThunk => (d, getState) => {
-  const next: Comment = { ...c, id: crypto.randomUUID(), status: 'pending', createdAt: Date.now() };
+/** `id`: caller-given (a media comment's mark folder is named by it, so it exists before the comment); else a fresh one. */
+export const addComment = (c: Omit<Comment, 'id' | 'status' | 'createdAt'> & { id?: string }): AppThunk => (d, getState) => {
+  const next: Comment = { ...c, id: c.id ?? crypto.randomUUID(), status: 'pending', createdAt: Date.now() };
   d(sync([...selectComments(getState()), next]));
 };
 

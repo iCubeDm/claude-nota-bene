@@ -4,7 +4,7 @@ import { MARK_COLORS, PEN_MAX_VALUES, type MediaShape } from '@nota-bene/shared'
 import { ConfirmDialog } from '@/controls/ConfirmDialog.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { contentBox, rectFrom, shapePath, simplify, toRel } from './geometry.ts';
+import { box as rectBox, contentBox, rectFrom, shapePath, shapesBounds, simplify, toRel } from './geometry.ts';
 import { MarkupToolbar } from './MarkupToolbar.tsx';
 import { addShape, clear, selectDraft, setColor, setMode, setTool, undo, type MarkTool } from './slice.ts';
 
@@ -45,8 +45,12 @@ function shapeOf(tool: MarkTool, color: MediaShape['color'], a: Pt, b: Pt, pen: 
  * pointerup. Skew: coordinates come from `contentBox` of the media element's own rect (it has no border or padding), in
  * client px, so neither the zoom, the scroll nor the device pixel ratio enters them.
  */
-export function MarkupLayer({ tabId, media, fit, onAdd }: {
-  tabId: string; media: Media; fit: 'contain' | 'natural'; onAdd: (shapes: MediaShape[]) => void;
+/**
+ * `onAdd(shapes, at)`: Comment was asked for; `at` is the client rect around the shapes, or the toolbar's when they are
+ * scrolled out of sight (where the comment popup opens). `held`: the popup is open, so the mode's keys are off.
+ */
+export function MarkupLayer({ tabId, media, fit, onAdd, held = false }: {
+  tabId: string; media: Media; fit: 'contain' | 'natural'; onAdd: (shapes: MediaShape[], at: DOMRect) => void; held?: boolean;
 }) {
   const t = useT();
   const dispatch = useAppDispatch();
@@ -182,12 +186,22 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
   };
   const shapes = draft.shapes;
   const leave = useCallback(() => (shapes.length ? setAsking(true) : void dispatch(setMode(tabId, false))), [shapes, dispatch, tabId]);
-  const comment = useCallback(() => void (shapes.length && onAdd(shapes)), [shapes, onAdd]);
+  const comment = useCallback(() => {
+    if (!shapes.length) return;
+    const b = box();
+    const s = shapesBounds(shapes);
+    const at = rectBox(b.x + s.x * b.width, b.y + s.y * b.height, s.w * b.width, s.h * b.height);
+    // visible = inside the pane's box and the window
+    const v = pane?.getBoundingClientRect();
+    const seen = at.right >= Math.max(0, v?.left ?? 0) && at.left <= Math.min(window.innerWidth, v?.right ?? Infinity)
+      && at.bottom >= Math.max(0, v?.top ?? 0) && at.top <= Math.min(window.innerHeight, v?.bottom ?? Infinity);
+    onAdd(shapes, seen || !toolbar.current ? at : toolbar.current.getBoundingClientRect());
+  }, [shapes, onAdd, box, pane]);
 
   // ---- keys: only while on, in the visible tab, with focus on nothing (body) or in this tab's pane or toolbar; never in
   // a text field. Focus in the feed keeps Esc for the agent and Enter for a link. Capture + preventDefault (Esc protocol).
   useEffect(() => {
-    if (!on || asking) return;
+    if (!on || asking || held) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || editable(e.target) || media.closest('[hidden]')) return;
       const f = document.activeElement;
@@ -217,7 +231,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [on, asking, media, dispatch, tabId, leave, comment, shapes]);
+  }, [on, asking, held, media, dispatch, tabId, leave, comment, shapes]);
 
   const drawn = useMemo(() => shapes.map((s, i) => {
     const d = shapePath(s, nat[0], nat[1]);

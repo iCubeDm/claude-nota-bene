@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { contentBox, describeShape, rectFrom, round4, shapePath, simplify, toRel } from './geometry.ts';
+import { contentBox, describeShape, mediaTime, rectFrom, round4, shapePath, shapesBounds, simplify, toRel } from './geometry.ts';
 
 const R = (x: number, y: number, w: number, h: number) =>
   ({ x, y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h }) as DOMRect;
@@ -70,4 +70,19 @@ it('shapePath draws in the 0..1 viewBox; the arrow head is sized in natural px l
   expect(nums.slice(0, 4)).toEqual([0.1, 0.5, 0.5, 0.5]);
   expect(nums[6]).toBeCloseTo(0.5 - 10.876 / 1000, 4); // barb x
   expect(nums[7]).toBeCloseTo(0.5 - 5.071 / 500, 4); // barb y: px → relative by height, not width
+});
+
+it('shapesBounds: the relative box around every shape (arrow ends, pen points)', () => {
+  expect(shapesBounds([
+    { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.1 },
+    { kind: 'arrow', color: '#ff3b30', x1: 0.9, y1: 0.05, x2: 0.5, y2: 0.5 },
+    { kind: 'pen', color: '#ff3b30', points: [0.2, 0.7, 0.3, 0.8] },
+  ])).toEqual({ x: 0.1, y: 0.05, w: 0.8, h: 0.75 });
+});
+
+it('mediaTime: m:ss.mmm, the batch and the popup quote alike', () => {
+  expect(mediaTime(4.24)).toBe('0:04.240');
+  expect(mediaTime(0)).toBe('0:00.000');
+  expect(mediaTime(125.0006)).toBe('2:05.001');
+  expect(mediaTime(59.9996)).toBe('1:00.000'); // rounding carries into the minute
 });

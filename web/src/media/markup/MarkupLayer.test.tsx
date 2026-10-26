@@ -34,14 +34,14 @@ function image() {
   return img;
 }
 
-function setup(media: HTMLImageElement | HTMLVideoElement = image(), protocol = 4) {
+function setup(media: HTMLImageElement | HTMLVideoElement = image(), protocol = 4, held = false) {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   store.dispatch(serverEvent({ kind: 'hello', protocol } as ServerEvent));
   const onAdd = vi.fn();
   const ui = () => (
     <Provider store={store}>
       <TooltipProvider>
-        <MarkupLayer tabId={TAB} media={media} fit="contain" onAdd={onAdd} />
+        <MarkupLayer tabId={TAB} media={media} fit="contain" onAdd={onAdd} held={held} />
       </TooltipProvider>
     </Provider>
   );
@@ -182,7 +182,7 @@ it('keys are ignored in a text field and outside the mode; Enter comments with t
   const shape: MediaShape = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.1, h: 0.1 };
   act(() => { store.dispatch(addShape(TAB, shape)); });
   key({ key: 'Enter', code: 'Enter' });
-  expect(onAdd).toHaveBeenCalledWith([shape]);
+  expect(onAdd).toHaveBeenCalledWith([shape], expect.objectContaining({ width: expect.any(Number) }));
   fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
   expect(onAdd).toHaveBeenCalledTimes(2);
   expect(draft().shapes).toEqual([shape]); // the caller clears it once the comment exists
@@ -281,4 +281,40 @@ it('colour buttons are named', () => {
   setup();
   fireEvent.click(toggle());
   for (const n of ['Red (1)', 'Yellow (2)', 'Green (3)', 'Blue (4)', 'White (5)']) expect(screen.getByRole('button', { name: n })).toBeInTheDocument();
+});
+
+it('Comment hands over the client rect around the drawn shapes (the popup opens there)', () => {
+  const { onAdd, store } = setup();
+  fireEvent.click(toggle());
+  // content box (0, 250) 1000×500
+  act(() => { store.dispatch(addShape(TAB, { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 })); });
+  act(() => { store.dispatch(addShape(TAB, { kind: 'arrow', color: '#ff3b30', x1: 0.5, y1: 0.1, x2: 0.6, y2: 0.3 })); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  const r = onAdd.mock.calls[0]![1] as DOMRect;
+  expect([r.left, r.top, r.width, r.height].map(Math.round)).toEqual([100, 300, 500, 250]);
+});
+
+it('shapes scrolled out of sight: the rect is the toolbar\'s', () => {
+  const img = image();
+  img.getBoundingClientRect = () => rect(0, -5000, 1000, 1000); // scrolled far up
+  const { onAdd, store } = setup(img);
+  fireEvent.click(toggle());
+  act(() => { store.dispatch(addShape(TAB, { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 })); });
+  const bar = screen.getByRole('toolbar');
+  const tb = rect(800, 8, 180, 30);
+  bar.parentElement!.getBoundingClientRect = () => tb;
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  expect(onAdd.mock.calls[0]![1]).toBe(tb);
+});
+
+it('held (the comment popup is open): the mode keys are off', () => {
+  const { draft, onAdd, store } = setup(image(), 4, true);
+  fireEvent.click(toggle());
+  act(() => { store.dispatch(addShape(TAB, { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.1, h: 0.1 })); });
+  key({ key: 'Enter', code: 'Enter' });
+  key({ key: 'Escape', code: 'Escape' });
+  key({ key: 'p', code: 'KeyP' });
+  expect(onAdd).not.toHaveBeenCalled();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(draft()).toMatchObject({ on: true, tool: 'rect' });
 });

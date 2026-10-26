@@ -179,3 +179,12 @@ it('a socket that closes before the stale push arrives keeps the change unsynced
   expect(f.sent).toHaveLength(2);
   expect((f.sent[1] as { items: Comment[] }).items[0]!.text).toBe('offline');
 });
+
+it('add keeps a caller-given id (a media comment: its mark folder is named by it)', () => {
+  const f = fake();
+  const store = makeStore({ url: 'u', connect: f.connect });
+  f.state('open');
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  store.dispatch(addComment({ ...draft, id }));
+  expect(selectComments(store.getState())[0]).toMatchObject({ id, status: 'pending', text: 'note' });
+});

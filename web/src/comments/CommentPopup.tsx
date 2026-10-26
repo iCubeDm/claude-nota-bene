@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { isMediaAnchor, type QuickLabelId } from '@nota-bene/shared';
+import { isMediaAnchor, type Anchor, type QuickLabelId } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { selectSwitching } from '@/controls/slice.ts';
@@ -8,20 +8,38 @@ import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { labelsFor, labelText } from './labels.ts';
 import { LabelTip } from './LabelTip.tsx';
 import { EmojiMenu } from './EmojiMenu.tsx';
-import type { PendingSelection } from './SelectionButton.tsx';
 import { MentionPicker } from '@/composer/MentionPicker.tsx';
 import { ShortcodePicker } from './ShortcodePicker.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
 import type { ImageEntry } from '@/composer/slice.ts';
+import { mediaTime } from '@/media/markup/geometry.ts';
+import { deleteMarks } from '@/media/markup/createMediaComment.ts';
 import { addComment, setPanelOpen } from './slice.ts';
 
-/** The popup next to a fresh selection: a note plus optional quick-label chips; a chip adds at once. */
-export function CommentPopup({ pending, onClose }: { pending: PendingSelection; onClose: () => void }) {
+/**
+ * What the popup comments on. A text selection: anchor + rect (+ the letter typed to open it). A media drawing adds
+ * `id` (the comment id, which names its mark folder) and `prepare` (renders and uploads the frame and the layer, and
+ * returns their attachment ids; on failure it has already removed the folder).
+ */
+export type PendingComment = {
+  anchor: Anchor; rect: DOMRect; text?: string;
+  id?: string; prepare?: () => Promise<{ images: string[] }>;
+};
+
+const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+
+/**
+ * The popup next to a fresh selection or drawing: a note plus optional quick-label chips; a chip adds at once.
+ * `onAdded`: after the comment is in the store (a drawing clears its draft then, never before).
+ */
+export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingComment; onClose: () => void; onAdded?: () => void }) {
   const t = useT();
   const dispatch = useAppDispatch();
   // the comment set belongs to the session being left: no new comment mid-switch (the server resets it with the session)
   const switching = useAppSelector(selectSwitching);
+  const switchingNow = useRef(switching);
+  switchingNow.current = switching;
   const protocol = useAppSelector((s) => s.controls.protocol);
   const root = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -30,28 +48,63 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [note, setNote] = useState('');
   const [dropping, setDropping] = useState(false);
+  const [busy, setBusyState] = useState(false); // a drawing's files are being written
+  const busyNow = useRef(false); // a second click in the same tick must not start a second prepare
+  const setBusy = (v: boolean) => void ((busyNow.current = v), setBusyState(v));
+  // false once unmounted: a prepare that finishes after a cancel must not add, and must take its folder along
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => void (alive.current = false);
+  }, []);
   const fileIn = useRef<HTMLInputElement>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const notify = (m: string, ms = 3000) => {
+    setNote(m);
+    clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setNote(''), ms);
+  };
   const intake = useImageIntake({
     onUploaded: (im) => setImages((l) => (l.some((x) => x.id === im.id) ? l : [...l, im])),
-    notify: (m) => {
-      setNote(m);
-      clearTimeout(noteTimer.current);
-      noteTimer.current = setTimeout(() => setNote(''), 3000);
-    },
+    notify,
   });
   useEffect(() => () => clearTimeout(noteTimer.current), []);
   const uploading = intake.pending.length > 0;
 
-  const add = (label?: QuickLabelId) => {
-    if (uploading || switching) return;
+  const add = async (label?: QuickLabelId) => {
+    if (uploading || switching || busyNow.current) return;
     const body = text.trim();
-    const has = !!(body || label || images.length);
-    if (has) dispatch(addComment({ anchor: pending.anchor, text: body, ...(label && { label }), ...(images.length && { images: images.map((i) => i.id) }) }));
+    const { prepare, id } = pending;
+    // a drawing is content of its own: no text and no label is still a comment
+    const has = !!(prepare || body || label || images.length);
+    let prepared: string[] = [];
+    if (prepare) {
+      setBusy(true);
+      try {
+        prepared = (await prepare()).images;
+      } catch (e) {
+        // prepare removed the folder; the popup and the drawing stay, so Add can be tried again
+        if (alive.current) {
+          setBusy(false);
+          notify(t('markSaveFailed', e instanceof Error ? e.message : String(e)), 8000);
+        }
+        return;
+      }
+      // cancelled meanwhile (Esc, a click outside, the tab closed), or a session switch began: the comment never came to be
+      if (!alive.current || switchingNow.current) {
+        void (id && deleteMarks(id));
+        if (alive.current) setBusy(false);
+        return;
+      }
+    }
+    const all = [...prepared, ...images.map((i) => i.id)];
+    if (has) dispatch(addComment({ ...(id && { id }), anchor: pending.anchor, text: body, ...(label && { label }), ...(all.length && { images: all }) }));
     window.getSelection()?.removeAllRanges();
+    if (has) onAdded?.();
     onClose();
     if (has) dispatch(setPanelOpen(true));
   };
+  const off = uploading || switching || busy;
 
   // focus once positioned: a `visibility:hidden` textarea (before the layout effect sets pos) cannot take focus
   const placed = pos !== null;
@@ -96,8 +149,12 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
     if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.nativeEvent.isComposing) return;
     e.preventDefault();
     e.stopPropagation(); // never reaches the composer
-    add();
+    void add();
   };
+  const a = pending.anchor;
+  const quote = isMediaAnchor(a)
+    ? `${baseName(a.source.path)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${t('markShapes', a.shapes.length)}`
+    : `«${a.quote.trim()}»`;
 
   return (
     <div
@@ -121,13 +178,14 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
       }}
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
-      <div className="mb-1.5 truncate border-l-2 border-nb-accent pl-1.5 text-[11px] text-muted-foreground">«{isMediaAnchor(pending.anchor) ? '' : pending.anchor.quote.trim()}»</div>
+      <div className="mb-1.5 truncate border-l-2 border-nb-accent pl-1.5 text-[11px] text-muted-foreground">{quote}</div>
       <textarea
         ref={area}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
         onPaste={intake.onPaste}
+        readOnly={busy}
         placeholder={t('commentPh')}
         aria-label={t('commentPh')}
         className="min-h-16 w-full resize-y rounded-md border border-border-soft bg-background px-2 py-1.5 text-[13px] leading-[1.45] text-foreground focus:border-primary focus:outline-none"
@@ -149,8 +207,8 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
                 <button
                   type="button"
                   aria-label={labelText(l.id)}
-                  disabled={uploading || switching}
-                  onClick={() => add(l.id)}
+                  disabled={off}
+                  onClick={() => void add(l.id)}
                   className="inline-flex min-h-7 min-w-7 items-center justify-center rounded-full border border-border-soft px-1.5 text-sm leading-none hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
                 >
                   {l.emoji}
@@ -186,7 +244,10 @@ export function CommentPopup({ pending, onClose }: { pending: PendingSelection; 
             📎
           </button>
           <span data-slot="emoji"><EmojiMenu target={area} /></span>
-          <Button size="xs" disabled={uploading || switching} title={switching ? t('switching') : undefined} onClick={() => add()}>{t('add')}</Button>
+          <Button size="xs" disabled={off} aria-busy={busy || undefined} title={switching ? t('switching') : undefined} onClick={() => void add()}>
+            {busy && <span aria-hidden className="inline-block size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+            {t('add')}
+          </Button>
         </span>
       </div>
     </div>

@@ -213,4 +213,6 @@ export const ru = {
   markDiscardTitle: 'Выбросить рисунок?',
   markDiscardBody: (n: number) => `Нарисовано фигур: ${n}. Они пропадут.`,
   markDiscard: 'Выбросить',
+  markShapes: (n: number) => `фигур: ${n}`,
+  markSaveFailed: (e: string) => `Не удалось сохранить рисунок: ${e}`,
 };

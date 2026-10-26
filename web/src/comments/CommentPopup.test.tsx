@@ -1,13 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ClientMessage } from '@nota-bene/shared';
+import type { ClientMessage, MediaAnchor } from '@nota-bene/shared';
 import { Composer } from '@/composer/Composer.tsx';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
 import { switchSession } from '@/controls/slice.ts';
-import { CommentPopup } from './CommentPopup.tsx';
+import { CommentPopup, type PendingComment } from './CommentPopup.tsx';
 import { labelText, QUICK_LABELS } from './labels.ts';
 import type { PendingSelection } from './SelectionButton.tsx';
 
@@ -22,7 +22,7 @@ afterEach(() => {
   window.getSelection()?.removeAllRanges();
 });
 
-function setup(p: PendingSelection = pending) {
+function setup(p: PendingComment = pending, onAdded?: () => void) {
   const sent: ClientMessage[] = [];
   const store = makeStore({
     url: 'ws://x',
@@ -38,7 +38,7 @@ function setup(p: PendingSelection = pending) {
       <TooltipProvider>
         <p id="outside">outside</p>
         <Composer />
-        <CommentPopup pending={p} onClose={onClose} />
+        <CommentPopup pending={p} onClose={onClose} onAdded={onAdded} />
       </TooltipProvider>
     </Provider>,
   );
@@ -209,4 +209,92 @@ it('opened by typing: the typed letter is in the field, the caret after it', asy
   await waitFor(() => expect(document.activeElement).toBe(area));
   expect(area.value).toBe('н');
   expect(area.selectionStart).toBe(1);
+});
+
+// ---- media comments (Task 6) ----
+
+const MID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const mediaAnchor = (over: Partial<MediaAnchor> = {}): MediaAnchor => ({
+  kind: 'media', source: { kind: 'file', path: 'media/scene_v6.png' }, width: 1000, height: 500,
+  shapes: [
+    { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
+    { kind: 'arrow', color: '#ffcc00', x1: 0.5, y1: 0.5, x2: 0.6, y2: 0.6 },
+  ],
+  ...over,
+});
+const deferred = <T,>() => {
+  let resolve!: (v: T) => void, reject!: (e: unknown) => void;
+  const promise = new Promise<T>((a, b) => ((resolve = a), (reject = b)));
+  return { promise, resolve, reject };
+};
+const FRAME = '1'.repeat(64), LAYER = '2'.repeat(64);
+
+it('the popup quote for a media anchor shows the file and the shape count, not a text quote', () => {
+  setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: async () => ({ images: [] }) });
+  expect(screen.getByText('scene_v6.png · 2 shapes')).toBeInTheDocument();
+  expect(screen.queryByText(/«/)).toBeNull();
+});
+
+it('a video quote has the time; one shape is singular', () => {
+  const a = mediaAnchor({ source: { kind: 'file', path: 'clip.mp4' }, time: 4.24, shapes: [mediaAnchor().shapes[0]!] });
+  setup({ ...pending, anchor: a, id: MID, prepare: async () => ({ images: [] }) });
+  expect(screen.getByText('clip.mp4 @ 0:04.240 · 1 shape')).toBeInTheDocument();
+});
+
+it('Add on a media comment: no text needed; awaits prepare with a disabled spinner button, then adds with the id and [frame, layer]', async () => {
+  const d = deferred<{ images: string[] }>();
+  const onAdded = vi.fn();
+  const { comments, onClose } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise }, onAdded);
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  const add = screen.getByRole('button', { name: 'Add' });
+  expect(add).toBeDisabled();
+  expect(add).toHaveAttribute('aria-busy', 'true');
+  expect(comments()).toEqual([]);
+  expect(onAdded).not.toHaveBeenCalled();
+  await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+  expect(comments()).toHaveLength(1);
+  expect(comments()[0]).toMatchObject({ id: MID, text: '', anchor: mediaAnchor(), images: [FRAME, LAYER] });
+  expect(onAdded).toHaveBeenCalledTimes(1);
+  expect(onClose).toHaveBeenCalled();
+});
+
+it('a quick label on a media comment adds it labelled, after prepare', async () => {
+  const { comments } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: async () => ({ images: [FRAME, LAYER] }) });
+  fireEvent.change(box(), { target: { value: 'sit here' } });
+  await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Verify this' })));
+  expect(comments()[0]).toMatchObject({ id: MID, text: 'sit here', label: 'verify', images: [FRAME, LAYER] });
+});
+
+it('a failed prepare shows the error and keeps the popup open; nothing is added', async () => {
+  const onAdded = vi.fn();
+  const { comments, onClose } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: async () => { throw new Error('marks 500'); } }, onAdded);
+  fireEvent.change(box(), { target: { value: 'keep me' } });
+  await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Add' })));
+  expect(screen.getByText(/Could not save the drawing.*marks 500/)).toBeInTheDocument();
+  expect(comments()).toEqual([]);
+  expect(onClose).not.toHaveBeenCalled();
+  expect(onAdded).not.toHaveBeenCalled();
+  expect(box()).toHaveValue('keep me');
+  expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled(); // a retry is possible
+});
+
+it('cancelling the popup after prepare ran deletes /marks/<id> (Review Focus 5)', async () => {
+  const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    const d = deferred<{ images: string[] }>();
+    const onAdded = vi.fn();
+    const p = { ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise };
+    const { comments, onClose } = setup(p, onAdded);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.keyDown(document, { key: 'Escape' }); // the user gives up while the files upload
+    expect(onClose).toHaveBeenCalled();
+    cleanup(); // the parent unmounts the popup on close
+    await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/marks/${MID}`, expect.objectContaining({ method: 'DELETE' })));
+    expect(comments()).toEqual([]);
+    expect(onAdded).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
