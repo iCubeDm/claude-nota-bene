@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { parseClientMessage } from './protocol.ts';
+import { parseClientMessage, toAnchor, type MediaAnchor } from './protocol.ts';
 
 test('accepts a send', () => expect(parseClientMessage('{"type":"send","id":"u1","text":"hi"}')).toEqual({ type: 'send', id: 'u1', text: 'hi' }));
 test('rejects bad json', () => expect(parseClientMessage('{nope')).toHaveProperty('error'));
@@ -137,25 +137,47 @@ test('parses a comment with a media anchor (rect, ellipse, arrow, pen; time; ver
   expect(parseMedia(a)).toEqual({ type: 'comments', sessionId: null, items: [comment({ anchor: a })] });
 });
 
-test('rejects media anchors that are out of range or malformed', () => {
-  const rect = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
-  const bad = [
-    mediaAnchor({ shapes: [{ ...rect, x: 1.5 }] }),
-    mediaAnchor({ shapes: [{ ...rect, w: 0 }] }),
-    mediaAnchor({ shapes: [{ kind: 'arrow', color: '#ff3b30', x1: 0, y1: 0, x2: 2, y2: 0 }] }),
-    mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, 0.5] }] }),
-    mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: new Array(20002).fill(0.5) }] }),
-    mediaAnchor({ shapes: [{ ...rect, color: '#123456' }] }),
-    mediaAnchor({ shapes: [] }),
-    mediaAnchor({ width: 0 }),
-    mediaAnchor({ source: { kind: 'message', id: 'm1' } }),
-  ];
-  for (const a of bad) expect(parseMedia(a)).toHaveProperty('error');
+const rect = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+const rejectCases: [string, unknown][] = [
+  ['x > 1', mediaAnchor({ shapes: [{ ...rect, x: 1.5 }] })],
+  ['rect w = 0', mediaAnchor({ shapes: [{ ...rect, w: 0 }] })],
+  ['rect h = 0', mediaAnchor({ shapes: [{ ...rect, h: 0 }] })],
+  ['arrow x2 > 1', mediaAnchor({ shapes: [{ kind: 'arrow', color: '#ff3b30', x1: 0, y1: 0, x2: 2, y2: 0 }] })],
+  ['arrow y1 < 0', mediaAnchor({ shapes: [{ kind: 'arrow', color: '#ff3b30', x1: 0, y1: -0.1, x2: 1, y2: 0 }] })],
+  ['pen odd count', mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, 0.5] }] })],
+  ['pen over 20000', mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: new Array(20002).fill(0.5) }] })],
+  ['pen value < 0', mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, -0.5, 0.2] }] })],
+  ['unknown colour', mediaAnchor({ shapes: [{ ...rect, color: '#123456' }] })],
+  ['unknown shape kind', mediaAnchor({ shapes: [{ ...rect, kind: 'star' }] })],
+  ['shapes empty', mediaAnchor({ shapes: [] })],
+  ['width <= 0', mediaAnchor({ width: 0 })],
+  ['height <= 0', mediaAnchor({ height: 0 })],
+  ['source is a message', mediaAnchor({ source: { kind: 'message', id: 'm1' } })],
+  ['empty ref on a file source', mediaAnchor({ source: { kind: 'file', path: 'a.png', ref: '' } })],
+  ['negative time', mediaAnchor({ time: -1 })],
+  ['non-finite time (NaN serialises to null)', mediaAnchor({ time: null })],
+  ['version over 200 chars', mediaAnchor({ version: 'x'.repeat(201) })],
+];
+test.each(rejectCases)('rejects a media anchor: %s', (_name, a) => {
+  expect(parseMedia(a)).toHaveProperty('error');
 });
 
-test('toAnchor copies a media anchor deeply', () => {
-  const a = mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, 1, 1] }] });
-  const r = parseMedia(a) as { items: { anchor: { shapes: { points: number[] }[] } }[] };
-  r.items[0].anchor.shapes[0].points[0] = 0.9;
-  expect((a.shapes[0] as unknown as { points: number[] }).points[0]).toBe(0);
+test('toAnchor copies a media anchor deeply and drops unknown keys', () => {
+  const input = {
+    kind: 'media', junk: 1, source: { kind: 'file', path: 'a.png', junk: 2 }, width: 10, height: 20, time: 1.5, version: 'v',
+    shapes: [
+      { kind: 'pen', color: '#ff3b30', points: [0, 0, 1, 1], junk: 3 },
+      { kind: 'rect', color: '#ff3b30', x: 0, y: 0, w: 1, h: 1, junk: 4 },
+    ],
+  } as unknown as MediaAnchor;
+  const snapshot = JSON.parse(JSON.stringify(input));
+  const out = toAnchor(input) as MediaAnchor;
+  expect(JSON.stringify(out)).not.toMatch(/junk/);
+  expect(out.shapes).not.toBe(input.shapes);
+  expect(out.shapes[0]).not.toBe(input.shapes[0]);
+  expect(out.source).not.toBe(input.source);
+  (out.shapes[0] as { points: number[] }).points[0] = 0.9;
+  (out.shapes[1] as { x: number }).x = 0.5;
+  out.source.path = 'changed';
+  expect(JSON.parse(JSON.stringify(input))).toEqual(snapshot);
 });

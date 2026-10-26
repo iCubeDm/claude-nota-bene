@@ -222,7 +222,8 @@ function toShape(s: MediaShape): MediaShape {
   }
 }
 
-function toAnchor(a: Anchor): Anchor {
+/** exported for tests */
+export function toAnchor(a: Anchor): Anchor {
   if (isMediaAnchor(a)) {
     return {
       kind: 'media', source: toSource(a.source) as FileSource, width: a.width, height: a.height,
