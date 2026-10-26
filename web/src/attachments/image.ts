@@ -11,7 +11,7 @@ export const mediaTypeOf = (id: string): ImageType => known.get(id) ?? 'image/pn
 
 const isImageType = (t: string): t is ImageType => (IMAGE_TYPES as readonly string[]).includes(t);
 
-async function encode(c: OffscreenCanvas | HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+export async function encode(c: OffscreenCanvas | HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
   const blob = 'convertToBlob' in c
     ? await c.convertToBlob({ type, quality })
     : await new Promise<Blob | null>((res) => (c as HTMLCanvasElement).toBlob(res, type, quality));
