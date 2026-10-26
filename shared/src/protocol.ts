@@ -59,7 +59,8 @@ export type ClientMessage =
  * Idle compaction of this window's project. `on` is the project's setting; `blocked`: `"idleCompaction": false` in the
  * user's Claude Code settings.json keeps it off whatever `on` says.
  */
-export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; minTokens: number };
+/** `minutes` after the last turn, if the window saw no activity for `awayMinutes` */
+export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; awayMinutes: number; minTokens: number };
 
 export type ServerEvent =
   | { kind: 'replay'; events: ServerEvent[] }

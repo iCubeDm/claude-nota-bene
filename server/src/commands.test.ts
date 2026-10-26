@@ -165,7 +165,7 @@ describe('compact and clear', () => {
 });
 
 describe('idle compaction', () => {
-  const idle = { idleMs: 150, cacheMs: 60_000, minTokens: 100_000 };
+  const idle = { afterMs: 150, awayMs: 100, retryMs: 30, cacheMs: 400, minTokens: 100_000 };
   const big = { text: 'hello', context: { used: 500_000, max: 1_000_000, pct: 50 } };
   async function bootIdle(turns: FakeTurn[], off = false) {
     const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend(turns), webDist: dist, idle, idleOffInSettings: () => off });
@@ -179,7 +179,7 @@ describe('idle compaction', () => {
     const s = await bootIdle([big]);
     const a = await connect(s.url);
     await until(() => states(a).length === 1);
-    expect(states(a)[0]).toEqual({ on: true, blocked: false, minutes: 0, minTokens: 100_000 });
+    expect(states(a)[0]).toEqual({ on: true, blocked: false, minutes: 0, awayMinutes: 0, minTokens: 100_000 });
     a.send({ type: 'send', id: 'u1', text: 'hi' });
     await until(() => results(a).length === 1);
     await until(() => idleUsers(a).length === 1);
@@ -191,12 +191,12 @@ describe('idle compaction', () => {
     expect(errors(a)).toEqual([]);
   });
 
-  it('activity holds it off; turned off for the project it never runs, and the setting is announced and kept', async () => {
+  it('activity until the cache runs out holds it off; turned off for the project it never runs, and the setting is announced and kept', async () => {
     const s = await bootIdle([big]);
     const a = await connect(s.url);
     a.send({ type: 'send', id: 'u1', text: 'hi' });
     await until(() => results(a).length === 1);
-    for (let i = 0; i < 4; i++) { await new Promise((r) => setTimeout(r, 80)); a.send({ type: 'activity' }); }
+    for (let i = 0; i < 9; i++) { await new Promise((r) => setTimeout(r, 50)); a.send({ type: 'activity' }); }
     expect(idleUsers(a)).toHaveLength(0);
     a.send({ type: 'idle-compact', on: false });
     await until(() => states(a).some((x) => !x.on));

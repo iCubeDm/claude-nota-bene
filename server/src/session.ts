@@ -156,7 +156,8 @@ export async function createSessionManager(o: {
   const idleState = (): IdleCompact => ({
     on: readPrefs().idleCompact[prefsKey(root)] ?? true,
     blocked: idleBlocked(),
-    minutes: Math.round(idleCfg.idleMs / 60_000),
+    minutes: Math.round(idleCfg.afterMs / 60_000),
+    awayMinutes: Math.round(idleCfg.awayMs / 60_000),
     minTokens: idleCfg.minTokens,
   });
   const idle = new IdleCompactor({
@@ -166,7 +167,7 @@ export async function createSessionManager(o: {
     busy: () => switching || closed || agent === null || waiting.size > 0 || pending.size > 0,
     contextUsed: () => stats.current().context?.used ?? null,
     compact: () => runCommand('compact', true),
-    onFire: (why) => console.log(`[idle] ${why}`),
+    onFire: (why) => { if (why !== 'active' && why !== 'off') console.log(`[idle] ${why}`); }, // the retries would flood the log
   });
   let compactedInTurn = false;
   const commandIds = new Set<string>(); // /compact and /clear sends whose result has not come yet
