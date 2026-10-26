@@ -14,7 +14,8 @@
 // 0, 130, 143 exit; 98 (listen failed) on the first start retries once on another port when the port was picked
 // automatically; anything else (a signal too) is a crash: relaunch after 1 s, give up at 5 crashes within 60 s.
 // A relaunch keeps the port, so the open tab reconnects by itself, reopens the folder the window has now (it may have
-// switched), and drops --resume/--fork/--new for --continue.
+// switched), and drops --resume/--fork/--new for --continue. The registry entry stays through the restart gap (it is
+// removed only when the launcher ends), so no other launch picks the port meanwhile; a 98 on a relaunch gives up.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -24,7 +25,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
-import { liveWindows, pidAlive, probeInfo, readWindows, registerWindow, unregisterWindow } from '../server/src/windows.ts';
+import {
+  liveWindows, pidAlive, probeInfo, readWindows, registerWindow, restartingWindows, unregisterWindow,
+} from '../server/src/windows.ts';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const SELF = fileURLToPath(import.meta.url);
@@ -41,6 +44,7 @@ const GUARD_WINDOW_MS = 60_000;
 const DETACH_WAIT_MS = Number(process.env.NOTA_BENE_DETACH_WAIT_MS) || 20_000;
 const LOCK_STALE_MS = 60_000;
 const LOCK_WAIT_MS = 30_000;
+const RESTART_WAIT_MS = 10_000; // how long a launch waits for a restarting window of its folder to come back
 
 const say = (msg) => process.stderr.write(`nota-bene: ${msg}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -128,8 +132,11 @@ export async function portFree(port) {
   return true;
 }
 
+/** The first port that passes the bind test and is not reserved by a live launcher (a window in its restart gap). */
 async function firstFreePort(skip = new Set()) {
-  for (const p of candidatePorts()) if (!skip.has(p) && await portFree(p)) return p;
+  const reserved = new Set(skip);
+  for (const [key, w] of Object.entries(readWindows())) if (w.launcherPid && pidAlive(w.launcherPid)) reserved.add(Number(key));
+  for (const p of candidatePorts()) if (!reserved.has(p) && await portFree(p)) return p;
   return null;
 }
 
@@ -278,9 +285,18 @@ export async function acquireLaunchLock(root, waitMs = LOCK_WAIT_MS) {
   }
 }
 
-/** A live window serving root (registry entries verified by /info; stale ones pruned), or undefined. */
-async function windowFor(root) {
-  return (await liveWindows((p) => probeInfo(p))).find((w) => w.root === root);
+/**
+ * A live window serving root (registry entries verified by /info; stale ones pruned), or undefined. A window of root
+ * in its restart gap is waited for (up to waitMs), so the launch finds it instead of opening a second one.
+ */
+async function windowFor(root, waitMs = RESTART_WAIT_MS) {
+  const end = Date.now() + waitMs;
+  for (;;) {
+    const hit = (await liveWindows((p) => probeInfo(p))).find((w) => w.root === root);
+    if (hit) return hit;
+    if (Date.now() >= end || !restartingWindows().some((w) => w.root === root)) return undefined;
+    await sleep(250);
+  }
 }
 
 /**
@@ -388,8 +404,27 @@ function tail(text, n = 15) {
   return lines.slice(-n).map((l) => `${l}\n`).join('');
 }
 
-/** The supervisor loop. Resolves with the launcher's exit code. */
+/** The supervisor loop. Resolves with the launcher's exit code; the window's registry entry goes with it. */
 async function run(o, autoPort, release = () => {}) {
+  const state = { port: o.port, pid: undefined };
+  try {
+    return await supervise(o, autoPort, release, state);
+  } finally {
+    if (state.pid !== undefined) dropEntry(state.port, state.pid);
+  }
+}
+
+/** Removes the port's entry if it is this launcher's: its last child's, or an earlier child's kept through a restart. */
+function dropEntry(port, pid) {
+  try {
+    const w = entryOf(port);
+    unregisterWindow(port, w?.launcherPid === process.pid ? w.pid : pid);
+  } catch (e) {
+    say(`cannot update the window registry: ${e.message}`);
+  }
+}
+
+async function supervise(o, autoPort, release, state) {
   let port = o.port;
   let dir = o.dir; // follows the window's in-app folder switches (its registry entry), so a relaunch reopens it
   let child = null;
@@ -424,6 +459,7 @@ async function run(o, autoPort, release = () => {}) {
       stdio: ['ignore', 'inherit', 'inherit'],
     });
     child = c;
+    state.pid = c.pid;
     const exited = new Promise((resolve) => c.on('exit', (code, signal) => resolve({ code, signal })));
     let done = false;
     void exited.then(() => (done = true));
@@ -445,14 +481,15 @@ async function run(o, autoPort, release = () => {}) {
     }
     const { code, signal } = await exited;
     child = null;
-    try {
-      const w = entryOf(port);
-      if (w?.pid === c.pid && w.root !== dir && fs.existsSync(w.root)) dir = w.root;
-      unregisterWindow(port, c.pid);
-    } catch (e) {
-      say(`cannot update the window registry: ${e.message}`);
-    }
+    // the entry stays (pid dead, launcher alive = restarting) so no other launch takes the port before the relaunch
+    const w = entryOf(port);
+    if (w?.pid === c.pid && w.root !== dir && fs.existsSync(w.root)) dir = w.root;
     if (stopping) return 0;
+
+    if (!first && code === LISTEN_FAILED) {
+      say(`port ${port} was taken during the restart — giving up`);
+      return LISTEN_FAILED;
+    }
 
     if (first && code === LISTEN_FAILED) {
       if (!autoPort || retried) {
@@ -473,7 +510,9 @@ async function run(o, autoPort, release = () => {}) {
         return LISTEN_FAILED;
       }
       say(`port ${port} was taken meanwhile, retrying on ${next}`);
+      dropEntry(port, c.pid); // a holder's /info may have got us registered there
       port = next;
+      state.port = next;
       retried = true;
       continue; // still the first start: the original --resume/--fork/--new apply
     }

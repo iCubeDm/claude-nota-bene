@@ -87,8 +87,8 @@ const env = (extra: Record<string, string> = {}) => ({
 });
 
 type Run = { p: ChildProcess; out: () => string; err: () => string; exited: Promise<number | null> };
-function launch(args: string[], extra: Record<string, string> = {}, fake = FAKE): Run {
-  const p = spawn(process.execPath, [BIN, project, ...args, '--fake', fake, '--no-open'], {
+function launch(args: string[], extra: Record<string, string> = {}, fake = FAKE, dir = project): Run {
+  const p = spawn(process.execPath, [BIN, dir, ...args, '--fake', fake, '--no-open'], {
     env: env(extra),
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -284,6 +284,58 @@ describe('nota-bene launcher', () => {
     expect(await info(4792)).toMatchObject({ root: projB });
     expect(next.root).toBe(projB);
     expect(argsOf(next.pid)).toContain(projB);
+  }, 15000);
+
+  it('a restarting window keeps its port: a launch of another folder in the gap takes a different one', async () => {
+    const a = launch(['--port', '4791']);
+    const first = await waitFor(() => windows()['4791']);
+    const projB = path.join(tmp, 'projB');
+    fs.mkdirSync(projB);
+    process.kill(first.pid, 'SIGKILL');
+    const b = launch([], {}, FAKE, projB); // picks a port while A's server is down
+    const bPort = await waitFor(() => Object.entries(windows()).find(([, w]) => w.root === projB)?.[0]);
+    expect(bPort).not.toBe('4791');
+    const back = await waitFor(() => {
+      const w = windows()['4791'];
+      return w && w.pid !== first.pid && w.root === project ? w : null;
+    });
+    expect(back.launcherPid).toBe(a.p.pid);
+    expect(await info(4791)).toMatchObject({ root: project });
+    expect(await info(Number(bPort))).toMatchObject({ root: projB });
+    expect(alive(b.p.pid!)).toBe(true);
+  }, 20000);
+
+  it('a launch of the same folder during the restart gap waits for the window instead of opening a second one', async () => {
+    launch(['--port', '4792']);
+    const first = await waitFor(() => windows()['4792']);
+    process.kill(first.pid, 'SIGKILL');
+    await waitFor(() => !alive(first.pid));
+    const r = launch([]);
+    expect(await r.exited, r.err()).toBe(0);
+    expect(r.out()).toBe('nota-bene: already open at http://127.0.0.1:4792\n');
+    expect(Object.keys(windows())).toEqual(['4792']);
+  }, 20000);
+
+  it('a relaunch that finds its port taken gives up at once, not after 5 crashes', async () => {
+    const r = launch(['--port', '4793']);
+    const first = await waitFor(() => windows()['4793']);
+    process.kill(first.pid, 'SIGKILL');
+    // take the port inside the 1 s crash pause (retry while the dead server's socket is being released)
+    await waitFor(() => new Promise<boolean>((res) => {
+      const s = net.createServer((sock) => {
+        sock.on('error', () => {});
+        sockets.add(sock);
+      });
+      s.once('error', () => res(false));
+      s.listen(4793, '127.0.0.1', () => {
+        servers.push(s);
+        res(true);
+      });
+    }), 900);
+    expect(await r.exited).toBe(98);
+    expect(r.err()).toMatch(/port 4793 was taken during the restart/);
+    expect(r.err().match(/relaunching/g)).toHaveLength(1); // the SIGKILL crash only
+    expect(windows()['4793']).toBeUndefined();
   }, 15000);
 
   it('more than 10 restarts (75) within a minute give up', async () => {

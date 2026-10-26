@@ -84,9 +84,24 @@ export async function probeInfo(port: number, timeoutMs = 500): Promise<{ root: 
 }
 
 /**
+ * A restarting window: its server is down (crashed, or exited 75) but its launcher is alive and relaunches it on the
+ * same port. The launcher keeps the entry across relaunches, so the port stays reserved for it.
+ */
+const restarting = (w: WindowEntry): boolean => !pidAlive(w.pid) && w.launcherPid !== undefined && pidAlive(w.launcherPid);
+
+/** The entries of windows in a restart gap (see `restarting`). */
+export function restartingWindows(): { port: number; root: string }[] {
+  return Object.entries(readWindows())
+    .filter(([, w]) => restarting(w))
+    .map(([key, w]) => ({ port: Number(key), root: w.root }))
+    .sort((a, b) => a.port - b.port);
+}
+
+/**
  * The registered windows that are really there: pid alive and /info.root equal to the entry's root.
- * Proven-stale entries (dead pid, or the port answers with another root) are pruned; an entry whose pid is alive
- * but whose /info does not answer is skipped and kept (a busy server is not proof of a stale entry).
+ * Proven-stale entries (dead pid and dead launcher, or the port answers with another root) are pruned; a restarting
+ * entry is kept but not listed; an entry whose pid is alive but whose /info does not answer is skipped and kept
+ * (a busy server is not proof of a stale entry).
  */
 export async function liveWindows(
   probe: (port: number) => Promise<{ root: string } | null>,
@@ -96,7 +111,7 @@ export async function liveWindows(
   await Promise.all(entries.map(async ([key, w]) => {
     const port = Number(key);
     if (!pidAlive(w.pid)) {
-      unregisterWindow(port, w.pid);
+      if (!restarting(w)) unregisterWindow(port, w.pid);
       return;
     }
     const got = await probe(port);

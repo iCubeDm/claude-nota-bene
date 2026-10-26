@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stateDir } from './state.ts';
-import { liveWindows, pidAlive, readWindows, registerWindow, unregisterWindow } from './windows.ts';
+import { liveWindows, pidAlive, readWindows, registerWindow, restartingWindows, unregisterWindow } from './windows.ts';
 
 let home: string;
 const prevHome = process.env.NOTA_BENE_HOME;
@@ -89,5 +89,23 @@ describe('liveWindows', () => {
     registerWindow(4791, '/p', process.pid);
     expect(await liveWindows(async () => null)).toEqual([]);
     expect(readWindows()['4791']).toBeDefined();
+  });
+
+  it('keeps but does not list a restarting entry (dead server, live launcher), and never probes it', async () => {
+    registerWindow(4791, '/p', deadPid(), process.pid);
+    registerWindow(4792, '/q', deadPid(), deadPid());
+    const probed: number[] = [];
+    expect(await liveWindows(async (port) => (probed.push(port), { root: '/p' }))).toEqual([]);
+    expect(probed).toEqual([]);
+    expect(Object.keys(readWindows())).toEqual(['4791']); // launcher dead too: pruned
+  });
+});
+
+describe('restartingWindows', () => {
+  it('lists the entries whose server is down but whose launcher is alive', () => {
+    registerWindow(4791, '/p', deadPid(), process.pid);
+    registerWindow(4792, '/q', process.pid, process.pid);
+    registerWindow(4793, '/r', deadPid());
+    expect(restartingWindows()).toEqual([{ port: 4791, root: '/p' }]);
   });
 });
