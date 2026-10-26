@@ -4,8 +4,9 @@ import path from 'node:path';
 import type { TreeEntry } from '@nota-bene/shared';
 
 export const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store']);
-// the tree shows build output; the file walk (the prototype's SKIP_DIRS) does not
-const SKIP_DIRS = new Set([...HIDDEN, 'dist', 'build', '.next', '__pycache__', '.venv', 'venv', '.cache']);
+// the tree shows build output and the media comments' `.nota-bene` folder; the file walk (the prototype's SKIP_DIRS,
+// so @ completion) does not: frame.jpg/layer.png of every comment would crowd out the project's own files
+const SKIP_DIRS = new Set([...HIDDEN, 'dist', 'build', '.next', '__pycache__', '.venv', 'venv', '.cache', '.nota-bene']);
 const CAP = 20_000;
 const TTL = 10_000;
 

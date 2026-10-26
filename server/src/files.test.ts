@@ -98,6 +98,20 @@ describe('listDir / listFiles', () => {
     }
     expect((await listFiles(d)).sort()).toEqual(['keep/', 'keep/f.txt']);
   });
+  it('listFiles (walk and git) hides the .nota-bene marks folder; the tree still shows it', async () => {
+    const d = path.join(base, 'lf-nb');
+    fs.mkdirSync(path.join(d, '.nota-bene/marks/m1'), { recursive: true });
+    fs.writeFileSync(path.join(d, '.nota-bene/marks/m1/frame.jpg'), '');
+    fs.writeFileSync(path.join(d, 'top.md'), '');
+    expect((await listFiles(d)).sort()).toEqual(['top.md']);
+    expect(await listDir(d, d)).toContainEqual({ name: '.nota-bene', dir: true });
+    const g = path.join(base, 'lf-nb-git'); // a repo where the marks folder is not ignored (no .nota-bene/.gitignore)
+    fs.mkdirSync(path.join(g, '.nota-bene/marks/m1'), { recursive: true });
+    fs.writeFileSync(path.join(g, '.nota-bene/marks/m1/layer.png'), '');
+    fs.writeFileSync(path.join(g, 'a.md'), '');
+    execFileSync('git', ['init'], { cwd: g, stdio: 'ignore' });
+    expect((await listFiles(g)).sort()).toEqual(['a.md']);
+  });
   it('listFiles uses git ls-files in a repo: untracked yes, ignored and deleted no', async () => {
     const d = path.join(base, 'lf4');
     fs.mkdirSync(path.join(d, 'src'), { recursive: true });

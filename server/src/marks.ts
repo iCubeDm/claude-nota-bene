@@ -57,22 +57,44 @@ function realDir(p: string): boolean {
   return true;
 }
 
+/** link() codes of a file system without hard links (exFAT, SMB, some FUSE mounts). */
+const NO_LINKS = new Set(['ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'ENOSYS', 'EXDEV']);
+
 /**
  * `.nota-bene/.gitignore` = "*\n", only when missing; the user's own root .gitignore is never touched. Atomic: the
  * content goes to a tmp file first and is hard-linked into place, so a failed write never leaves an empty .gitignore
  * (which would make the marks trackable), and link's EEXIST keeps it once-only, never through a symlink.
+ * Without hard links: written in place with O_EXCL (still once-only, still refuses a symlink); a failed write removes
+ * the file it created.
  */
 function writeGitignore(nb: string): void {
   const file = path.join(nb, '.gitignore');
   const tmp = path.join(nb, `.gitignore.tmp${process.pid}-${Math.random().toString(36).slice(2)}`);
   try {
     fs.writeFileSync(tmp, '*\n', { flag: 'wx' });
-    fs.linkSync(tmp, file);
+    try {
+      fs.linkSync(tmp, file);
+    } catch (e) {
+      if (!NO_LINKS.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      writeExclusive(file);
+    }
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
   } finally {
     fs.rmSync(tmp, { force: true });
   }
+}
+
+function writeExclusive(file: string): void {
+  const fd = fs.openSync(file, 'wx'); // EEXIST (also for a symlink, even a dangling one) → the caller's once-only
+  try {
+    fs.writeSync(fd, '*\n');
+  } catch (e) {
+    fs.closeSync(fd);
+    fs.rmSync(file, { force: true });
+    throw e;
+  }
+  fs.closeSync(fd);
 }
 
 export class MarkFiles {

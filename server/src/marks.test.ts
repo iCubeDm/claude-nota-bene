@@ -157,6 +157,29 @@ describe('MarkFiles', () => {
     expect(fs.readdirSync(path.join(root, '.nota-bene')).sort()).toEqual(['.gitignore', 'marks']);
   });
 
+  for (const code of ['ENOTSUP', 'EPERM', 'ENOSYS', 'EXDEV']) {
+    it(`no hard links (exFAT/SMB: link() → ${code}): .gitignore is written with O_EXCL instead, once, never through a symlink`, () => {
+      const spy = vi.spyOn(fs, 'linkSync').mockImplementation(() => { throw Object.assign(new Error(code), { code }); });
+      try {
+        const m = new MarkFiles({ root: () => root });
+        m.write(ID, 'frame.jpg', JPEG);
+        expect(fs.readFileSync(path.join(root, '.nota-bene', '.gitignore'), 'utf8')).toBe('*\n');
+        expect(fs.readdirSync(path.join(root, '.nota-bene')).sort()).toEqual(['.gitignore', 'marks']); // no tmp left
+        fs.writeFileSync(path.join(root, '.nota-bene', '.gitignore'), '*\n!keep\n');
+        m.write(ID2, 'frame.jpg', JPEG); // once only
+        expect(fs.readFileSync(path.join(root, '.nota-bene', '.gitignore'), 'utf8')).toBe('*\n!keep\n');
+        // a symlinked .gitignore: wx refuses it (EEXIST), the target is never created
+        const out = path.join(dir, 'target-' + code);
+        fs.rmSync(path.join(root, '.nota-bene', '.gitignore'));
+        fs.symlinkSync(out, path.join(root, '.nota-bene', '.gitignore'));
+        m.write(ID, 'layer.png', PNG);
+        expect(fs.existsSync(out)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  }
+
   it('a .gitignore symlink is never followed', () => {
     const out = path.join(dir, 'target');
     fs.mkdirSync(path.join(root, '.nota-bene'));

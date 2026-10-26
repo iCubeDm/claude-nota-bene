@@ -158,6 +158,8 @@ function isFileSource(s: Obj): boolean {
 
 const isRel = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
 const isPos = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+/** Slack for a box that ends at the edge: its ends are rounded to 4 decimals independently. */
+const EDGE_EPS = 1e-4;
 const isMarkColor = (v: unknown): v is MarkColor => (MARK_COLORS as readonly unknown[]).includes(v);
 
 function isMediaShape(v: unknown): v is MediaShape {
@@ -165,7 +167,8 @@ function isMediaShape(v: unknown): v is MediaShape {
   switch (v.kind) {
     case 'rect':
     case 'ellipse':
-      return isRel(v.x) && isRel(v.y) && isRel(v.w) && isRel(v.h) && v.w > 0 && v.h > 0;
+      return isRel(v.x) && isRel(v.y) && isRel(v.w) && isRel(v.h) && v.w > 0 && v.h > 0
+        && v.x + v.w <= 1 + EDGE_EPS && v.y + v.h <= 1 + EDGE_EPS; // inside the media
     case 'arrow':
       return isRel(v.x1) && isRel(v.y1) && isRel(v.x2) && isRel(v.y2);
     case 'pen':

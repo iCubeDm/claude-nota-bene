@@ -142,6 +142,10 @@ const rejectCases: [string, unknown][] = [
   ['x > 1', mediaAnchor({ shapes: [{ ...rect, x: 1.5 }] })],
   ['rect w = 0', mediaAnchor({ shapes: [{ ...rect, w: 0 }] })],
   ['rect h = 0', mediaAnchor({ shapes: [{ ...rect, h: 0 }] })],
+  ['rect x + w > 1', mediaAnchor({ shapes: [{ ...rect, x: 0.8, w: 0.3 }] })],
+  ['rect y + h > 1', mediaAnchor({ shapes: [{ ...rect, y: 0.9, h: 0.2 }] })],
+  ['ellipse x + w > 1', mediaAnchor({ shapes: [{ ...rect, kind: 'ellipse', x: 0.5, w: 0.6 }] })],
+  ['ellipse y + h > 1', mediaAnchor({ shapes: [{ ...rect, kind: 'ellipse', y: 1, h: 0.01 }] })],
   ['arrow x2 > 1', mediaAnchor({ shapes: [{ kind: 'arrow', color: '#ff3b30', x1: 0, y1: 0, x2: 2, y2: 0 }] })],
   ['arrow y1 < 0', mediaAnchor({ shapes: [{ kind: 'arrow', color: '#ff3b30', x1: 0, y1: -0.1, x2: 1, y2: 0 }] })],
   ['pen odd count', mediaAnchor({ shapes: [{ kind: 'pen', color: '#ff3b30', points: [0, 0, 0.5] }] })],
@@ -164,6 +168,14 @@ const rejectCases: [string, unknown][] = [
 ];
 test.each(rejectCases)('rejects a media anchor: %s', (_name, a) => {
   expect(parseMedia(a)).toHaveProperty('error');
+});
+
+test('a rect/ellipse may touch the far edge, with 4-decimal rounding slack (1e-4)', () => {
+  for (const kind of ['rect', 'ellipse']) {
+    for (const box of [{ x: 0.7, y: 0.6, w: 0.3, h: 0.4 }, { x: 0.3334, y: 0.5, w: 0.6667, h: 0.5 }, { x: 0, y: 0.00005, w: 1, h: 1 }]) {
+      expect(parseMedia(mediaAnchor({ shapes: [{ kind, color: '#ff3b30', ...box }] }))).not.toHaveProperty('error');
+    }
+  }
 });
 
 test('toAnchor copies a media anchor deeply and drops unknown keys', () => {

@@ -13,7 +13,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      ...Object.fromEntries(['/info', '/file', '/tree', '/complete', '/attach', '/sources', '/git-status'].map((p) => [p, backend])),
+      ...Object.fromEntries(['/info', '/file', '/tree', '/complete', '/attach', '/sources', '/git-status', '/marks', '/sessions', '/restart-server'].map((p) => [p, backend])),
       '/ws': { ...backend, ws: true },
     },
   },
