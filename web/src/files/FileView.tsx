@@ -228,8 +228,9 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   } else if (kind === 'video' || kind === 'audio') {
     body = (
       <div data-pane={tabId} hidden={!active} className={`grid-pane nb-media-pane relative min-h-0 flex-1 overflow-auto`}>
+        {/* while marking up, no native controls: the frame stays still, so the drawing and currentTime agree */}
         {kind === 'video' ? (
-          <video ref={mediaRef} controls preload="metadata" src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="nb-fit" />
+          <video ref={mediaRef} controls={!marking} preload="metadata" src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="nb-fit" />
         ) : (
           <audio ref={mediaRef} controls src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="w-full max-w-xl p-4" />
         )}

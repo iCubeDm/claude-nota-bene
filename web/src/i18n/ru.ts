@@ -205,7 +205,7 @@ export const ru = {
   toolEllipse: 'Эллипс (E)',
   toolPen: 'Карандаш (P)',
   toolArrow: 'Стрелка (A)',
-  markColor: (n: number) => `Цвет ${n} (${n})`,
+  markColor: (n: number) => `${['Красный', 'Жёлтый', 'Зелёный', 'Синий', 'Белый'][n - 1]} (${n})`,
   markUndo: (mac: boolean) => `Отменить (${mac ? '⌘Z' : 'Ctrl+Z'})`,
   markComment: 'Комментировать',
   markCommentTip: 'Комментировать (Enter)',

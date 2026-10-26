@@ -11,9 +11,10 @@ import { addShape, clear, selectDraft, setColor, setMode, setTool, undo, type Ma
 type Media = HTMLImageElement | HTMLVideoElement;
 type Pt = { x: number; y: number };
 
-/** The native video controls' strip at the bottom of the frame: the layer never takes a press that starts there. */
-const VIDEO_CONTROLS_PX = 44;
 const STROKE_PX = 3;
+/** A dark outline under every stroke, so a white or yellow mark stays visible on a light frame (no CSS filter: cheap). */
+const HALO_PX = STROKE_PX + 2;
+const HALO = 'rgba(0,0,0,0.55)';
 const TOOL_KEYS: Record<string, MarkTool> = { KeyR: 'rect', KeyE: 'ellipse', KeyP: 'pen', KeyA: 'arrow' };
 
 const natSize = (m: Media): [number, number] =>
@@ -54,10 +55,26 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
   const [asking, setAsking] = useState(false);
   const pane = media.parentElement;
   const svg = useRef<SVGSVGElement>(null);
-  const hit = useRef<SVGRectElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
   const live = useRef<SVGPathElement>(null);
+  const liveHalo = useRef<SVGPathElement>(null);
   const livePen = useRef<SVGPolylineElement>(null);
+  const livePenHalo = useRef<SVGPolylineElement>(null);
   const [nat, setNat] = useState<[number, number]>(() => natSize(media));
+  // the natural size arrives after mount (image load, video metadata): follow it whether or not the mode is on
+  const syncNat = useCallback(() => setNat((old) => {
+    const [w, h] = natSize(media);
+    return old[0] === w && old[1] === h ? old : [w, h];
+  }), [media]);
+  useEffect(() => {
+    syncNat();
+    media.addEventListener('load', syncNat);
+    media.addEventListener('loadedmetadata', syncNat);
+    return () => {
+      media.removeEventListener('load', syncNat);
+      media.removeEventListener('loadedmetadata', syncNat);
+    };
+  }, [media, syncNat]);
   const box = useCallback(() => {
     const [w, h] = natSize(media);
     return contentBox(media.getBoundingClientRect(), w, h, fit);
@@ -73,24 +90,18 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     el.style.top = `${b.y - p.y - pane.clientTop + pane.scrollTop}px`;
     el.style.width = `${b.width}px`;
     el.style.height = `${b.height}px`;
-    // a video's controls strip stays the video's (the hit area stops above it)
-    const keep = media instanceof HTMLVideoElement && b.height > 0 ? Math.max(0, 1 - VIDEO_CONTROLS_PX / b.height) : 1;
-    hit.current?.setAttribute('height', String(keep));
-  }, [box, pane, media]);
+  }, [box, pane]);
 
   // once on, the mode stays through a reconnect (protocol is 0 until the next hello): a drawing never vanishes
   const on = draft.on;
   useLayoutEffect(() => {
     if (!on) return;
+    syncNat();
     place();
     // focus off the toggle (gone now) or a text field, so R/E/P/A, Enter and Esc reach the mode at once
     svg.current?.focus({ preventScroll: true });
-    const sync = () => {
-      setNat(natSize(media));
-      place();
-    };
-    media.addEventListener('load', sync);
-    media.addEventListener('loadedmetadata', sync);
+    media.addEventListener('load', place);
+    media.addEventListener('loadedmetadata', place);
     window.addEventListener('resize', place);
     const onScroll = () => void (drag.current && (drag.current.box = box()));
     pane?.addEventListener('scroll', onScroll, { passive: true });
@@ -98,25 +109,31 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     ro?.observe(media);
     if (pane) ro?.observe(pane);
     return () => {
-      media.removeEventListener('load', sync);
-      media.removeEventListener('loadedmetadata', sync);
+      media.removeEventListener('load', place);
+      media.removeEventListener('loadedmetadata', place);
       window.removeEventListener('resize', place);
       pane?.removeEventListener('scroll', onScroll);
       ro?.disconnect();
     };
-  }, [on, media, pane, place, box]);
+  }, [on, media, pane, place, box, syncNat]);
 
   // ---- drawing: refs only until pointerup ----
-  // `box`: the content box at pointerdown (no layout read per move); a scroll during the drag refreshes it
-  const drag = useRef<{ id: number; a: Pt; b: Pt; pen: number[]; ptsText: string; box: DOMRect } | null>(null);
+  // `box`: the content box at pointerdown (no layout read per move); a scroll during the drag refreshes it.
+  // `tool`/`color`: fixed at pointerdown, so a key pressed mid-drag changes the next shape, not this one.
+  type Drag = { id: number; a: Pt; b: Pt; pen: number[]; ptsText: string; box: DOMRect; tool: MarkTool; color: MediaShape['color'] };
+  const drag = useRef<Drag | null>(null);
   const toolRef = useRef(draft);
   toolRef.current = draft;
   const relOf = (e: { clientX: number; clientY: number }, b: DOMRect) => toRel(e.clientX, e.clientY, b);
-  const showLive = (d: NonNullable<typeof drag.current>) => {
-    const { tool, color } = toolRef.current;
-    if (tool === 'pen') return void livePen.current?.setAttribute('points', d.ptsText);
-    const s = shapeOf(tool, color, d.a, d.b, d.pen);
-    live.current?.setAttribute('d', s ? shapePath(s, nat[0], nat[1]) : '');
+  const showLive = (d: Drag) => {
+    if (d.tool === 'pen') {
+      livePen.current?.setAttribute('points', d.ptsText);
+      return void livePenHalo.current?.setAttribute('points', d.ptsText);
+    }
+    const s = shapeOf(d.tool, d.color, d.a, d.b, d.pen);
+    const path = s ? shapePath(s, nat[0], nat[1]) : '';
+    live.current?.setAttribute('d', path);
+    liveHalo.current?.setAttribute('d', path);
   };
   const onDown = (e: RPointerEvent<SVGSVGElement>) => {
     if (e.button !== 0 || drag.current) return;
@@ -125,9 +142,9 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     (e.target as Element).setPointerCapture?.(e.pointerId); // the hit rect: the svg itself takes no pointer events
     const at = box();
     const a = relOf(e, at);
-    const d = { id: e.pointerId, a, b: a, pen: [a.x, a.y], ptsText: `${a.x},${a.y}`, box: at };
-    drag.current = d;
     const { tool, color } = toolRef.current;
+    const d: Drag = { id: e.pointerId, a, b: a, pen: [a.x, a.y], ptsText: `${a.x},${a.y}`, box: at, tool, color };
+    drag.current = d;
     (tool === 'pen' ? livePen : live).current?.setAttribute('stroke', color);
     showLive(d);
   };
@@ -136,11 +153,11 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     if (!d || e.pointerId !== d.id) return;
     // every input sample since the last frame, for a stroke as smooth as the pointer (pen only; a box needs the last)
     const native = e.nativeEvent;
-    const samples = toolRef.current.tool === 'pen' && typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [];
+    const samples = d.tool === 'pen' && typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : [];
     for (const p of samples.length ? samples : [native]) {
       const r = relOf(p, d.box);
       d.b = r;
-      if (toolRef.current.tool === 'pen') {
+      if (d.tool === 'pen') {
         d.pen.push(r.x, r.y);
         d.ptsText += ` ${r.x},${r.y}`;
       }
@@ -152,10 +169,9 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     if (!d || e.pointerId !== d.id) return;
     drag.current = null;
     if (e.type === 'pointerup') d.b = relOf(e, d.box);
-    live.current?.setAttribute('d', '');
-    livePen.current?.setAttribute('points', '');
-    const { tool, color } = toolRef.current;
-    const s = shapeOf(tool, color, d.a, d.b, d.pen);
+    for (const el of [live.current, liveHalo.current]) el?.setAttribute('d', '');
+    for (const el of [livePen.current, livePenHalo.current]) el?.setAttribute('points', '');
+    const s = shapeOf(d.tool, d.color, d.a, d.b, d.pen);
     if (s) dispatch(addShape(tabId, s));
   };
 
@@ -168,11 +184,14 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
   const leave = useCallback(() => (shapes.length ? setAsking(true) : void dispatch(setMode(tabId, false))), [shapes, dispatch, tabId]);
   const comment = useCallback(() => void (shapes.length && onAdd(shapes)), [shapes, onAdd]);
 
-  // ---- keys: only while on, in the visible tab, outside text fields; capture + preventDefault (the Esc protocol) ----
+  // ---- keys: only while on, in the visible tab, with focus on nothing (body) or in this tab's pane or toolbar; never in
+  // a text field. Focus in the feed keeps Esc for the agent and Enter for a link. Capture + preventDefault (Esc protocol).
   useEffect(() => {
     if (!on || asking) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || editable(e.target) || media.closest('[hidden]')) return;
+      const f = document.activeElement;
+      if (f && f !== document.body && !pane?.contains(f) && !toolbar.current?.contains(f)) return;
       const mod = e.metaKey || e.ctrlKey;
       // e.code, not e.key: R/E/P/A and the digits work on any keyboard layout
       if (mod && !e.altKey && !e.shiftKey && e.code === 'KeyZ') {
@@ -200,14 +219,18 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
     return () => document.removeEventListener('keydown', onKey, true);
   }, [on, asking, media, dispatch, tabId, leave, comment, shapes]);
 
-  const drawn = useMemo(() => shapes.map((s, i) => (
-    <path key={i} data-shape={s.kind} d={shapePath(s, nat[0], nat[1])} stroke={s.color} vectorEffect="non-scaling-stroke" />
-  )), [shapes, nat]);
+  const drawn = useMemo(() => shapes.map((s, i) => {
+    const d = shapePath(s, nat[0], nat[1]);
+    return [
+      <path key={`h${i}`} data-halo d={d} stroke={HALO} strokeWidth={HALO_PX} vectorEffect="non-scaling-stroke" />,
+      <path key={i} data-shape={s.kind} d={d} stroke={s.color} vectorEffect="non-scaling-stroke" />,
+    ];
+  }), [shapes, nat]);
 
   if (!offered && !on) return null;
   return (
     <>
-      <div data-anchor-skip className="pointer-events-none absolute top-2 right-3 z-20">
+      <div ref={toolbar} data-anchor-skip className="pointer-events-none absolute top-2 right-3 z-20">
         <MarkupToolbar
           draft={draft}
           onEnter={enter}
@@ -236,13 +259,13 @@ export function MarkupLayer({ tabId, media, fit, onAdd }: {
           onPointerCancel={finish}
           onLostPointerCapture={finish}
         >
-          {/* filter: the drop shadow keeps a white or yellow stroke visible on a light frame */}
-          <g style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,0.7))' }}>
-            <rect ref={hit} x="0" y="0" width="1" height="1" fill="transparent" stroke="none" className="pointer-events-auto" />
-            {drawn}
-            <path ref={live} data-live d="" vectorEffect="non-scaling-stroke" />
-            <polyline ref={livePen} data-live points="" vectorEffect="non-scaling-stroke" />
-          </g>
+          {/* the hit area: the svg itself takes no pointer events; while marking the video has no native controls */}
+          <rect x="0" y="0" width="1" height="1" fill="transparent" stroke="none" className="pointer-events-auto" />
+          {drawn}
+          <path ref={liveHalo} d="" stroke={HALO} strokeWidth={HALO_PX} vectorEffect="non-scaling-stroke" />
+          <path ref={live} data-live d="" vectorEffect="non-scaling-stroke" />
+          <polyline ref={livePenHalo} points="" stroke={HALO} strokeWidth={HALO_PX} vectorEffect="non-scaling-stroke" />
+          <polyline ref={livePen} data-live points="" vectorEffect="non-scaling-stroke" />
         </svg>,
         pane,
       )}

@@ -242,3 +242,14 @@ it('audio has no markup mode', () => {
   expect(r.container.querySelector('audio')).not.toBeNull();
   expect(screen.queryByRole('button', { name: /mark up/i })).toBeNull();
 });
+
+it('while marking, the video has no controls; leaving restores them', () => {
+  const { r, store } = setup('v.mp4');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const v = () => r.container.querySelector('video')!;
+  expect(v().controls).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  expect(v().controls).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: /leave/i }));
+  expect(v().controls).toBe(true);
+});

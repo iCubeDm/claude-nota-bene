@@ -207,7 +207,7 @@ export const en: Dict = {
   toolEllipse: 'Ellipse (E)',
   toolPen: 'Pen (P)',
   toolArrow: 'Arrow (A)',
-  markColor: (n) => `Colour ${n} (${n})`,
+  markColor: (n) => `${['Red', 'Yellow', 'Green', 'Blue', 'White'][n - 1]} (${n})`,
   markUndo: (mac) => `Undo (${mac ? '⌘Z' : 'Ctrl+Z'})`,
   markComment: 'Comment',
   markCommentTip: 'Comment (Enter)',

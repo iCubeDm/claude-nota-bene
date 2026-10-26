@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { connState, makeStore, serverEvent } from '@/store/store.ts';
 import { MarkupLayer } from './MarkupLayer.tsx';
+import { shapePath } from './geometry.ts';
 import { addShape, selectDraft, setMode } from './slice.ts';
 
 const TAB = 'file:p.png';
@@ -213,4 +214,71 @@ it('a dropped connection does not hide a drawing in progress', () => {
   act(() => { store.dispatch(connState('closed')); }); // protocol is 0 until the next hello
   expect(layer().querySelectorAll('path[data-shape]')).toHaveLength(1);
   expect(screen.getByRole('button', { name: /leave/i })).toBeInTheDocument();
+});
+
+it('every shape has a dark halo under it, no CSS filter, the hit area outside any group', () => {
+  setup();
+  fireEvent.click(toggle());
+  drag([[100, 300], [200, 400]]);
+  const shape = layer().querySelector('path[data-shape]')!;
+  const halo = layer().querySelector('path[data-halo]')!;
+  expect(halo.getAttribute('d')).toBe(shape.getAttribute('d'));
+  expect(halo.compareDocumentPosition(shape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // painted first
+  expect(layer().innerHTML).not.toContain('filter');
+  expect(layer().querySelector('rect')!.parentElement).toBe(layer());
+});
+
+it('the natural size known only after mount sizes the arrow head', () => {
+  const img = document.createElement('img');
+  let nat = [0, 0];
+  Object.defineProperty(img, 'naturalWidth', { get: () => nat[0] });
+  Object.defineProperty(img, 'naturalHeight', { get: () => nat[1] });
+  img.getBoundingClientRect = () => rect(0, 0, 1000, 1000);
+  pane.append(img);
+  const { draft } = setup(img);
+  nat = [2000, 1000]; // loaded after the layer mounted, no load event seen
+  fireEvent.click(toggle());
+  key({ key: 'a', code: 'KeyA' });
+  drag([[100, 400], [500, 500]]);
+  expect(layer().querySelector('path[data-shape]')!.getAttribute('d')).toBe(shapePath(draft().shapes[0], 2000, 1000));
+  nat = [1000, 2000];
+  fireEvent.load(img); // a reload with another size
+  expect(layer().querySelector('path[data-shape]')!.getAttribute('d')).toBe(shapePath(draft().shapes[0], 1000, 2000));
+});
+
+it('a tool or colour key pressed mid-drag does not change the shape being drawn', () => {
+  const { draft } = setup();
+  fireEvent.click(toggle());
+  fireEvent.pointerDown(layer(), { button: 0, clientX: 100, clientY: 300, pointerId: 1 });
+  key({ key: 'p', code: 'KeyP' });
+  key({ key: '3', code: 'Digit3' });
+  fireEvent.pointerMove(layer(), { clientX: 200, clientY: 400, pointerId: 1 });
+  fireEvent.pointerUp(layer(), { clientX: 200, clientY: 400, pointerId: 1 });
+  expect(draft().shapes).toEqual([{ kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.1, w: 0.1, h: 0.2 }]);
+  expect(draft()).toMatchObject({ tool: 'pen', color: '#34c759' }); // the next shape
+});
+
+it('Esc with focus inside the chat feed is not taken by the markup', () => {
+  const { draft } = setup();
+  fireEvent.click(toggle());
+  drag([[100, 300], [200, 400]]);
+  const feed = document.createElement('div');
+  const link = document.createElement('a');
+  link.href = '#x';
+  feed.append(link);
+  document.body.append(feed);
+  link.focus();
+  const ev = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true });
+  act(() => { link.dispatchEvent(ev); });
+  expect(ev.defaultPrevented).toBe(false); // the Composer interrupts the agent
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.keyDown(link, { key: 'Enter', code: 'Enter' });
+  expect(draft().on).toBe(true);
+  feed.remove();
+});
+
+it('colour buttons are named', () => {
+  setup();
+  fireEvent.click(toggle());
+  for (const n of ['Red (1)', 'Yellow (2)', 'Green (3)', 'Blue (4)', 'White (5)']) expect(screen.getByRole('button', { name: n })).toBeInTheDocument();
 });
