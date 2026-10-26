@@ -6,11 +6,16 @@ import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { addShape, selectDraft } from '@/media/markup/slice.ts';
+import { dismissToast, getToasts } from '@/shell/toast.ts';
 import { FileView } from './FileView.tsx';
 
-const prepareMediaComment = vi.fn(async (..._a: unknown[]) => ({ images: ['1'.repeat(64), '2'.repeat(64)] }));
+// like the real one: awaits the version request it was handed and returns it in the anchor patch
+const prepareMediaComment = vi.fn(async (_id: string, _el: unknown, _a: unknown, o?: { version?: Promise<string | undefined> }) => {
+  const version = await o?.version;
+  return { images: ['1'.repeat(64), '2'.repeat(64)], anchor: version === undefined ? {} : { version } };
+});
 vi.mock('@/media/markup/createMediaComment.ts', () => ({
-  prepareMediaComment: (...a: unknown[]) => prepareMediaComment(...a),
+  prepareMediaComment: (...a: Parameters<typeof prepareMediaComment>) => prepareMediaComment(...a),
   deleteMarks: vi.fn(async () => {}),
 }));
 vi.mock('mermaid', () => ({ default: { initialize: vi.fn(), render: vi.fn(async () => ({ svg: '<svg></svg>' })) } }));
@@ -280,10 +285,10 @@ it('Comment on an image opens the popup; Add renders the files and adds the comm
   expect(prepareMediaComment).not.toHaveBeenCalled(); // nothing is written until Add
   fireEvent.change(screen.getByPlaceholderText('Comment…'), { target: { value: 'sit here' } });
   await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Add' })));
-  const anchor = { kind: 'media', source: { kind: 'file', path: 'media/p.png' }, width: 1000, height: 500, version: 'W/"5-1729.5"', shapes: [SHAPE] };
-  expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), img, anchor);
+  const anchor = { kind: 'media', source: { kind: 'file', path: 'media/p.png' }, width: 1000, height: 500, shapes: [SHAPE] };
+  expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), img, anchor, { version: expect.any(Promise) });
   const [c] = store.getState().comments.items;
-  expect(c).toMatchObject({ id: prepareMediaComment.mock.calls[0]![0], text: 'sit here', anchor, images: ['1'.repeat(64), '2'.repeat(64)] });
+  expect(c).toMatchObject({ id: prepareMediaComment.mock.calls[0]![0], text: 'sit here', anchor: { ...anchor, version: 'W/"5-1729.5"' }, images: ['1'.repeat(64), '2'.repeat(64)] });
   expect(selectDraft(store.getState(), tab)).toMatchObject({ on: false, shapes: [] });
   expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
 });
@@ -307,5 +312,41 @@ it('a paused video: the anchor has the time to the ms and no version without an 
   fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
   await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Add' })));
   expect(prepareMediaComment).toHaveBeenCalledWith(expect.stringMatching(UUID), v,
-    { kind: 'media', source: { kind: 'file', path: 'v.mp4' }, width: 640, height: 360, time: 4.24, shapes: [SHAPE] });
+    { kind: 'media', source: { kind: 'file', path: 'v.mp4' }, width: 640, height: 360, time: 4.24, shapes: [SHAPE] }, expect.anything());
+  expect(store.getState().comments.items[0]!.anchor).not.toHaveProperty('version');
+});
+
+it('Comment pressed before the version request answers: the comment still gets the version', async () => {
+  let answer!: () => void;
+  const gate = new Promise<void>((r) => (answer = r));
+  const real = fetch;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'HEAD') { await gate; return new Response(null, { headers: { etag: 'W/"9-9"' } }); }
+    return real(url, init);
+  }));
+  const { r, store } = setup('p.png');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  const img = r.container.querySelector('img')!;
+  Object.defineProperty(img, 'naturalWidth', { value: 10 });
+  Object.defineProperty(img, 'naturalHeight', { value: 10 });
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:p.png', SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  expect(store.getState().comments.items).toEqual([]); // waiting for the version
+  await act(async () => answer());
+  await waitFor(() => expect(store.getState().comments.items).toHaveLength(1));
+  expect(store.getState().comments.items[0]!.anchor).toMatchObject({ version: 'W/"9-9"' });
+});
+
+it('Comment on media with no natural size (an SVG, or still loading) says why instead of doing nothing', () => {
+  for (const t of getToasts()) dismissToast(t.id);
+  const { store } = setup('p.svg');
+  act(() => { store.dispatch(serverEvent(hello())); });
+  fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
+  act(() => { store.dispatch(addShape('file:p.svg', SHAPE)); });
+  fireEvent.click(screen.getByRole('button', { name: /^comment/i }));
+  expect(screen.queryByPlaceholderText('Comment…')).toBeNull();
+  expect(getToasts().map((t) => t.title)).toContainEqual(expect.stringMatching(/^Cannot mark up this file/));
+  expect(selectDraft(store.getState(), 'file:p.svg').shapes).toEqual([SHAPE]); // the drawing stays
 });

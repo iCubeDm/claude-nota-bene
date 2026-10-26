@@ -20,6 +20,8 @@ export type MediaAnchor = {
   time?: number;
   /** the /file ETag when drawn */
   version?: string;
+  /** set only when the frame and layer files were downscaled to fit MARK_MAX_BYTES (0 < scale < 1; both files) */
+  scale?: number;
   shapes: MediaShape[];
 };
 export type TextAnchor = { source: AnchorSource; start: number; end: number; quote: string; prefix: string; suffix: string };
@@ -178,6 +180,7 @@ function isMediaAnchorShape(v: Obj): boolean {
   return isObj(v.source) && isFileSource(v.source) && isPos(v.width) && isPos(v.height)
     && (v.time === undefined || (typeof v.time === 'number' && Number.isFinite(v.time) && v.time >= 0))
     && (v.version === undefined || (typeof v.version === 'string' && v.version.length <= 200))
+    && (v.scale === undefined || (typeof v.scale === 'number' && v.scale > 0 && v.scale < 1))
     && Array.isArray(v.shapes) && v.shapes.length > 0 && v.shapes.every(isMediaShape);
 }
 
@@ -230,6 +233,7 @@ export function toAnchor(a: Anchor): Anchor {
       kind: 'media', source: toSource(a.source) as FileSource, width: a.width, height: a.height,
       ...(a.time === undefined ? {} : { time: a.time }),
       ...(a.version === undefined ? {} : { version: a.version }),
+      ...(a.scale === undefined ? {} : { scale: a.scale }),
       shapes: a.shapes.map(toShape),
     };
   }

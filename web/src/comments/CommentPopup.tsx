@@ -14,17 +14,18 @@ import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
 import type { ImageEntry } from '@/composer/slice.ts';
 import { mediaTime } from '@/media/markup/geometry.ts';
-import { deleteMarks } from '@/media/markup/createMediaComment.ts';
+import { deleteMarks, type MediaAnchorPatch } from '@/media/markup/createMediaComment.ts';
 import { addComment, setPanelOpen } from './slice.ts';
 
 /**
  * What the popup comments on. A text selection: anchor + rect (+ the letter typed to open it). A media drawing adds
  * `id` (the comment id, which names its mark folder) and `prepare` (renders and uploads the frame and the layer, and
- * returns their attachment ids; on failure it has already removed the folder).
+ * returns their attachment ids plus what only it knows for sure: the exact time, the version, the scale; on failure it
+ * has already removed the folder).
  */
 export type PendingComment = {
   anchor: Anchor; rect: DOMRect; text?: string;
-  id?: string; prepare?: () => Promise<{ images: string[] }>;
+  id?: string; prepare?: () => Promise<{ images: string[]; anchor?: MediaAnchorPatch }>;
 };
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
@@ -78,10 +79,13 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
     // a drawing is content of its own: no text and no label is still a comment
     const has = !!(prepare || body || label || images.length);
     let prepared: string[] = [];
+    let anchor = pending.anchor;
     if (prepare) {
       setBusy(true);
       try {
-        prepared = (await prepare()).images;
+        const r = await prepare();
+        prepared = r.images;
+        if (r.anchor && isMediaAnchor(anchor)) anchor = { ...anchor, ...r.anchor };
       } catch (e) {
         // prepare removed the folder; the popup and the drawing stay, so Add can be tried again
         if (alive.current) {
@@ -92,13 +96,13 @@ export function CommentPopup({ pending, onClose, onAdded }: { pending: PendingCo
       }
       // cancelled meanwhile (Esc, a click outside, the tab closed), or a session switch began: the comment never came to be
       if (!alive.current || switchingNow.current) {
-        void (id && deleteMarks(id));
+        if (id) await deleteMarks(id); // done before Add is offered again, so a retry cannot race the delete
         if (alive.current) setBusy(false);
         return;
       }
     }
     const all = [...prepared, ...images.map((i) => i.id)];
-    if (has) dispatch(addComment({ ...(id && { id }), anchor: pending.anchor, text: body, ...(label && { label }), ...(all.length && { images: all }) }));
+    if (has) dispatch(addComment({ ...(id && { id }), anchor, text: body, ...(label && { label }), ...(all.length && { images: all }) }));
     window.getSelection()?.removeAllRanges();
     if (has) onAdded?.();
     onClose();

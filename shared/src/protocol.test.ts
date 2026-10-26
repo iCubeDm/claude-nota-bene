@@ -157,6 +157,10 @@ const rejectCases: [string, unknown][] = [
   ['negative time', mediaAnchor({ time: -1 })],
   ['non-finite time (NaN serialises to null)', mediaAnchor({ time: null })],
   ['version over 200 chars', mediaAnchor({ version: 'x'.repeat(201) })],
+  ['scale 1 (an unscaled render has no field)', mediaAnchor({ scale: 1 })],
+  ['scale 0', mediaAnchor({ scale: 0 })],
+  ['scale > 1', mediaAnchor({ scale: 1.5 })],
+  ['scale not a number', mediaAnchor({ scale: '0.5' })],
 ];
 test.each(rejectCases)('rejects a media anchor: %s', (_name, a) => {
   expect(parseMedia(a)).toHaveProperty('error');
@@ -180,4 +184,11 @@ test('toAnchor copies a media anchor deeply and drops unknown keys', () => {
   (out.shapes[1] as { x: number }).x = 0.5;
   out.source.path = 'changed';
   expect(JSON.parse(JSON.stringify(input))).toEqual(snapshot);
+});
+
+test('a media anchor with a scale below 1 parses, and toAnchor keeps it', () => {
+  const a = mediaAnchor({ scale: 0.75 });
+  expect(parseMedia(a)).toEqual({ type: 'comments', sessionId: null, items: [comment({ anchor: a })] });
+  expect(toAnchor(a as unknown as MediaAnchor)).toMatchObject({ scale: 0.75 });
+  expect(toAnchor(mediaAnchor() as unknown as MediaAnchor)).not.toHaveProperty('scale');
 });

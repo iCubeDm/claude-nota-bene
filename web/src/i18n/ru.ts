@@ -215,4 +215,5 @@ export const ru = {
   markDiscard: 'Выбросить',
   markShapes: (n: number) => `фигур: ${n}`,
   markSaveFailed: (e: string) => `Не удалось сохранить рисунок: ${e}`,
+  markNoSize: 'Этот файл не разметить: у него ещё нет размера (грузится, или это SVG без размеров)',
 };

@@ -278,7 +278,7 @@ it('a failed prepare shows the error and keeps the popup open; nothing is added'
   expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled(); // a retry is possible
 });
 
-it('cancelling the popup after prepare ran deletes /marks/<id> (Review Focus 5)', async () => {
+it('cancelling the popup while prepare runs deletes /marks/<id> once it settles (Review Focus 5)', async () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
   vi.stubGlobal('fetch', fetchMock);
   try {
@@ -297,4 +297,42 @@ it('cancelling the popup after prepare ran deletes /marks/<id> (Review Focus 5)'
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it('the anchor patch from prepare (scale, version, the exact time) lands on the comment', async () => {
+  const { comments } = setup({
+    ...pending, anchor: mediaAnchor({ time: 1 }), id: MID,
+    prepare: async () => ({ images: [FRAME, LAYER], anchor: { scale: 0.75, version: 'W/"5-1"', time: 4.241 } }),
+  });
+  await act(async () => void fireEvent.click(screen.getByRole('button', { name: 'Add' })));
+  expect(comments()[0]!.anchor).toEqual({ ...mediaAnchor(), scale: 0.75, version: 'W/"5-1"', time: 4.241 });
+});
+
+it('a session switch during prepare: no comment, and the popup stays busy until the folder is deleted', async () => {
+  const del = deferred<Response>();
+  const fetchMock = vi.fn(() => del.promise);
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    const d = deferred<{ images: string[] }>();
+    const { comments, store } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare: () => d.promise });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    act(() => void store.dispatch(switchSession('x', '/r')));
+    await act(async () => d.resolve({ images: [FRAME, LAYER] }));
+    expect(fetchMock).toHaveBeenCalledWith(`/marks/${MID}`, expect.objectContaining({ method: 'DELETE' }));
+    expect(screen.getByRole('button', { name: 'Add' })).toHaveAttribute('aria-busy', 'true'); // DELETE still in flight
+    await act(async () => del.resolve(new Response(null, { status: 204 })));
+    expect(screen.getByRole('button', { name: 'Add' })).not.toHaveAttribute('aria-busy');
+    expect(comments()).toEqual([]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('two clicks on Add in one tick start one prepare', async () => {
+  const prepare = vi.fn(async () => ({ images: [FRAME, LAYER] }));
+  const { comments } = setup({ ...pending, anchor: mediaAnchor(), id: MID, prepare });
+  const add = screen.getByRole('button', { name: 'Add' });
+  await act(async () => { add.click(); add.click(); }); // no re-render between them: only the ref can tell
+  expect(prepare).toHaveBeenCalledTimes(1);
+  expect(comments()).toHaveLength(1);
 });

@@ -10,6 +10,7 @@ import { selectComments } from '@/comments/slice.ts';
 import { Markdown } from '@/feed/Markdown.tsx';
 import { refClick } from '@/refs/refs.ts';
 import { useT } from '@/i18n/index.ts';
+import { toast } from '@/shell/toast.ts';
 import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
 import { prepareMediaComment } from '@/media/markup/createMediaComment.ts';
 import { clear, selectDraft } from '@/media/markup/slice.ts';
@@ -114,16 +115,17 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   }, [mediaCtl, tabId]);
   const imgRef = useCallback((el: HTMLImageElement | null) => setMarkable(el), []);
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
-  // markup → comment. The version is the media's ETag when the mode is entered (absent for a branch source); nothing
-  // is written until Add (the popup runs `prepare` then), and the draft is cleared only once the comment exists.
-  const version = useRef<string | undefined>(undefined);
+  // markup → comment. The version is the media's ETag, asked for when the mode is entered (absent for a branch
+  // source); prepare awaits that request, so an early Add still gets it. Nothing is written until Add (the popup runs
+  // `prepare` then), and the draft is cleared only once the comment exists.
+  const version = useRef<Promise<string | undefined> | undefined>(undefined);
   useEffect(() => {
     version.current = undefined;
     if (!marking) return;
     const ac = new AbortController();
-    fetch(mediaUrl, { method: 'HEAD', signal: ac.signal }).then(
-      (r) => void (r.ok && (version.current = r.headers.get('etag') ?? undefined)),
-      () => {}, // no version: the mark simply cannot tell "the file changed"
+    version.current = fetch(mediaUrl, { method: 'HEAD', signal: ac.signal }).then(
+      (r) => (r.ok ? r.headers.get('etag') ?? undefined : undefined),
+      () => undefined, // no version: the mark simply cannot tell "the file changed"
     );
     return () => ac.abort();
   }, [marking, mediaUrl]);
@@ -133,17 +135,18 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     if (!el) return;
     const video = el instanceof HTMLVideoElement;
     const [width, height] = video ? [el.videoWidth, el.videoHeight] : [el.naturalWidth, el.naturalHeight];
-    if (!width || !height) return; // not loaded: nothing to render the drawing on
+    // not loaded yet, or no intrinsic size (an SVG without one): nothing to render the drawing on; the draft stays
+    if (!width || !height) return toast(t('markNoSize'), path);
     const anchor: MediaAnchor = {
       kind: 'media', source: ref === undefined ? { kind: 'file', path } : { kind: 'file', path, ref }, width, height,
-      // the native controls are hidden while marking, so the frame has not moved since the drawing
+      // for the popup's quote; prepare pauses the video and re-reads the time at the moment it captures the frame
       ...(video && { time: Math.round(el.currentTime * 1000) / 1000 }),
-      ...(version.current !== undefined && { version: version.current }),
       shapes,
     };
     const id = crypto.randomUUID();
-    setMarkPopup({ anchor, rect: at, id, prepare: () => prepareMediaComment(id, el, anchor) });
-  }, [markable, path, ref]);
+    const v = version.current;
+    setMarkPopup({ anchor, rect: at, id, prepare: () => prepareMediaComment(id, el, anchor, { version: v }) });
+  }, [markable, path, ref, t]);
   const closeMarkPopup = useCallback(() => setMarkPopup(null), []);
   const markAdded = useCallback(() => void dispatch(clear(tabId)), [dispatch, tabId]);
   // the popup belongs to a visible drawing: hiding the tab or leaving the mode closes it (the draft stays)

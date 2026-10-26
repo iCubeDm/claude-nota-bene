@@ -21,19 +21,46 @@ export async function deleteMarks(id: string): Promise<void> {
   }
 }
 
+/** What only prepare knows for sure; merged into the anchor before the comment is added. */
+export type MediaAnchorPatch = Partial<Pick<MediaAnchor, 'scale' | 'version' | 'time'>>;
+
+/** A HEAD that never answers must not hold Add forever: no version then. */
+const VERSION_WAIT_MS = 5000;
+
 /**
  * Renders, uploads the natural-size files to /marks/<id>/…, uploads downscaled copies to /attach; returns the ids
- * (frame first). On any failure deletes /marks/<id> and rejects. Sequential on purpose: a DELETE after a failure must
- * not overtake a write still in flight.
+ * (frame first) and the anchor patch. On any failure deletes /marks/<id> and rejects. Sequential on purpose: a DELETE
+ * after a failure must not overtake a write still in flight.
+ * - A video is paused and its time read right before the frame is drawn (an OS media key may have resumed it).
+ * - `version`: the media's ETag request, made when the mode was entered; awaited here, after the frame is captured.
+ * - `scale`: only when the files had to be downscaled to fit (< 1).
  */
-export async function prepareMediaComment(id: string, source: CanvasImageSource, anchor: MediaAnchor): Promise<{ images: string[] }> {
+export async function prepareMediaComment(
+  id: string, source: CanvasImageSource, anchor: MediaAnchor, o: { version?: Promise<string | undefined> } = {},
+): Promise<{ images: string[]; anchor: MediaAnchorPatch }> {
   try {
-    const { frame, layer } = await renderMarks(source, anchor.width, anchor.height, anchor.shapes);
+    const patch: MediaAnchorPatch = {};
+    if (source instanceof HTMLVideoElement) {
+      source.pause();
+      patch.time = Math.round(source.currentTime * 1000) / 1000;
+    }
+    // no await between the time and the call: renderMarks draws the frame before its first await
+    const { frame, layer, scale } = await renderMarks(source, anchor.width, anchor.height, anchor.shapes);
+    if (scale < 1) patch.scale = scale;
     await putMark(id, 'frame.jpg', frame);
     await putMark(id, 'layer.png', layer);
     const f = await uploadImage(await prepareImage(frame));
     const l = await uploadImage(await prepareImage(layer));
-    return { images: [f.id, l.id] };
+    if (o.version) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const version = await Promise.race([
+        o.version.catch(() => undefined),
+        new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), VERSION_WAIT_MS))),
+      ]);
+      clearTimeout(timer);
+      if (version !== undefined) patch.version = version;
+    }
+    return { images: [f.id, l.id], anchor: patch };
   } catch (e) {
     await deleteMarks(id);
     throw e;
