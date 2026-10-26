@@ -5,6 +5,10 @@
 //   nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
 //   nota-bene --find DIR   prints the port of a live window serving DIR (exit 0), or exits 1
 //   nota-bene --last DIR   prints DIR's saved session id if its transcript still exists (exit 0), or exits 1
+//   --detach prints exactly one line, `opened URL` or `already-open URL` (exit 0), or an error and the log tail (exit 1)
+//
+// One window per folder: a launch takes the folder's lock, then gives way to a window already serving it.
+// A picked port avoids 4780 (dev) and 4790-4795 (smoke, tests) unless NOTA_BENE_PORT_RANGE is set.
 //
 // Server exit codes (as prototype/ide.sh): 75 relaunches at once with --continue (more than 10 within 60 s give up);
 // 0, 130, 143 exit; 98 (listen failed) on the first start retries once on another port when the port was picked
@@ -19,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transcriptExists } from '../server/src/sessions.ts';
-import { lastSession } from '../server/src/state.ts';
+import { lastSession, stateDir } from '../server/src/state.ts';
 import { liveWindows, pidAlive, probeInfo, readWindows, registerWindow, unregisterWindow } from '../server/src/windows.ts';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -33,7 +37,10 @@ const CLEAN_EXITS = new Set([0, 130, 143]);
 const MAX_CRASHES = 5;
 const MAX_RESTARTS = 10;
 const GUARD_WINDOW_MS = 60_000;
-const DETACH_WAIT_MS = 20_000;
+// test only: NOTA_BENE_DETACH_WAIT_MS shortens the wait, to reach the timeout path
+const DETACH_WAIT_MS = Number(process.env.NOTA_BENE_DETACH_WAIT_MS) || 20_000;
+const LOCK_STALE_MS = 60_000;
+const LOCK_WAIT_MS = 30_000;
 
 const say = (msg) => process.stderr.write(`nota-bene: ${msg}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -89,9 +96,18 @@ export function serverArgs(o, port, relaunch) {
 // --- ports -----------------------------------------------------------------------------------------------------
 
 /** The live window range; NOTA_BENE_PORT_RANGE="A-B" narrows it (the tests use 4791-4795). */
-function portRange() {
-  const m = /^(\d+)-(\d+)$/.exec(process.env.NOTA_BENE_PORT_RANGE ?? '');
+function portRange(env = process.env) {
+  const m = /^(\d+)-(\d+)$/.exec(env.NOTA_BENE_PORT_RANGE ?? '');
   return m ? [Number(m[1]), Number(m[2])] : [4777, 4799];
+}
+
+/** Ports a window may take: the default range minus the dev server (4780) and the smoke/test ports (4790-4795). */
+export function candidatePorts(env = process.env) {
+  const [from, to] = portRange(env);
+  const reserved = env.NOTA_BENE_PORT_RANGE ? [] : [4780, 4790, 4791, 4792, 4793, 4794, 4795];
+  const out = [];
+  for (let p = from; p <= to; p++) if (!reserved.includes(p)) out.push(p);
+  return out;
 }
 
 function canBind(port, host) {
@@ -113,8 +129,7 @@ export async function portFree(port) {
 }
 
 async function firstFreePort(skip = new Set()) {
-  const [from, to] = portRange();
-  for (let p = from; p <= to; p++) if (!skip.has(p) && await portFree(p)) return p;
+  for (const p of candidatePorts()) if (!skip.has(p) && await portFree(p)) return p;
   return null;
 }
 
@@ -198,11 +213,91 @@ export function ensureBuild(repo, env = process.env, stdio = 'inherit', lockWait
   }
 }
 
+// --- one window per folder ------------------------------------------------------------------------------------
+
+/**
+ * The folder's launch lock: an mkdir of <stateDir>/locks/<sha1(root)[0,16]> holding a pid file. Held from before the
+ * port pick until the window answers /info and is registered, so a second launch on the folder waits, then finds that
+ * window instead of starting another (two launchers' bind tests can overlap, so the port alone is no arbiter).
+ * A lock whose owner is dead, or older than LOCK_STALE_MS, is broken; after LOCK_WAIT_MS we go on unguarded.
+ * Returns the release function (idempotent; removes the lock only while it is still ours).
+ */
+export async function acquireLaunchLock(root, waitMs = LOCK_WAIT_MS) {
+  const lock = path.join(stateDir(), 'locks', createHash('sha1').update(root).digest('hex').slice(0, 16));
+  const pidFile = path.join(lock, 'pid');
+  const owner = () => {
+    try {
+      // empty (the holder is between its mkdir and its write) or garbage: unknown, never "dead"
+      const n = Number(fs.readFileSync(pidFile, 'utf8').trim());
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const age = () => {
+    try {
+      return Date.now() - fs.statSync(lock).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  const end = Date.now() + waitMs;
+  for (;;) {
+    try {
+      fs.mkdirSync(lock);
+      fs.writeFileSync(pidFile, String(process.pid));
+      let held = true;
+      return () => {
+        if (held && owner() === process.pid) fs.rmSync(lock, { recursive: true, force: true });
+        held = false;
+      };
+    } catch (e) {
+      if (e.code !== 'EEXIST') {
+        say(`cannot take the launch lock (${e.message}), going on without it`);
+        return () => {};
+      }
+    }
+    const pid = owner(); // undefined for a moment between the holder's mkdir and its pid write
+    if ((pid !== undefined && !pidAlive(pid)) || age() > LOCK_STALE_MS) {
+      // rename first: of two launchers breaking the same stale lock, only one succeeds, and neither removes a fresh one
+      const gone = `${lock}.stale-${process.pid}`;
+      try {
+        if (owner() === pid) fs.renameSync(lock, gone);
+        fs.rmSync(gone, { recursive: true, force: true });
+      } catch {
+        // someone else broke it first
+      }
+      continue;
+    }
+    if (Date.now() >= end) {
+      say(`another launch on this folder holds the lock for over ${waitMs / 1000}s, going on without it`);
+      return () => {};
+    }
+    await sleep(100);
+  }
+}
+
+/** A live window serving root (registry entries verified by /info; stale ones pruned), or undefined. */
+async function windowFor(root) {
+  return (await liveWindows((p) => probeInfo(p))).find((w) => w.root === root);
+}
+
+/**
+ * The launch re-check: the registry, else any port of the range whose /info serves root. The scan covers a window
+ * whose registry write failed (the lock is released after /info answers either way) and prototype windows.
+ */
+async function servingWindow(root) {
+  const hit = await windowFor(root);
+  if (hit) return hit.port;
+  const roots = await Promise.all(candidatePorts().map(async (p) => ((await probeInfo(p))?.root === root ? p : null)));
+  return roots.find((p) => p !== null) ?? undefined;
+}
+
 // --- helpers for the /nb skill ---------------------------------------------------------------------------------
 
 async function find(dir) {
-  const root = realDir(dir);
-  const hit = (await liveWindows((p) => probeInfo(p))).find((w) => w.root === root);
+  const hit = await windowFor(realDir(dir));
   if (!hit) return 1;
   process.stdout.write(`${hit.port}\n`);
   return 0;
@@ -250,7 +345,8 @@ async function detach(o, argv, autoPort, buildOutput) {
   const child = spawn(process.execPath, [SELF, ...args], {
     detached: true,
     stdio: ['ignore', fd, fd],
-    env: { ...process.env, ...(autoPort ? { NOTA_BENE_AUTOPORT: '1' } : {}) },
+    // the parent holds the folder's launch lock until the URL is printed; the child must not wait for it
+    env: { ...process.env, NOTA_BENE_LOCKED: '1', ...(autoPort ? { NOTA_BENE_AUTOPORT: '1' } : {}) },
   });
   fs.closeSync(fd);
   let exitCode;
@@ -263,12 +359,21 @@ async function detach(o, argv, autoPort, buildOutput) {
     for (const [key, w] of Object.entries(readWindows())) {
       if (w.root !== o.dir || !(w.launcherPid === child.pid || (gone && exitCode === 0 && pidAlive(w.pid)))) continue;
       if ((await probeInfo(Number(key)))?.root === o.dir) {
-        process.stdout.write(`http://127.0.0.1:${key}\n`);
+        // ours, or the window our launcher gave way to (it lost a port race to a launcher of the same folder)
+        process.stdout.write(`${w.launcherPid === child.pid ? 'opened' : 'already-open'} http://127.0.0.1:${key}\n`);
         return 0;
       }
     }
     if (gone) break;
     await sleep(250);
+  }
+  if (exitCode === undefined) {
+    // timed out: stop the detached launcher and its server before our caller releases the folder's lock
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
   }
   say(exitCode !== undefined
     ? `the server did not come up (launcher exited: ${exitCode}). Last log lines:`
@@ -284,7 +389,7 @@ function tail(text, n = 15) {
 }
 
 /** The supervisor loop. Resolves with the launcher's exit code. */
-async function run(o, autoPort) {
+async function run(o, autoPort, release = () => {}) {
   let port = o.port;
   let dir = o.dir; // follows the window's in-app folder switches (its registry entry), so a relaunch reopens it
   let child = null;
@@ -312,6 +417,7 @@ async function run(o, autoPort) {
     const env = { ...process.env, NOTA_BENE_SUPERVISED: '1', NOTA_BENE_LAUNCHER_PID: String(process.pid) };
     delete env.INIT_CWD; // set by npm; the dir and --fake are absolute already
     delete env.NOTA_BENE_AUTOPORT;
+    delete env.NOTA_BENE_LOCKED;
     const c = spawn(process.execPath, [MAIN, ...serverArgs({ ...o, dir }, port, !first)], {
       cwd: REPO,
       env,
@@ -331,6 +437,7 @@ async function run(o, autoPort) {
         } catch (e) {
           say(`cannot register the window: ${e.message}`); // the window works without it; --find falls back
         }
+        release(); // registered: a later launch on the folder finds this window
         if (first && o.open && !stopping) openBrowser(`http://127.0.0.1:${port}`);
         break;
       }
@@ -355,6 +462,7 @@ async function run(o, autoPort) {
       // the bind test passed, then another launcher took the port first: if it serves this folder, it is ours
       const holder = await probeInfo(port, 1000);
       if (holder?.root === dir) {
+        if (o.open) openBrowser(`http://127.0.0.1:${port}`); // bring it to front
         process.stdout.write(`nota-bene: already open at http://127.0.0.1:${port}\n`);
         return 0;
       }
@@ -426,6 +534,26 @@ async function main(argv) {
     if (e.output) process.stderr.write(tail(e.output));
     return 1;
   }
+  // one window per folder: wait for any launch in progress on it, then give way to a window already serving it
+  const locked = process.env.NOTA_BENE_LOCKED === '1'; // a detached child: the parent holds the lock and checked
+  const release = locked ? () => {} : await acquireLaunchLock(o.dir);
+  try {
+    if (!locked) {
+      const port = await servingWindow(o.dir);
+      if (port !== undefined) {
+        const url = `http://127.0.0.1:${port}`;
+        if (o.open) openBrowser(url); // bring it to front
+        process.stdout.write(o.detach ? `already-open ${url}\n` : `nota-bene: already open at ${url}\n`);
+        return 0;
+      }
+    }
+    return await launch(o, argv, buildOutput, release);
+  } finally {
+    release();
+  }
+}
+
+async function launch(o, argv, buildOutput, release) {
   const picked = o.port === undefined;
   // a detached launcher gets its port from the parent's pick (NOTA_BENE_AUTOPORT), so it may still retry once on a race
   const autoPort = picked || process.env.NOTA_BENE_AUTOPORT === '1';
@@ -437,7 +565,7 @@ async function main(argv) {
     }
   }
   if (o.detach) return detach(o, argv, picked, buildOutput);
-  return run(o, autoPort);
+  return run(o, autoPort, release);
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(SELF)) {

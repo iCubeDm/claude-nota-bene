@@ -1,14 +1,16 @@
 // Spawns the real launcher (bin/nota-bene.mjs) with the fake agent, a temp NOTA_BENE_HOME and ports 4791-4795.
 // Every launcher runs in its own process group; afterEach SIGKILLs the groups, so no server outlives a test.
 import { type ChildProcess, execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM, no types
-import { buildLock, ensureBuild, needsBuild, portFree } from './nota-bene.mjs';
+import { acquireLaunchLock, buildLock, candidatePorts, ensureBuild, needsBuild, portFree } from './nota-bene.mjs';
 
 const BIN = fileURLToPath(new URL('./nota-bene.mjs', import.meta.url));
 const FAKE = fileURLToPath(new URL('../server/test/fixtures/hello.json', import.meta.url));
@@ -78,6 +80,7 @@ const env = (extra: Record<string, string> = {}) => ({
   NOTA_BENE_HOME: home,
   NOTA_BENE_BUILD_CMD: 'true', // never run the real vite build from a test
   CLAUDE_CONFIG_DIR: path.join(tmp, 'claude'),
+  NOTA_BENE_PORT_RANGE: '4791-4795', // a picked port never lands on a live window's or the dev server's
   TMPDIR: tmp, // the --detach log and the build lock stay out of the real TMPDIR
   ...extra,
 });
@@ -141,6 +144,8 @@ const alive = (pid: number) => {
     return false;
   }
 };
+const launchLock = () => path.join(home, 'locks', createHash('sha1').update(project).digest('hex').slice(0, 16));
+const deadPid = () => Number(execFileSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }));
 const bin = (args: string[], extra: Record<string, string> = {}) =>
   spawnSync(process.execPath, [BIN, ...args], { env: env(extra), encoding: 'utf8', timeout: 10000 });
 
@@ -293,13 +298,113 @@ describe('nota-bene launcher', () => {
       timeout: 25000,
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe('http://127.0.0.1:4793\n');
+    expect(r.stdout).toBe('opened http://127.0.0.1:4793\n');
     const w = windows()['4793']!; // the URL comes only after the registry has the window
     expect(w.root).toBe(project);
     expect(alive(w.launcherPid!)).toBe(true);
     expect(fs.existsSync(path.join(tmp, 'nota-bene-4793.log'))).toBe(true);
     expect(await info(4793)).toMatchObject({ root: project });
   }, 15000);
+
+  it('two parallel --detach launches on one folder end with ONE window: one says opened, the other already-open', async () => {
+    const [a, b] = [launch(['--detach']), launch(['--detach'])];
+    expect(await a.exited, a.err()).toBe(0);
+    expect(await b.exited, b.err()).toBe(0);
+    const [verbA, urlA] = a.out().trim().split(' ');
+    const [verbB, urlB] = b.out().trim().split(' ');
+    expect([verbA, verbB].sort()).toEqual(['already-open', 'opened']);
+    expect(urlB).toBe(urlA);
+    const entries = Object.entries(windows()).filter(([, w]) => w.root === project);
+    expect(entries).toHaveLength(1);
+    expect(urlA).toBe(`http://127.0.0.1:${entries[0]![0]}`);
+    const roots = [];
+    for (let p = 4791; p <= 4795; p++) roots.push((await info(p))?.root);
+    expect(roots.filter((r) => r === project)).toHaveLength(1);
+    expect(fs.existsSync(launchLock())).toBe(false); // released once the window was registered
+  }, 30000);
+
+  it('a launch while a window serves the folder says "already open" with its URL and exits 0', async () => {
+    launch(['--port', '4794']);
+    await waitFor(() => windows()['4794']);
+    const r = launch([]);
+    expect(await r.exited, r.err()).toBe(0);
+    expect(r.out()).toBe('nota-bene: already open at http://127.0.0.1:4794\n');
+    const d = launch(['--detach']);
+    expect(await d.exited, d.err()).toBe(0);
+    expect(d.out()).toBe('already-open http://127.0.0.1:4794\n');
+    expect(Object.keys(windows())).toEqual(['4794']);
+  }, 20000);
+
+  it('a window missing from the registry (a failed registry write, a prototype window) is found by /info', async () => {
+    const s = http.createServer((_, res) => res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: project })));
+    await new Promise<void>((r) => s.listen(4793, '127.0.0.1', () => r()));
+    try {
+      const d = launch(['--detach']);
+      expect(await d.exited, d.err()).toBe(0);
+      expect(d.out()).toBe('already-open http://127.0.0.1:4793\n');
+      expect(windows()).toEqual({});
+    } finally {
+      s.closeAllConnections();
+      await new Promise((r) => s.close(r));
+    }
+  }, 15000);
+
+  it.each([
+    ['its owner is dead', (lock: string) => fs.writeFileSync(path.join(lock, 'pid'), String(deadPid()))],
+    ['it is older than 60 s', (lock: string) => {
+      fs.writeFileSync(path.join(lock, 'pid'), String(process.pid)); // alive, but stuck
+      const old = (Date.now() - 61_000) / 1000;
+      fs.utimesSync(path.join(lock, 'pid'), old, old);
+      fs.utimesSync(lock, old, old);
+    }],
+  ])('a stale launch lock (%s) is broken', async (_, make) => {
+    fs.mkdirSync(launchLock(), { recursive: true });
+    make(launchLock());
+    const t0 = Date.now();
+    const r = launch(['--detach']);
+    expect(await r.exited, r.err()).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(10_000); // not the 30 s wait-then-go-unguarded
+    expect(r.out()).toMatch(/^opened http:\/\/127\.0\.0\.1:\d+\n$/);
+    expect(fs.existsSync(launchLock())).toBe(false);
+  }, 20000);
+
+  it.each(['', 'garbage'])('a fresh lock with a pid file of %j is held, not taken for dead', async (content) => {
+    fs.mkdirSync(launchLock(), { recursive: true });
+    fs.writeFileSync(path.join(launchLock(), 'pid'), content);
+    const saved = process.env.NOTA_BENE_HOME;
+    process.env.NOTA_BENE_HOME = home;
+    try {
+      const t0 = Date.now();
+      const release = await acquireLaunchLock(project, 300);
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(300); // waited, then went on unguarded
+      release();
+      expect(fs.readFileSync(path.join(launchLock(), 'pid'), 'utf8')).toBe(content); // not ours: untouched
+    } finally {
+      if (saved === undefined) delete process.env.NOTA_BENE_HOME;
+      else process.env.NOTA_BENE_HOME = saved;
+    }
+  });
+
+  it('a --detach timeout kills the detached launcher and its server, then releases the lock', async () => {
+    const r = launch(['--detach'], { NOTA_BENE_DETACH_WAIT_MS: '1' });
+    expect(await r.exited).toBe(1);
+    expect(r.err()).toMatch(/the server did not come up in 0\.001s/);
+    expect(fs.existsSync(launchLock())).toBe(false);
+    await new Promise((res) => setTimeout(res, 500));
+    const ps = execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+    expect(ps.split('\n').filter((l) => l.includes(project))).toEqual([]);
+    for (let p = 4791; p <= 4795; p++) expect((await info(p))?.root).not.toBe(project);
+  }, 15000);
+
+  it('a picked port avoids the dev port 4780 and the smoke/test ports 4790-4795, unless the range is set', () => {
+    const ports: number[] = candidatePorts({});
+    expect(ports[0]).toBe(4777);
+    expect(ports.at(-1)).toBe(4799);
+    for (const p of [4780, 4790, 4791, 4792, 4793, 4794, 4795]) expect(ports).not.toContain(p);
+    expect(ports).toContain(4781);
+    expect(ports).toContain(4796);
+    expect(candidatePorts({ NOTA_BENE_PORT_RANGE: '4791-4795' })).toEqual([4791, 4792, 4793, 4794, 4795]);
+  });
 
   it('refuses $HOME and / with the prototype message', () => {
     for (const dir of [tmp, '/']) {
