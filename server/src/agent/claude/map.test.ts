@@ -179,9 +179,12 @@ describe('mapSdk: commands, compaction, reset, mode', () => {
     expect(map({ type: 'system', subtype: 'status', status: null, compact_result: 'failed', compact_error: 'too big' })).toEqual([{ t: 'compact-failed', error: 'too big' }]);
     expect(map({ type: 'system', subtype: 'status', status: null, compact_result: 'failed' })).toEqual([{ t: 'compact-failed' }]);
   });
-  it('status null after a successful compaction -> nothing (the boundary follows)', () => {
-    expect(map({ type: 'system', subtype: 'status', status: null, compact_result: 'success' })).toEqual([]);
-    expect(map({ type: 'system', subtype: 'status', status: null })).toEqual([]);
+  it('a bare status null (success or none) -> compact-end; the boundary may follow', () => {
+    expect(map({ type: 'system', subtype: 'status', status: null, compact_result: 'success' })).toEqual([{ t: 'compact-end' }]);
+    expect(map({ type: 'system', subtype: 'status', status: null })).toEqual([{ t: 'compact-end' }]);
+  });
+  it('other status values -> nothing', () => {
+    expect(map({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([]);
   });
   it('status carrying permissionMode -> mode; an unknown mode is ignored', () => {
     expect(map({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan' })).toEqual([{ t: 'mode', mode: 'plan' }]);

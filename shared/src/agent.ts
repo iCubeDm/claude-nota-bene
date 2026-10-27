@@ -14,6 +14,7 @@ export type AgentEvent =
   | { t: 'turn-end'; stop: StopReason; secs: number; error?: string; answers: string[] | 'all' | 'none'; queued: number }
   | { t: 'cancelled'; sendId: string }
   | { t: 'compacting' } | { t: 'compact-failed'; error?: string } | { t: 'compacted'; preTokens: number; ms?: number }
+  | { t: 'compact-end' }                                     // a compaction ended with no boundary and no failure (hook-blocked, early start, retry)
   | { t: 'reset'; newId?: string }                           // /clear: a new conversation
   | { t: 'init'; sessionId?: string; model?: string; mode?: Mode }    // server-internal: never sent to clients
   | { t: 'mode'; mode: Mode }                                // ACP current_mode_update

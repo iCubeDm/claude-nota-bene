@@ -84,8 +84,9 @@ function system(m: Frame): AgentEvent[] {
       const out: AgentEvent[] = [];
       if (isMode(m.permissionMode)) out.push({ t: 'mode', mode: m.permissionMode });
       if (m.status === 'compacting') out.push({ t: 'compacting' });
-      // a successful compaction ends with the boundary frame, not with this one
-      else if (m.status === null && m.compact_result === 'failed') out.push({ t: 'compact-failed', ...(m.compact_error ? { error: m.compact_error } : {}) });
+            else if (m.status === null && m.compact_result === 'failed') out.push({ t: 'compact-failed', ...(m.compact_error ? { error: m.compact_error } : {}) });
+      // a bare null (no mode report) may end a compaction that has no boundary: hook-blocked, early start, retry
+      else if (m.status === null && m.permissionMode === undefined) out.push({ t: 'compact-end' });
       return out;
     }
     case 'compact_boundary':
