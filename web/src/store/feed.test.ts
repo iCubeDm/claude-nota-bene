@@ -258,6 +258,10 @@ test('compacted adds a compacted line, live or replayed', () => {
 
 const compacting = (ts = 1) => agent({ t: 'compacting' }, ts);
 
+test('the CLI repeats compacting while it compacts (every 30 s, and per phase): the elapsed time keeps its start', () => {
+  expect(fold([compacting(20), compacting(30_020), compacting(60_020)]).compacting).toBe(20);
+});
+
 test('a compaction shows while it runs: compacting to compact-end, then compacted with its duration', () => {
   const running = fold([compacting(20)]);
   expect(running.compacting).toBe(20);

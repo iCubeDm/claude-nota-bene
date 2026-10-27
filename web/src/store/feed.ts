@@ -72,8 +72,8 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
     case 'reset': // live only (never stored): the server's replay [] came first, this adds the line
       return { ...emptyFeed, session: s.session, turnSeq: s.turnSeq, items: [{ kind: 'marker', what: 'cleared', ts }] };
     // a compaction: compacting, then its end (compact-failed, compact-end), then (on success) compacted
-    case 'compacting':
-      return { ...s, compacting: ts };
+    case 'compacting': // the CLI repeats it as a keepalive (every 30 s) and at each phase: the compaction started at the first one
+      return s.compacting === null ? { ...s, compacting: ts } : s;
     case 'compact-end':
       return s.compacting === null ? s : { ...s, compacting: null };
     case 'compact-failed': {
