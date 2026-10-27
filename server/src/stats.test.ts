@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, ServerEvent, Stats } from '@nota-bene/shared';
 import type { AgentSession } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { StatsService, UsageUnavailableError, mapContextUsage, mapUsage, resetStatsReports } from './stats.ts';
@@ -21,7 +20,7 @@ function make(s: AgentSession | null) {
   return { svc, emitted, errors };
 }
 
-const msg = (m: Record<string, unknown>) => m as unknown as SDKMessage;
+const rate = (info: Record<string, unknown>): AgentEvent => ({ t: 'rate-limit', info });
 
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000); resetStatsReports(); });
 afterEach(() => vi.useRealTimers());
@@ -71,29 +70,31 @@ describe('StatsService', () => {
     expect(emitted).toHaveLength(1);
   });
 
-  it('merges a rate_limit_event: utilization 0.42 gives 42, a percent stays, other types are ignored', () => {
+  it('merges a rate-limit event: utilization 0.42 gives 42, a percent stays, other types are ignored', () => {
     const { svc, emitted } = make(stub().session);
-    svc.onSdk(msg({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'five_hour', utilization: 0.42, resetsAt: 1_800_000_000 } }));
+    svc.onAgent(rate({ rateLimitType: 'five_hour', utilization: 0.42, resetsAt: 1_800_000_000 }));
     expect(svc.current().limits).toEqual({ five_hour: { utilization: 42, resets_at: new Date(1_800_000_000_000).toISOString() }, seven_day: null });
-    svc.onSdk(msg({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day', utilization: 61 } }));
+    svc.onAgent(rate({ rateLimitType: 'seven_day', utilization: 61 }));
     expect(svc.current().limits?.seven_day).toEqual({ utilization: 61, resets_at: null });
-    svc.onSdk(msg({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day_opus', utilization: 5 } }));
-    svc.onSdk(msg({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'five_hour' } }));
+    svc.onAgent(rate({ rateLimitType: 'seven_day_opus', utilization: 5 }));
+    svc.onAgent(rate({ rateLimitType: 'five_hour' }));
     expect(emitted).toHaveLength(2);
   });
 
-  it('refreshes after result, conversation_reset and compact_boundary, and ignores other messages', async () => {
+  it('refreshes after turn-end, reset and compacted, and ignores other events', async () => {
     const { session, contextUsage } = stub();
     const { svc } = make(session);
-    svc.onSdk(msg({ type: 'stream_event' }));
-    svc.onSdk(msg({ type: 'system', subtype: 'init' }));
+    for (const e of [{ t: 'message-chunk', text: 'x' }, { t: 'init' }, { t: 'compacting' }, { t: 'compact-end' }] as AgentEvent[]) svc.onAgent(e);
     await svc.refresh(); // settle
     expect(contextUsage).toHaveBeenCalledTimes(1);
-    for (const m of [{ type: 'result' }, { type: 'system', subtype: 'conversation_reset' }, { type: 'conversation_reset' }, { type: 'system', subtype: 'compact_boundary' }]) {
-      svc.onSdk(msg(m));
+    const refreshing: AgentEvent[] = [
+      { t: 'turn-end', stop: 'done', secs: 0, answers: 'none', queued: 0 }, { t: 'reset' }, { t: 'compacted', preTokens: 1 },
+    ];
+    for (const e of refreshing) {
+      svc.onAgent(e);
       await svc.refresh();
     }
-    expect(contextUsage.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(contextUsage).toHaveBeenCalledTimes(1 + 2 * refreshing.length); // each event's own pass, then the explicit one
   });
 
   it('a throwing usage API keeps the context and reports once', async () => {

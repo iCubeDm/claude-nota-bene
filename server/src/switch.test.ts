@@ -77,7 +77,7 @@ async function until(cond: () => boolean, ms = 3000): Promise<void> {
 }
 
 const get = (url: string, p: string) => fetch(url + p);
-const isResult = (e: ServerEvent) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result';
+const isResult = (e: ServerEvent) => e.kind === 'agent' && e.e.t === 'turn-end';
 const lastOf = <K extends ServerEvent['kind']>(c: Client, kind: K) =>
   c.events.filter((e): e is Extract<ServerEvent, { kind: K }> => e.kind === kind).at(-1);
 const errors = (c: Client) => c.events.filter((e): e is Extract<ServerEvent, { kind: 'server-error' }> => e.kind === 'server-error');
@@ -139,7 +139,7 @@ describe('switch', () => {
     expect(after.map((e) => e.kind)).toEqual(['replay', 'replay', 'resumed', 'session', 'mode', 'idle-compact', 'stats', 'comments']);
     expect(after[0]).toEqual({ kind: 'replay', events: [] });
     const replay = after[1] as Extract<ServerEvent, { kind: 'replay' }>;
-    expect(replay.events.map((e) => (e.kind === 'user' ? e.text : e.kind))).toEqual(['b-before', 'sdk']);
+    expect(replay.events.map((e) => (e.kind === 'user' ? e.text : e.kind === 'agent' ? e.e.t : e.kind))).toEqual(['b-before', 'message']);
     expect(after[2]).toEqual({ kind: 'resumed', id: SB });
     expect(after[3]).toEqual({ kind: 'session', id: SB, root: B, title: 'B work', model: null });
     expect(errors(c)).toEqual([]);
@@ -188,7 +188,7 @@ describe('switch', () => {
     const s = await boot({ backend: backendFor([{ text: 'x'.repeat(100), chunk: 1, delayMs: 10 }]) });
     const c = await connect(s.url);
     c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'long' }));
-    await until(() => c.events.some((e) => e.kind === 'sdk'));
+    await until(() => c.events.some((e) => e.kind === 'agent'));
     c.ws.send(JSON.stringify({ type: 'switch', id: SB, dir: B }));
     await until(() => errors(c).length > 0);
     expect(errors(c)[0]).toMatchObject({ where: 'switch' });

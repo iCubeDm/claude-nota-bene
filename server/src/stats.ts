@@ -1,5 +1,4 @@
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Limit, Stats } from '@nota-bene/shared';
+import type { AgentEvent, Limit, Stats } from '@nota-bene/shared';
 import type { AgentSession } from './agent/types.ts';
 
 const CONTEXT_TIMEOUT_MS = 10_000;
@@ -65,7 +64,8 @@ export function resetStatsReports(): void {
 
 const EMPTY: Stats = { context: null, limits: null, cost: null };
 
-type Msg = { type?: string; subtype?: string; rate_limit_info?: { rateLimitType?: string; utilization?: number; resetsAt?: number } };
+/** The SDK's rate_limit_info, as far as it is read (the `rate-limit` event carries it unread). */
+type RateLimitInfo = { rateLimitType?: string; utilization?: number; resetsAt?: number };
 
 type StatsOptions = {
   session: () => AgentSession | null; emit: (s: Stats) => void; onError?: (e: unknown) => void; now?: () => number;
@@ -122,16 +122,10 @@ export class StatsService {
     return run;
   }
 
-  /** Cheap: called for every sdk message, so it looks at `type` first and does nothing for the common ones. */
-  onSdk(m: SDKMessage): void {
-    const { type, subtype, rate_limit_info: info } = m as Msg;
-    if (type === 'result' || type === 'conversation_reset') { // the SDK's reset frame has a top-level type
-      void this.refresh();
-    } else if (type === 'system') {
-      if (subtype === 'conversation_reset' || subtype === 'compact_boundary') void this.refresh();
-    } else if (type === 'rate_limit_event' && info) {
-      this.mergeRateLimit(info);
-    }
+  /** Cheap: called for every agent event, so it looks at `t` first and does nothing for the common ones. */
+  onAgent(e: AgentEvent): void {
+    if (e.t === 'turn-end' || e.t === 'reset' || e.t === 'compacted') void this.refresh();
+    else if (e.t === 'rate-limit' && e.info) this.mergeRateLimit(e.info as RateLimitInfo);
   }
 
   start(): void {
@@ -189,7 +183,7 @@ export class StatsService {
     this.publish(next);
   }
 
-  private mergeRateLimit(info: NonNullable<Msg['rate_limit_info']>): void {
+  private mergeRateLimit(info: RateLimitInfo): void {
     const { rateLimitType: kind, utilization: u, resetsAt } = info;
     if ((kind !== 'five_hour' && kind !== 'seven_day') || u == null) return;
     const limit: Limit = { utilization: u <= 1 ? u * 100 : u, resets_at: resetsAt ? new Date(resetsAt * 1000).toISOString() : null };

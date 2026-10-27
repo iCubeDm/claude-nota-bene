@@ -1,12 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { MODES } from '@nota-bene/shared';
-import type { IdleCompact, ImageRef, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, IdleCompact, ImageRef, Mode, ServerEvent, Stats } from '@nota-bene/shared';
 import { AttachmentStore } from './attachments.ts';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './agent/types.ts';
-import { stripUserFrameImages } from './agent/claude/transcript.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { IdleCompactor, idleConfig, offInClaudeSettings, type IdleConfig } from './idle.ts';
@@ -82,12 +79,7 @@ export type SessionManager = {
   onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
 
-type Msg = {
-  type?: string; subtype?: string; session_id?: string; permissionMode?: unknown; model?: unknown;
-  is_error?: unknown; user_message_uuid?: unknown; user_message_uuids?: unknown; state?: unknown; command_uuid?: unknown;
-};
-
-const isReset = (f: Msg) => f.type === 'conversation_reset' || (f.type === 'system' && f.subtype === 'conversation_reset');
+type TurnEnd = Extract<AgentEvent, { t: 'turn-end' }>;
 
 const SESSION_ID = /^[0-9a-f-]{36}$/i;
 const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after close() must not hold the switch
@@ -198,46 +190,9 @@ export async function createSessionManager(o: {
   async function pump(a: AgentSession, g: number): Promise<void> {
     const current = () => g === gen && agent === a;
     try {
-      for await (const m of a.messages) {
+      for await (const e of a.messages) {
         if (!current()) return;
-        const f = m as Msg;
-        if (f.type === 'result') settle(f);
-        else if (f.type === 'command_lifecycle' && f.state === 'cancelled' && typeof f.command_uuid === 'string') waiting.delete(f.command_uuid);
-        if (isReset(f)) {
-          onReset(m, f);
-          continue;
-        }
-        hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) }, f.type === 'result' && clearResultDue ? { store: false } : {});
-        if (f.type === 'result') clearResultDue = false;
-        stats.onSdk(m);
-        const { type, subtype, session_id, permissionMode } = f;
-        // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
-        if (type === 'system' && (subtype === 'init' || subtype === 'status') && (MODES as readonly unknown[]).includes(permissionMode)) {
-          adoptMode(permissionMode as Mode);
-        }
-        // the CLI sends init at the start of every turn: act only when something is new
-        if (type === 'system' && subtype === 'init') {
-          if (session_id) {
-            forkPending = false;
-            sessionId = session_id;
-            if (saved !== session_id) { saved = session_id; saveSession(root, session_id); }
-          }
-          if (typeof f.model === 'string' && f.model) model = f.model;
-          emitSession();
-          if (session_id) heardId(session_id);
-        }
-        // any compaction (manual, auto, idle) disarms; the turn that compacted (a /compact's own result too) does not
-        // arm again: the next one waits for a turn after it
-        if (type === 'system' && subtype === 'compact_boundary') { compactedInTurn = true; idle.disarm(); }
-        if (type === 'result') {
-          scheduleTitle();
-          // a command's result (a /compact that failed or was stopped, a /clear) never arms: a failed idle compaction
-          // would otherwise retry every idle stretch, keeping its own cache warm forever
-          const ids = Array.isArray(f.user_message_uuids) ? f.user_message_uuids : typeof f.user_message_uuid === 'string' ? [f.user_message_uuid] : [];
-          const ofCommand = ids.some((x) => commandIds.delete(x as string));
-          if (!compactedInTurn && !ofCommand) idle.turnEnded();
-          compactedInTurn = false;
-        }
+        onAgent(e);
       }
       if (current()) died(a, new Error('agent session ended'));
     } catch (e) {
@@ -245,13 +200,70 @@ export async function createSessionManager(o: {
     }
   }
 
+  /** One event of the current agent. Every kind but `init` and `rate-limit` (server-internal) reaches the clients. */
+  function onAgent(e: AgentEvent): void {
+    switch (e.t) {
+      case 'init':
+        // the CLI sends init at the start of every turn: act only when something is new
+        if (e.mode) adoptMode(e.mode);
+        if (e.sessionId) {
+          forkPending = false;
+          sessionId = e.sessionId;
+          if (saved !== e.sessionId) { saved = e.sessionId; saveSession(root, e.sessionId); }
+        }
+        if (e.model) model = e.model;
+        emitSession();
+        if (e.sessionId) heardId(e.sessionId);
+        return;
+      case 'rate-limit':
+        stats.onAgent(e);
+        return;
+      case 'reset':
+        onReset(e);
+        return;
+      case 'turn-end':
+        onTurnEnd(e);
+        return;
+      case 'cancelled':
+        waiting.delete(e.sendId); // a cancelled queued send never gets a result of its own
+        break;
+      case 'compacted':
+        // any compaction (manual, auto, idle) disarms; the turn that compacted (a /compact's own result too) does not
+        // arm again: the next one waits for a turn after it
+        compactedInTurn = true;
+        idle.disarm();
+        break;
+      // `compact-end` (a compaction that ended with no boundary) neither arms nor disarms: the turn's end decides
+      default:
+        break;
+    }
+    hub.emit({ kind: 'agent', e });
+    stats.onAgent(e);
+    // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
+    if (e.t === 'mode') adoptMode(e.mode);
+  }
+
+  function onTurnEnd(e: TurnEnd): void {
+    settle(e.answers);
+    // the result that follows a /clear's reset is live only (see clearSent)
+    hub.emit({ kind: 'agent', e }, clearResultDue ? { store: false } : {});
+    clearResultDue = false;
+    stats.onAgent(e);
+    scheduleTitle();
+    // a command's result (a /compact that failed or was stopped, a /clear) never arms: a failed idle compaction
+    // would otherwise retry every idle stretch, keeping its own cache warm forever
+    const ofCommand = Array.isArray(e.answers) && e.answers.some((x) => commandIds.delete(x));
+    if (!compactedInTurn && !ofCommand) idle.turnEnded();
+    compactedInTurn = false;
+  }
+
   /**
    * /clear (or the CLI leaving plan mode with a cleared context): a new conversation under a new id. The feed is
    * emptied (a reload must not bring the old turns back), the new id becomes the current and the resume target, and
    * the id listeners hear it with the old id as `prev`, so the server sends that id's own (empty) comments and
-   * never adopts the unsent set. The reset frame itself is live only: the web renders its line from it.
+   * never adopts the unsent set. The reset event itself is live only: the web renders its line from it.
    */
-  function onReset(m: SDKMessage, f: Msg & { new_conversation_id?: unknown }): void {
+  function onReset(e: Extract<AgentEvent, { t: 'reset' }>): void {
     waiting.clear(); // the CLI's result for a /clear follows the reset; waiting must not depend on it
     clearResultDue = clearSent;
     clearSent = false;
@@ -259,25 +271,24 @@ export async function createSessionManager(o: {
     lastSession = '';
     title = null;
     titleAt = -Infinity;
-    const next = typeof f.new_conversation_id === 'string' && SESSION_ID.test(f.new_conversation_id) ? f.new_conversation_id : null;
+    // the mapper passes any non-empty string; only a session id is adopted
+    const next = e.newId && SESSION_ID.test(e.newId) ? e.newId : null;
     if (next) {
       forkPending = false;
       sessionId = next;
       saved = next;
-      try { saveSession(root, next); } catch (e) { reportError(hub, 'session', e); }
+      try { saveSession(root, next); } catch (err) { reportError(hub, 'session', err); }
     }
-    hub.emit({ kind: 'sdk', m: stripUserFrameImages(m) }, { store: false });
+    hub.emit({ kind: 'agent', e }, { store: false });
     emitSession();
-    stats.onSdk(m);
+    stats.onAgent(e);
     if (next) heardId(next);
   }
 
-  /** Mirrors the web reducer: a result answers the sends it names; one naming none answers all if it is an error. */
-  function settle(m: Msg): void {
-    const answered = Array.isArray(m.user_message_uuids) ? (m.user_message_uuids as unknown[])
-      : typeof m.user_message_uuid === 'string' ? [m.user_message_uuid] : null;
-    if (answered) for (const id of answered) waiting.delete(id as string);
-    else if (m.is_error === true) waiting.clear();
+  /** Mirrors the web reducer: a turn-end answers the sends it names; `all` (an error naming none) answers every one. */
+  function settle(answers: TurnEnd['answers']): void {
+    if (answers === 'all') waiting.clear();
+    else if (answers !== 'none') for (const id of answers) waiting.delete(id);
   }
 
   function adoptMode(next: Mode): void {
@@ -354,16 +365,13 @@ export async function createSessionManager(o: {
     emitErrorResult(e);
   }
 
-  // shaped like SDKResultError: the text goes in errors[]; no aborted terminal_reason, so it shows as an error.
-  // With `answers` it names the send it stands in for (user_message_uuid(s)); without, it answers every waiting send.
+  // a failed turn-end, as the mapper makes of an SDKResultError. With `answers` it names the send it stands in for;
+  // without, it answers every waiting send.
   function emitErrorResult(e: unknown, answers?: string): void {
     const message = e instanceof Error ? e.message : String(e);
-    const m = {
-      type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: [message],
-      ...(answers ? { user_message_uuid: answers, user_message_uuids: [answers] } : {}),
-    };
-    settle(m);
-    hub.emit({ kind: 'sdk', m: m as unknown as SDKMessage });
+    const ev: TurnEnd = { t: 'turn-end', stop: 'failed', secs: 0, ...(message ? { error: message } : {}), answers: answers ? [answers] : 'all', queued: 0 };
+    settle(ev.answers);
+    hub.emit({ kind: 'agent', e: ev });
   }
 
   function ensureAgent(): AgentSession {

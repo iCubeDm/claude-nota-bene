@@ -49,7 +49,7 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
   }
 }
 
-const isResult = (e: ServerEvent) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result';
+const isResult = (e: ServerEvent) => e.kind === 'agent' && e.e.t === 'turn-end';
 
 describe('server', () => {
   it('chat round-trip over ws', async () => {

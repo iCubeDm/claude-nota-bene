@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
 import { AttachmentStore } from '../../attachments.ts';
-import { stripUserFrameImages, transcriptToEvents } from './transcript.ts';
+import { transcriptToEvents } from './transcript.ts';
 
 const dirs: string[] = [];
 const tmpDir = () => {
@@ -22,13 +22,13 @@ const msgs = JSON.parse(
 ) as SessionMessage[];
 
 describe('transcriptToEvents', () => {
-  it('maps assistant messages to sdk events', () => {
-    const sdk = transcriptToEvents(msgs, store()).filter((e) => e.kind === 'sdk' && e.m.type === 'assistant');
-    expect(sdk).toHaveLength(2);
-    expect(sdk[0]).toMatchObject({
-      kind: 'sdk', ts: 0,
-      m: { type: 'assistant', uuid: 'a1', parent_tool_use_id: null, message: msgs[1]!.message },
-    });
+  it('maps assistant messages to message and tool-call events, ids as the live mapper makes them', () => {
+    const agent = transcriptToEvents(msgs, store()).filter((e) => e.kind === 'agent' && (e.e.t === 'message' || e.e.t === 'tool-call'));
+    expect(agent).toEqual([
+      { kind: 'agent', ts: 0, e: { t: 'message', id: 'a1:0', text: 'Reading it.' } },
+      { kind: 'agent', ts: 0, e: { t: 'tool-call', id: 'tool-1', name: 'Read', input: { file_path: 'notes.md' }, sub: false } },
+      { kind: 'agent', ts: 0, e: { t: 'message', id: 'a2:0', text: 'The file says hello.' } },
+    ]);
   });
 
   it('tool_result user turns are never bubbles', () => {
@@ -38,12 +38,9 @@ describe('transcriptToEvents', () => {
 
   it('transcript replay attaches tool results', () => {
     const events = transcriptToEvents(msgs, store());
-    const sdk = events.filter((e) => e.kind === 'sdk');
-    expect(sdk).toHaveLength(3);
-    expect(sdk[1]).toMatchObject({
-      kind: 'sdk', ts: 0,
-      m: { type: 'user', uuid: 'u2', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'hello' }] } },
-    });
+    expect(events.filter((e) => e.kind === 'agent' && e.e.t === 'tool-update')).toEqual([
+      { kind: 'agent', ts: 0, e: { t: 'tool-update', id: 'tool-1', text: 'hello', isError: false } },
+    ]);
   });
 
   it('replay strips base64 from tool_result images', () => {
@@ -53,13 +50,14 @@ describe('transcriptToEvents', () => {
       message: { content: [{ type: 'tool_result', tool_use_id: 't', content: [{ type: 'text', text: 'k' }, big] }] },
     }] as unknown as SessionMessage[];
     const [ev] = transcriptToEvents(m, store());
-    expect(ev).toMatchObject({ m: { message: { content: [{ content: [{ type: 'text', text: 'k' }, { type: 'image' }] }] } } });
+    expect(ev).toEqual({ kind: 'agent', ts: 0, e: { t: 'tool-update', id: 't', text: 'k\n[image]', isError: false } });
     expect(JSON.stringify(ev)).not.toContain('AAAA');
   });
 
   it('user text becomes historic user events in order', () => {
     const events = transcriptToEvents(msgs, store());
-    expect(events.map((e) => (e.kind === 'user' ? e.id : e.kind))).toEqual(['u1', 'sdk', 'sdk', 'sdk', 'u3']);
+    expect(events.map((e) => (e.kind === 'user' ? e.id : e.kind === 'agent' ? e.e.t : e.kind)))
+      .toEqual(['u1', 'message', 'tool-call', 'tool-update', 'message', 'u3']);
     expect(events.filter((e) => e.kind === 'user')).toEqual([
       { kind: 'user', id: 'u1', text: 'Read notes.md', historic: true, ts: 0 },
       { kind: 'user', id: 'u3', text: 'Thanks', historic: true, ts: 0 },
@@ -108,14 +106,5 @@ describe('transcriptToEvents', () => {
     expect(evs.map((e) => (e.kind === 'user' ? e.text : ''))).toEqual(['one', 'two']);
     expect(evs.every((e) => e.kind === 'user' && e.images === undefined)).toBe(true);
     expect(errors).toHaveLength(1);
-  });
-});
-
-describe('stripUserFrameImages', () => {
-  it('reduces a bare user image block to {type:image}', () => {
-    const f = { type: 'user', message: { content: [{ type: 'text', text: 't' }, { type: 'image', source: { type: 'base64', data: 'AAAA' } }] } };
-    const out = stripUserFrameImages(f);
-    expect(out.message.content).toEqual([{ type: 'text', text: 't' }, { type: 'image' }]);
-    expect(JSON.stringify(out)).not.toContain('AAAA');
   });
 });

@@ -1,4 +1,4 @@
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentEvent } from './agent.ts';
 
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
 export type AnchorSource = { kind: 'message'; id: string } | { kind: 'file'; path: string; ref?: string };
@@ -55,9 +55,10 @@ export type Comment = {
 /**
  * What this server understands beyond the base protocol, announced in `hello` on connect. Every window serves the one
  * shared `web/dist`, so a reloaded page can be newer than its server (until "Restart the server"): the page sends a newer
- * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label; 4: media anchors and `/marks`.
+ * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label; 4: media anchors and `/marks`;
+ * 5: the agent's output as `agent` events (AgentEvent) instead of raw SDK frames.
  */
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 
 export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type Mode = (typeof MODES)[number];
@@ -98,7 +99,13 @@ export type ServerEvent =
   /** right after the replay on every connection (servers before it send none: protocol 0) */
   | { kind: 'hello'; protocol: number }
   | { kind: 'replay'; events: ServerEvent[] }
-  | { kind: 'sdk'; m: SDKMessage; ts: number }
+  /** what the agent said (R-M7-14); `init` and `rate-limit` are server-internal and never sent */
+  | { kind: 'agent'; e: AgentEvent; ts: number }
+  /**
+   * @deprecated Protocol 4 and older: a raw SDK frame. No server sends it any more; it stays only until the web reads
+   * `agent` events (M7-08), so that the web reducers still compile.
+   */
+  | { kind: 'sdk'; m: unknown; ts: number }
   /** `idle`: a `/compact` the server sent itself after the session sat idle */
   | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; historic?: boolean; images?: ImageRef[]; idle?: boolean }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; ts: number }

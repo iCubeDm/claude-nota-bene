@@ -58,8 +58,8 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
   }
 }
 
-const sdkType = (e: ServerEvent) => (e.kind === 'sdk' ? (e.m as { type: string; subtype?: string }) : null);
-const results = (cl: Client) => cl.events.filter((e) => sdkType(e)?.type === 'result');
+const agentEv = (e: ServerEvent) => (e.kind === 'agent' ? e.e : null);
+const results = (cl: Client) => cl.events.filter((e) => agentEv(e)?.t === 'turn-end');
 const replays = (cl: Client) => cl.events.filter((e) => e.kind === 'replay');
 const lastComments = (cl: Client) => {
   const all = cl.events.filter((e) => e.kind === 'comments');
@@ -76,13 +76,13 @@ describe('compact and clear', () => {
     a.send({ type: 'command', name: 'compact' });
     await until(() => results(a).length === 1);
     expect(a.events.find((e) => e.kind === 'user')).toMatchObject({ text: '/compact' });
-    const b = a.events.map(sdkType).find((m) => m?.subtype === 'compact_boundary') as unknown as { compact_metadata: { pre_tokens: number } };
-    expect(b.compact_metadata.pre_tokens).toBe(12000);
+    const b = a.events.map(agentEv).find((e) => e?.t === 'compacted');
+    expect(b).toMatchObject({ t: 'compacted', preTokens: 12000 });
     // the boundary is stored: a reconnecting client sees it
     const late = await connect(s.url);
     await until(() => replays(late).length === 1);
     const r = replays(late)[0]!;
-    expect(r.kind === 'replay' && r.events.some((e) => sdkType(e)?.subtype === 'compact_boundary')).toBe(true);
+    expect(r.kind === 'replay' && r.events.some((e) => agentEv(e)?.t === 'compacted')).toBe(true);
   });
 
   it('pre_tokens is scriptable', async () => {
@@ -90,8 +90,7 @@ describe('compact and clear', () => {
     const a = await connect(s.url);
     a.send({ type: 'command', name: 'compact' });
     await until(() => results(a).length === 1);
-    const b = a.events.map(sdkType).find((m) => m?.subtype === 'compact_boundary') as unknown as { compact_metadata: { pre_tokens: number } };
-    expect(b.compact_metadata.pre_tokens).toBe(54321);
+    expect(a.events.map(agentEv).find((e) => e?.t === 'compacted')).toMatchObject({ preTokens: 54321 });
   });
 
   it('/clear: a reconnecting socket has no old turns, the session id is new, saved, and comments start empty', async () => {
@@ -125,7 +124,7 @@ describe('compact and clear', () => {
     const late = await connect(s.url);
     await until(() => replays(late).length === 1);
     const r = replays(late)[0]!;
-    expect(r.kind === 'replay' && r.events.filter((e) => e.kind === 'user' || sdkType(e)?.type === 'assistant')).toEqual([]);
+    expect(r.kind === 'replay' && r.events.filter((e) => e.kind === 'user' || agentEv(e)?.t === 'message')).toEqual([]);
     await until(() => lastComments(late) !== undefined);
     expect(lastComments(late)).toEqual([]);
 
@@ -140,7 +139,7 @@ describe('compact and clear', () => {
     const s = await boot([{ text: 'x'.repeat(80), chunk: 1, delayMs: 10 }]);
     const a = await connect(s.url);
     a.send({ type: 'send', id: 'u1', text: 'hi' });
-    await until(() => a.events.some((e) => e.kind === 'sdk'));
+    await until(() => a.events.some((e) => e.kind === 'agent'));
     a.send({ type: 'command', name: 'clear' });
     a.send({ type: 'command', name: 'compact' });
     await until(() => errors(a).length === 2);
@@ -185,7 +184,7 @@ describe('idle compaction', () => {
     await until(() => idleUsers(a).length === 1);
     expect(idleUsers(a)[0]).toMatchObject({ text: '/compact', idle: true });
     await until(() => results(a).length === 2);
-    expect(a.events.some((e) => sdkType(e)?.subtype === 'compact_boundary')).toBe(true);
+    expect(a.events.some((e) => agentEv(e)?.t === 'compacted')).toBe(true);
     await new Promise((r) => setTimeout(r, 400));
     expect(idleUsers(a)).toHaveLength(1); // the compaction disarmed it; its own result does not count as a quiet turn
     expect(errors(a)).toEqual([]);
@@ -224,7 +223,7 @@ describe('idle compaction', () => {
     a.send({ type: 'send', id: 'u1', text: 'hi' });
     await until(() => idleUsers(a).length === 1);
     await until(() => results(a).length === 2);
-    expect(a.events.some((e) => sdkType(e)?.subtype === 'compact_boundary')).toBe(false);
+    expect(a.events.some((e) => agentEv(e)?.t === 'compacted')).toBe(false);
     await new Promise((r) => setTimeout(r, 500));
     expect(idleUsers(a)).toHaveLength(1);
   });

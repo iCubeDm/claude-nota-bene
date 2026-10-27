@@ -66,7 +66,7 @@ const lastComments = (cl: Client) => {
   const e = all[all.length - 1];
   return e && e.kind === 'comments' ? e.items : undefined;
 };
-const isResult = (e: ServerEvent) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result';
+const isResult = (e: ServerEvent) => e.kind === 'agent' && e.e.t === 'turn-end';
 
 describe('comment sync', () => {
   it('a new client receives the stored comments after the replay', async () => {

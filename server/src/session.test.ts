@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerEvent } from '@nota-bene/shared';
+import { mapFrames } from './agent/claude/map.ts';
 import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
 import type { AgentBackend, PermissionAsk } from './agent/types.ts';
@@ -37,11 +38,11 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
 
 const noSessions = { listSessions: async () => [], sessionInfo: async () => null };
 
-const sdkOf = (events: ServerEvent[], type: string) =>
-  events.filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === type);
+type Agent = Extract<ServerEvent, { kind: 'agent' }>;
+const agentOf = (events: ServerEvent[], t: Agent['e']['t']) => events.filter((e): e is Agent => e.kind === 'agent' && e.e.t === t);
 
 describe('session manager', () => {
-  it('strips base64 from tool_result images before the hub stores the user frame', async () => {
+  it('no base64 of a tool_result image reaches the hub: the tool-update carries [image]', async () => {
     const frame = (type: string, content: unknown[]) => ({ type, message: { content } });
     const img = { type: 'image', source: { type: 'base64', data: 'AAAA' } };
     const frames = [
@@ -53,18 +54,16 @@ describe('session manager', () => {
       ...noSessions,
       history: async () => [],
       start: () => ({
-        messages: (async function* () { yield* frames as never[]; await new Promise(() => {}); })(),
+        messages: mapFrames((async function* () { yield* frames as never[]; await new Promise(() => {}); })()),
         send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
       }),
     };
     const { events, make } = setup(backend);
     await make();
-    await until(() => sdkOf(events, 'result').length === 1);
-    expect(sdkOf(events, 'user')[0]).toMatchObject({
-      m: { message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: 'hi' }, { type: 'image' }] }] } },
-    });
-    expect(JSON.stringify(sdkOf(events, 'user'))).not.toContain('AAAA');
-    expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('AAAA'); // only tool_result images are stripped
+    await until(() => agentOf(events, 'turn-end').length === 1);
+    expect(agentOf(events, 'tool-update')).toMatchObject([{ e: { t: 'tool-update', id: 't', text: 'hi\n[image]', isError: false } }]);
+    // an assistant image block maps to no event at all (the feed never showed one)
+    expect(JSON.stringify(events)).not.toContain('AAAA');
   });
 
   it('fileSuggestions delegates to the agent and rejects once it has died', async () => {
@@ -72,14 +71,14 @@ describe('session manager', () => {
       ...noSessions,
       history: async () => [],
       start: () => ({
-        messages: (async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })(),
+        messages: mapFrames((async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })()),
         send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
       }),
     };
     const { events, make } = setup(backend);
     const s = await make();
     expect(await s.fileSuggestions('a')).toEqual(['hit-a']);
-    await until(() => sdkOf(events, 'result').length === 1); // the crash became an error result; the agent is gone
+    await until(() => agentOf(events, 'turn-end').length === 1); // the crash became an error result; the agent is gone
     await expect(s.fileSuggestions('a')).rejects.toThrow('no agent');
   });
 
@@ -87,10 +86,10 @@ describe('session manager', () => {
     const { events, make } = setup(fakeBackend([{ text: 'hello' }]));
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     const kinds = events.map((e) => e.kind);
     expect(kinds.indexOf('user')).toBeGreaterThanOrEqual(0);
-    const a = events.findIndex((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'assistant');
+    const a = events.findIndex((e) => e.kind === 'agent' && e.e.t === 'message');
     expect(kinds.indexOf('user')).toBeLessThan(a);
   });
 
@@ -114,12 +113,12 @@ describe('session manager', () => {
     const { events, make } = setup(backend);
     const s = await make();
     s.send({ id: 'u1', text: 'long' });
-    await until(() => sdkOf(events, 'stream_event').length > 2);
+    await until(() => agentOf(events, 'message-chunk').length > 2);
     s.send({ id: 'u2', text: 'now', force: true });
     await until(() => calls.length === 2);
     expect(interrupts).toBe(1);
     expect(calls.map((c) => c.priority)).toEqual(['next', 'now']);
-    await until(() => sdkOf(events, 'result').length === 2);
+    await until(() => agentOf(events, 'turn-end').length === 2);
   });
 
   it('permission round-trip', async () => {
@@ -130,10 +129,10 @@ describe('session manager', () => {
     await until(() => events.some((e) => e.kind === 'permission'));
     const p = events.find((e) => e.kind === 'permission') as Extract<ServerEvent, { kind: 'permission' }>;
     expect(p.toolName).toBe('Bash');
-    expect(sdkOf(events, 'result')).toHaveLength(0);
+    expect(agentOf(events, 'turn-end')).toHaveLength(0);
     s.answer('unknown-id', true); // no-op
     s.answer(p.id, true);
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     const done = events.find((e) => e.kind === 'permission-done');
     expect(done).toMatchObject({ kind: 'permission-done', id: p.id, allow: true });
   });
@@ -171,14 +170,12 @@ describe('session manager', () => {
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
     await until(() => events.some((e) => e.kind === 'server-error'));
-    await until(() => sdkOf(events, 'result').length === 1);
-    expect((sdkOf(events, 'result')[0] as { m: unknown }).m).toMatchObject({
-      subtype: 'error_during_execution', is_error: true, errors: ['fake backend crash'],
-    });
+    await until(() => agentOf(events, 'turn-end').length === 1);
+    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: 0, error: 'fake backend crash', answers: 'all', queued: 0 });
     s.send({ id: 'u2', text: 'again' });
-    await until(() => sdkOf(events, 'result').length === 2);
+    await until(() => agentOf(events, 'turn-end').length === 2);
     expect(resumes).toEqual([undefined, 'fake-session']);
-    expect((sdkOf(events, 'assistant').at(-1) as { m: { message: { content: { text: string }[] } } }).m.message.content[0]!.text).toBe('fine');
+    expect(agentOf(events, 'message').at(-1)!.e).toMatchObject({ text: 'fine' });
   });
 
   it('every force send interrupts first, even after an earlier force', async () => {
@@ -201,7 +198,7 @@ describe('session manager', () => {
     const s = await make();
     s.send({ id: 'u0', text: 'idle force', force: true }); // idle: must not throw
     s.send({ id: 'a', text: 'A' });
-    await until(() => sdkOf(events, 'stream_event').length > 2);
+    await until(() => agentOf(events, 'message-chunk').length > 2);
     s.send({ id: 'b', text: 'B', force: true });
     s.send({ id: 'c', text: 'C', force: true });
     await until(() => log.length >= 7);
@@ -226,9 +223,9 @@ describe('session manager', () => {
           interrupt: () => a.interrupt(),
           setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
           messages: (async function* () {
-            for await (const m of a.messages) {
-              yield m;
-              if ((m as { type: string }).type === 'result') return;
+            for await (const e of a.messages) {
+              yield e;
+              if (e.t === 'turn-end') return;
             }
           })(),
         };
@@ -238,11 +235,11 @@ describe('session manager', () => {
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
     await until(() => events.some((e) => e.kind === 'server-error'));
-    await until(() => sdkOf(events, 'result').length === 2);
+    await until(() => agentOf(events, 'turn-end').length === 2);
     s.send({ id: 'u2', text: 'again' });
-    await until(() => sdkOf(events, 'result').length === 3);
+    await until(() => agentOf(events, 'turn-end').length === 3);
     expect(resumes).toEqual([undefined, 'fake-session']);
-    expect(sdkOf(events, 'result')[1]).toMatchObject({ m: { is_error: true, errors: ['agent session ended'] } });
+    expect(agentOf(events, 'turn-end')[1]).toMatchObject({ e: { stop: 'failed', error: 'agent session ended', answers: 'all' } });
   });
 
   it('crash with a pending permission denies it and closes the agent', async () => {
@@ -251,12 +248,12 @@ describe('session manager', () => {
       ...noSessions,
       history: async () => [],
       start: (o) => ({
-        messages: (async function* () {
+        messages: mapFrames((async function* () {
           yield { type: 'system', subtype: 'init', session_id: 's1' } as never;
           void o.ask('Bash', {}, new AbortController().signal);
           await new Promise((r) => setTimeout(r, 20));
           throw new Error('dead');
-        })(),
+        })()),
         send: () => {},
         interrupt: async () => {},
         setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => { closed++; },
@@ -290,7 +287,7 @@ describe('session manager', () => {
     s.send({ id: 'u1', text: 'lost' });
     await until(() => events.some((e) => e.kind === 'server-error' && e.where === 'send'));
     s.send({ id: 'u2', text: 'ok' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
   });
 
   it('a send queued across a crash is delivered to the fresh agent', async () => {
@@ -304,11 +301,11 @@ describe('session manager', () => {
         resumes.push(o.resume);
         const mine = n++;
         return {
-          messages: (async function* () {
+          messages: mapFrames((async function* () {
             yield { type: 'system', subtype: 'init', session_id: 'fake-session' } as never;
             if (mine === 0) { await new Promise((r) => setTimeout(r, 10)); throw new Error('dead'); }
             await new Promise(() => {});
-          })(),
+          })()),
           send: (m) => { delivered.push(`${mine}:${m.text}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
           setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
@@ -333,9 +330,9 @@ describe('session manager', () => {
     expect(events.find((e) => e.kind === 'server-error')).toMatchObject({ where: 'history', message: 'transcript gone' });
     const replayed: ServerEvent[] = [];
     hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') replayed.push(...e.events); } });
-    expect(replayed.some((e) => e.kind === 'user' || e.kind === 'sdk')).toBe(false);
+    expect(replayed.some((e) => e.kind === 'user' || e.kind === 'agent')).toBe(false);
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
   });
 
   it('resume: history, then exactly one resumed marker, then live events; one session per distinct id', async () => {
@@ -351,10 +348,11 @@ describe('session manager', () => {
     expect(replayed[1]).toEqual({ kind: 'resumed', id: 'old-session' });
     expect(replayed[2]).toEqual({ kind: 'session', id: 'old-session', root: '/proj', title: null, model: null });
     s.send({ id: 'u1', text: 'one' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     s.send({ id: 'u2', text: 'two' });
-    await until(() => sdkOf(events, 'result').length === 2);
-    expect(sdkOf(events, 'system')).toHaveLength(2); // the CLI sends init at the start of every turn
+    await until(() => agentOf(events, 'turn-end').length === 2);
+    // the CLI sends init at the start of every turn; it is server-internal (R-M7-14), never sent to the clients
+    expect(events.some((e) => e.kind === 'agent' && e.e.t === 'init')).toBe(false);
     expect(events.filter((e) => e.kind === 'resumed')).toHaveLength(1);
     expect(events.filter((e) => e.kind === 'session')).toHaveLength(1); // same id: no new session event
     expect(lastSession('/proj')).toBe('old-session');
@@ -364,19 +362,30 @@ describe('session manager', () => {
     const { events, make } = setup(fakeBackend([{ text: 'a' }]));
     const s = await make();
     s.send({ id: 'u1', text: 'one' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     s.send({ id: 'u2', text: 'two' });
-    await until(() => sdkOf(events, 'result').length === 2);
+    await until(() => agentOf(events, 'turn-end').length === 2);
     expect(events.filter((e) => e.kind === 'session').map((e) => (e as { id: string | null }).id)).toEqual([null, 'fake-session']);
     expect(events.some((e) => e.kind === 'resumed')).toBe(false);
   });
 });
 
-// the web reducer decides what the user sees; loaded by variable path so the server project does not compile web sources
-async function feedOf(events: ServerEvent[]): Promise<{ busy: boolean; waiting: string[] }> {
-  const href = new URL('../../web/src/store/feed.ts', import.meta.url).href;
-  const { reduce, emptyFeed } = (await import(/* @vite-ignore */ href)) as { reduce: (s: unknown, e: ServerEvent) => never; emptyFeed: unknown };
-  return events.reduce(reduce as never, emptyFeed as never) as never;
+// The sends a client still waits for, read from the events as the protocol defines it (R-M7-14): a live `user` waits,
+// a `turn-end` answers its `answers` ('all': every one), a `cancelled` drops its send. It stands in for the web
+// reducer until that reads `agent` events (M7-08 may point these tests back at web/src/store/feed.ts).
+function waitingOf(events: ServerEvent[]): string[] {
+  let waiting: string[] = [];
+  for (const ev of events) {
+    if (ev.kind === 'user' && !ev.historic) waiting.push(ev.id);
+    else if (ev.kind === 'agent' && ev.e.t === 'turn-end') {
+      const { answers } = ev.e;
+      waiting = answers === 'all' ? [] : answers === 'none' ? waiting : waiting.filter((id) => !answers.includes(id));
+    } else if (ev.kind === 'agent' && ev.e.t === 'cancelled') {
+      const { sendId } = ev.e;
+      waiting = waiting.filter((id) => id !== sendId);
+    }
+  }
+  return waiting;
 }
 
 describe('busy cannot get stuck', () => {
@@ -393,15 +402,14 @@ describe('busy cannot get stuck', () => {
     const { hub, events, make } = setup(backend);
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     const kinds = events.map((e) => e.kind);
-    expect(kinds.indexOf('server-error')).toBeLessThan(events.findIndex((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result'));
-    expect((sdkOf(events, 'result')[0] as { m: unknown }).m).toMatchObject({
-      subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: ['stdin closed'], user_message_uuid: 'u1', user_message_uuids: ['u1'],
-    });
+    expect(kinds.indexOf('server-error')).toBeLessThan(events.findIndex((e) => e.kind === 'agent' && e.e.t === 'turn-end'));
+    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: 0, error: 'stdin closed', answers: ['u1'], queued: 0 });
     const attached: ServerEvent[] = [];
     hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
-    expect((await feedOf(attached)).busy).toBe(false);
+    expect(waitingOf(attached)).toEqual([]);
+    expect(s.busy()).toBe(false);
   });
 
   it('a crash with a queued send leaves busy false', async () => {
@@ -412,11 +420,11 @@ describe('busy cannot get stuck', () => {
       ...noSessions,
       history: async () => [],
       start: () => ({
-        messages: (async function* () {
+        messages: mapFrames((async function* () {
           yield { type: 'system', subtype: 'init', session_id: 'fake-session' } as never;
           await gate;
           throw new Error('dead');
-        })(),
+        })()),
         send: () => { sent++; },
         interrupt: async () => {},
         setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
@@ -428,13 +436,12 @@ describe('busy cannot get stuck', () => {
     s.send({ id: 'B', text: 'two' });
     await until(() => sent === 2);
     release();
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     const attached: ServerEvent[] = [];
     hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
-    expect((sdkOf(events, 'result')[0] as { m: unknown }).m).toMatchObject({ is_error: true, errors: ['dead'] });
-    const f = await feedOf(attached);
-    expect(f.waiting).toEqual([]);
-    expect(f.busy).toBe(false);
+    expect(agentOf(events, 'turn-end')[0]!.e).toMatchObject({ stop: 'failed', error: 'dead', answers: 'all' });
+    expect(waitingOf(attached)).toEqual([]);
+    expect(s.busy()).toBe(false);
   });
 
   describe('image attachments', () => {
@@ -448,7 +455,7 @@ describe('busy cannot get stuck', () => {
       ...noSessions,
         history: async () => [],
         start: () => ({
-          messages: (async function* () { await new Promise(() => {}); })(),
+          messages: mapFrames((async function* () { await new Promise(() => {}); })()),
           send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
         }),
       };
@@ -479,7 +486,7 @@ describe('busy cannot get stuck', () => {
       ...noSessions,
         history: async () => [],
         start: () => ({
-          messages: (async function* () { await new Promise(() => {}); })(),
+          messages: mapFrames((async function* () { await new Promise(() => {}); })()),
           send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
         }),
       };
@@ -502,8 +509,8 @@ describe('busy cannot get stuck', () => {
       hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind !== 'replay') events.push(e); } });
       const s = await createSessionManager({ hub, backend: fakeBackend([{ text: 'ok', echoImages: true }]), cwd: '/proj', attachments });
       s.send({ id: 'u1', text: 'hi', images: [ref, ref] });
-      await until(() => sdkOf(events, 'result').length === 1);
-      expect(JSON.stringify(sdkOf(events, 'assistant'))).toContain('ok\\nimages: 2');
+      await until(() => agentOf(events, 'turn-end').length === 1);
+      expect(agentOf(events, 'message').map((e) => e.e)).toMatchObject([{ text: 'ok\nimages: 2' }]);
     });
   });
 });
@@ -553,7 +560,7 @@ describe('permission mode', () => {
     const { events, make } = setup(inner);
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1); // the crash killed the agent
+    await until(() => agentOf(events, 'turn-end').length === 1); // the crash killed the agent
     await s.setMode('default');
     expect(inner.setModes).toEqual([]);
     expect(modeEvents(events)).toEqual(['default']);
@@ -566,7 +573,7 @@ describe('permission mode', () => {
     const { events, make } = setup(fakeBackend([{ text: 'x', initMode: 'default' }]));
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     expect(s.mode()).toBe('default');
     expect(readPrefs().modes[prefsKey('/proj')]).toBe('default');
     expect(modeEvents(events)).toEqual(['default']);
@@ -577,7 +584,7 @@ describe('permission mode', () => {
       ...noSessions,
       history: async () => [],
       start: () => ({
-        messages: (async function* () { yield { type: 'system', subtype: 'status', permissionMode: 'acceptEdits' } as never; await new Promise(() => {}); })(),
+        messages: mapFrames((async function* () { yield { type: 'system', subtype: 'status', permissionMode: 'acceptEdits' } as never; await new Promise(() => {}); })()),
         send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
       }),
     };
@@ -592,7 +599,7 @@ describe('permission mode', () => {
     const { events, make } = setup(fakeBackend([{ text: 'x', initMode: 'plan' }]));
     const s = await make();
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     expect(modeEvents(events)).toEqual([]);
     expect(s.mode()).toBe('plan');
   });
@@ -607,12 +614,12 @@ describe('permission mode', () => {
         let wake: (() => void) | null = null;
         const push = (f: object) => { q.push(f); wake?.(); };
         return {
-          messages: (async function* () {
+          messages: mapFrames((async function* () {
             while (true) {
               while (q.length) yield q.shift() as never;
               await new Promise<void>((r) => { wake = r; });
             }
-          })(),
+          })()),
           send() {}, interrupt: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
           setPermissionMode: () => onSet(push),
         };
@@ -670,12 +677,12 @@ describe('switch', () => {
         return {
           ...stubs,
           // ignores close(): the loop never ends, and it speaks again after the switch
-          messages: (async function* () {
+          messages: mapFrames((async function* () {
             await late;
             yield { type: 'assistant', uuid: 'late-from-old', message: { content: [] } } as never;
             yield { type: 'system', subtype: 'init', session_id: 'old-late', permissionMode: 'plan' } as never;
             await new Promise(() => {});
-          })(),
+          })()),
           close() {},
         };
       },
@@ -731,7 +738,7 @@ describe('switch', () => {
     hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') log.push('replay'); events.push(e); } });
     const s = await createSessionManager({ hub, backend, cwd: dirA, closeTimeoutMs: 50, interruptTimeoutMs: 50 });
     s.send({ id: 'u1', text: 'long' });
-    await until(() => sdkOf(events, 'stream_event').length > 2);
+    await until(() => agentOf(events, 'message-chunk').length > 2);
     s.send({ id: 'u2', text: 'now', force: true });
     await new Promise((r) => setTimeout(r, 20));
     expect(s.busy()).toBe(true);
@@ -743,7 +750,7 @@ describe('switch', () => {
     expect(s.busy()).toBe(false);
     const mark = events.length;
     await new Promise((r) => setTimeout(r, 30));
-    expect(events.slice(mark).filter((e) => e.kind === 'sdk')).toEqual([]); // agent2 is idle
+    expect(events.slice(mark).filter((e) => e.kind === 'agent')).toEqual([]); // agent2 is idle
     s.close();
     fs.rmSync(dirA, { recursive: true, force: true });
   });
@@ -753,17 +760,17 @@ describe('switch', () => {
     const { hub, events } = setup(backend);
     const s = await createSessionManager({ hub, backend, cwd: '/proj' });
     s.command('clear');
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     await until(() => !s.busy());
     const replayOf = () => {
       let r: ServerEvent[] = [];
       hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') r = e.events; } });
       return r;
     };
-    expect(replayOf().filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result')).toEqual([]);
+    expect(replayOf().filter((e) => e.kind === 'agent' && e.e.t === 'turn-end')).toEqual([]);
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 2);
-    expect(replayOf().filter((e) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result')).toHaveLength(1);
+    await until(() => agentOf(events, 'turn-end').length === 2);
+    expect(replayOf().filter((e) => e.kind === 'agent' && e.e.t === 'turn-end')).toHaveLength(1);
     s.close();
   });
 
@@ -772,9 +779,9 @@ describe('switch', () => {
     const { hub, events } = setup(backend);
     const s = await createSessionManager({ hub, backend, cwd: '/proj' });
     s.send({ id: 'u1', text: 'hi' });
-    await until(() => sdkOf(events, 'result').length === 1);
+    await until(() => agentOf(events, 'turn-end').length === 1);
     let stored = 0;
-    hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') stored = e.events.filter((x) => x.kind === 'sdk' && (x.m as { type: string }).type === 'result').length; } });
+    hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind === 'replay') stored = e.events.filter((x) => x.kind === 'agent' && x.e.t === 'turn-end').length; } });
     expect(stored).toBe(1);
     s.close();
   });
@@ -819,7 +826,7 @@ describe('switch', () => {
       const ids: string[] = [];
       m.onSessionId((id) => ids.push(id));
       m.send({ id: 'u1', text: 'go' });
-      await until(() => sdkOf(events, 'result').length === 1);
+      await until(() => agentOf(events, 'turn-end').length === 1);
       const forked = m.info().id!;
       expect(forked).not.toBe('src-id');
       expect(lastSession(home)).toBe(forked);
@@ -842,7 +849,7 @@ describe('switch', () => {
       const { events, hub } = setup(backend);
       const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
       m.send({ id: 'u1', text: 'go' });
-      await until(() => sdkOf(events, 'result').length === 1);
+      await until(() => agentOf(events, 'turn-end').length === 1);
       const forked = m.info().id!;
       await m.restart();
       expect(backend.starts[1]).toEqual(expect.objectContaining({ resume: forked }));

@@ -1,5 +1,4 @@
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ImageType, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, ImageType, Mode, ServerEvent, Stats } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
@@ -7,7 +6,8 @@ export type SendImage = { mediaType: ImageType; data: string /* base64 */; label
 export type PermissionAsk = (toolName: string, input: Record<string, unknown>, signal: AbortSignal) => Promise<boolean>;
 
 export interface AgentSession {
-  readonly messages: AsyncIterable<SDKMessage>; // ends after close()
+  /** What the agent says, already mapped (R-M7-13: no SDK shapes past the backend); ends after close(). */
+  readonly messages: AsyncIterable<AgentEvent>;
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: SendImage[] }): void;
   interrupt(): Promise<void>; // no-op when idle
   /** The CLI's own @ search: project-relative paths, best first. May reject; [] while the CLI is still indexing. */
@@ -36,5 +36,6 @@ export interface AgentBackend {
   listSessions(): Promise<SessionListEntry[]>;
   /** The session's title fields when it belongs to `dir` (or one of its worktrees); null when it does not. */
   sessionInfo(id: string, dir: string): Promise<SessionInfo | null>;
+  /** The replay of a stored session: `user` events and `agent` events (message, tool-call, tool-update), ts 0. */
   history(sessionId: string, cwd: string, attachments: AttachmentStore, onError?: (e: unknown) => void): Promise<ServerEvent[]>;
 }

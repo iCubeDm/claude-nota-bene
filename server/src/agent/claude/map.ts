@@ -1,4 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+// the fake backend speaks SDK frames through this mapper (R-M7-13); it takes the frame type from here, not the SDK
+export type { SDKMessage };
 import { MODES } from '@nota-bene/shared';
 import type { AgentEvent, Mode } from '@nota-bene/shared';
 
@@ -165,4 +167,9 @@ export function mapSdk(msg: SDKMessage): AgentEvent[] {
     default:
       return [];
   }
+}
+
+/** A backend's frame stream as AgentEvents: each frame's events in order, nothing for a frame that maps to none. */
+export async function* mapFrames(frames: AsyncIterable<SDKMessage>): AsyncGenerator<AgentEvent> {
+  for await (const m of frames) yield* mapSdk(m);
 }

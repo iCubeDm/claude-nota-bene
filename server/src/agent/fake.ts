@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import { mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
@@ -63,7 +63,8 @@ export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessio
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
  * parent_tool_use_id, message.content, event, duration_ms, is_error, result, terminal_reason,
  * queued_turn_count, user_message_uuid(s)), with the values the real CLI uses (server/test/fixtures/real-frames.json).
- * The rest of the real SDK shape is deliberately not invented, so the objects are cast once, here.
+ * The rest of the real SDK shape is deliberately not invented, so the objects are cast once, here. They reach the
+ * server through the Claude mapper (R-M7-13), so the scripts and the real-frames fixture keep testing the real shapes.
  */
 function sdk(m: Record<string, unknown>): SDKMessage {
   return m as unknown as SDKMessage;
@@ -89,8 +90,12 @@ function whenAborted(signal: AbortSignal): Promise<void> {
   });
 }
 
-class FakeSession implements AgentSession {
-  readonly messages: AsyncIterable<SDKMessage>;
+/** The fake's session; `frames` is the raw SDK stream behind `messages` (for its own tests: each iteration is a new run). */
+export type FakeAgentSession = AgentSession & { readonly frames: AsyncIterable<SDKMessage> };
+
+class FakeSession implements FakeAgentSession {
+  readonly messages: AsyncIterable<AgentEvent>;
+  readonly frames: AsyncIterable<SDKMessage>;
   private pending: { uuid: string; text: string; images: number; command?: 'compact' | 'clear' }[] = []; // sends not yet started
   private wake: (() => void) | null = null;
   private closed = false;
@@ -108,7 +113,8 @@ class FakeSession implements AgentSession {
     this.ask = ask;
     // a resumed CLI session keeps its id; a fork gets a new one
     this.sessionId = resume && fork ? `${resume}-fork-${++forkCount}` : (resume ?? DEFAULT_SESSION_ID);
-    this.messages = { [Symbol.asyncIterator]: () => this.run() };
+    this.frames = { [Symbol.asyncIterator]: () => this.run() };
+    this.messages = { [Symbol.asyncIterator]: () => mapFrames(this.frames) };
   }
 
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: unknown[] }): void {
@@ -316,7 +322,7 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
 export function fakeBackend(
   turns: FakeTurn[],
   o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number } = {},
-): AgentBackend & { startModes: Mode[]; setModes: Mode[]; starts: Started[] } {
+): Omit<AgentBackend, 'start'> & { start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[] } {
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
   const starts: Started[] = [];
@@ -348,9 +354,10 @@ export function fakeBackend(
     },
     history: async (id) => {
       await sleepFor(o.historyDelayMs ?? 0); // e2e: a switch that visibly takes time
-      return (sessions.find((e) => e.id === id)?.history ?? []).map((h, i): ServerEvent => (h.role === 'user'
-        ? { kind: 'user', id: `fake-h-${i}`, text: h.text, historic: true, ts: 0 }
-        : { kind: 'sdk', m: sdk({ type: 'assistant', uuid: `fake-h-${i}`, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: h.text }] } }), ts: 0 }));
+      return (sessions.find((e) => e.id === id)?.history ?? []).flatMap((h, i): ServerEvent[] => (h.role === 'user'
+        ? [{ kind: 'user', id: `fake-h-${i}`, text: h.text, historic: true, ts: 0 }]
+        : mapSdk(sdk({ type: 'assistant', uuid: `fake-h-${i}`, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: h.text }] } }))
+          .map((e) => ({ kind: 'agent', e, ts: 0 }))));
     },
   };
 }

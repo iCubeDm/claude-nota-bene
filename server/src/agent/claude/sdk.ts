@@ -1,7 +1,8 @@
 import { getSessionInfo, getSessionMessages, listSessions, query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Mode } from '@nota-bene/shared';
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentEvent, Mode } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
+import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
 import { UsageUnavailableError, mapContextUsage, mapUsage } from '../../stats.ts';
 
@@ -52,7 +53,7 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 }
 
 class SdkSession implements AgentSession {
-  readonly messages: AsyncIterable<SDKMessage>;
+  readonly messages: AsyncIterable<AgentEvent>;
   private readonly input = new InputQueue();
   private readonly q: ReturnType<typeof query>;
   private readonly warmup: NodeJS.Timeout;
@@ -77,7 +78,7 @@ class SdkSession implements AgentSession {
             : { behavior: 'deny', message: 'User denied this action in the UI.' },
       },
     });
-    this.messages = this.q;
+    this.messages = mapFrames(this.q);
     // warm the CLI's file index (it answers [] for a few seconds after start); the failure does not matter
     this.warmup = setTimeout(() => void this.fileSuggestions('').catch(() => {}), 2000);
     this.warmup.unref();

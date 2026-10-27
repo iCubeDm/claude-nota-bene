@@ -262,6 +262,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'hello':
     case 'send-refused': // composer/refused.ts: restores the draft, never the feed
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
+    case 'agent': // protocol 5: not read yet (M7-08 moves the feed from `sdk` to these)
       return s;
     default: {
       const never: never = ev;

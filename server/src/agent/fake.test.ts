@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentEvent } from '@nota-bene/shared';
+import type { SDKMessage } from './claude/map.ts';
 import { fakeBackend, type FakeTurn } from './fake.ts';
 import type { PermissionAsk } from './types.ts';
 
@@ -9,7 +10,7 @@ const yes: PermissionAsk = async () => true;
 
 function run(turns: FakeTurn[], ask: PermissionAsk = yes) {
   const s = fakeBackend(turns).start({ cwd: '/tmp', permissionMode: 'auto', ask });
-  const it = s.messages[Symbol.asyncIterator]();
+  const it = s.frames[Symbol.asyncIterator](); // the SDK frames; `messages` is them through the Claude mapper
   return { s, it, next: async () => (await it.next()).value as SDKMessage };
 }
 
@@ -27,6 +28,28 @@ async function collectTurn(turns: FakeTurn[], ask?: PermissionAsk) {
 }
 
 describe('fake backend', () => {
+  it('messages are its SDK frames through the Claude mapper (R-M7-13)', async () => {
+    const s = fakeBackend([{ text: 'hi', tools: [{ name: 'Bash', input: { command: 'ls' }, output: 'a' }] }]).start({ cwd: '/tmp', permissionMode: 'auto', ask: yes });
+    const it = s.messages[Symbol.asyncIterator]();
+    s.send(send);
+    const out: AgentEvent[] = [];
+    while (true) {
+      const e = (await it.next()).value as AgentEvent;
+      out.push(e);
+      if (e.t === 'turn-end') break;
+    }
+    s.close();
+    expect(out).toEqual([
+      { t: 'init', sessionId: 'fake-session' },
+      { t: 'message-start' },
+      { t: 'message-chunk', text: 'hi' },
+      { t: 'message', id: 'fake-a-1:0', text: 'hi' },
+      { t: 'tool-call', id: 'fake-tool-1-0', name: 'Bash', input: { command: 'ls' }, sub: false },
+      { t: 'tool-update', id: 'fake-tool-1-0', text: 'a', isError: false },
+      { t: 'turn-end', stop: 'done', secs: 0, answers: ['u1'], queued: 0 },
+    ]);
+  });
+
   it('streams a tool_result user message for each tool use, before the result', async () => {
     const out = await collectTurn([{ text: 'x', tools: [
       { name: 'Bash', input: { command: 'ls' }, output: 'a\nb' },
@@ -92,7 +115,7 @@ describe('fake backend', () => {
 
   it('emits init at the start of every turn, like the CLI, and keeps the resumed id', async () => {
     const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', resume: 'r1', permissionMode: 'auto', ask: yes });
-    const it = s.messages[Symbol.asyncIterator]();
+    const it = s.frames[Symbol.asyncIterator]();
     const types: string[] = [];
     const ids = new Set<string>();
     for (const uuid of ['u1', 'u2']) {
@@ -230,6 +253,14 @@ describe('fake backend', () => {
       const h = await b.history('s1', '/x', undefined as never, () => {});
       expect(Date.now() - t0).toBeGreaterThanOrEqual(50);
       expect(h).toHaveLength(1);
+    });
+
+    it('history replays assistant lines as agent message events', async () => {
+      const b = fakeBackend([], { sessions: [{ id: 's1', cwd: '/x', history: [{ role: 'user', text: 'q' }, { role: 'assistant', text: 'a' }] }] });
+      expect(await b.history('s1', '/x', undefined as never, () => {})).toEqual([
+        { kind: 'user', id: 'fake-h-0', text: 'q', historic: true, ts: 0 },
+        { kind: 'agent', e: { t: 'message', id: 'fake-h-1:0', text: 'a' }, ts: 0 },
+      ]);
     });
   });
 });
