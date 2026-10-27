@@ -1,9 +1,10 @@
 import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { WebSocketServer } from 'ws';
+import { EventEmitter } from 'node:events';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { parseClientMessage, PROTOCOL } from '@nota-bene/shared';
-import type { Comment } from '@nota-bene/shared';
+import type { ClientMessage, Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { HistoryArchive, historyRoutes } from './archive.ts';
@@ -19,6 +20,13 @@ import { listSessionsView } from './sessions.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
 import { controlToken, systemRoutes } from './system.ts';
+
+/** how long a newcomer waits for the owner to close before it is told `occupied` (R-M7-6) */
+export const TAKEOVER_GRACE_MS = 700;
+/** ping period for the owner socket (R-M7-7) */
+export const HEARTBEAT_MS = 30_000;
+/** close code the owner gets when another tab takes over (R-M7-5/8) */
+export const TAKEN_OVER_CODE = 4001;
 
 // Process-wide handlers are registered once; each running server's hub is in this set.
 const hubs = new Set<EventHub>();
@@ -50,6 +58,11 @@ export async function startServer(o: {
   /** idle compaction timing and the settings.json check (tests shorten / stub them) */
   idle?: IdleConfig;
   idleOffInSettings?: () => boolean;
+  /** one tab at a time (R-M7-5); default true. Tests that need several live sockets pass false */
+  oneTab?: boolean;
+  /** tests shorten the reload grace (R-M7-6) and the heartbeat (R-M7-7) */
+  takeoverGraceMs?: number;
+  heartbeatMs?: number;
 }): Promise<{ url: string; close(): Promise<void> }> {
   const hub = new EventHub();
   installProcessHandlers();
@@ -186,8 +199,40 @@ export async function startServer(o: {
     const caps = o.backend.capabilities;
     const refuse = (what: string) => reportError(hub, 'capability', new Error(`${what}: the agent does not support it`));
 
-    wss.on('connection', (ws) => {
-      const detach = hub.attach({ send: (d) => ws.send(d) });
+    const oneTab = o.oneTab ?? true;
+    const graceMs = o.takeoverGraceMs ?? TAKEOVER_GRACE_MS;
+    // the owner socket (R-M7-5); only used with oneTab. `alive`: false while a ping waits for its pong
+    let owner: { ws: WebSocket; alive: boolean } | null = null;
+    const heartbeat = oneTab
+      ? setInterval(() => {
+        if (!owner) return;
+        if (!owner.alive) { owner.ws.terminate(); return; } // the previous ping got no pong (R-M7-7)
+        owner.alive = false;
+        try { owner.ws.ping(); } catch { /* socket gone: its close handler follows */ }
+      }, o.heartbeatMs ?? HEARTBEAT_MS)
+      : null;
+    heartbeat?.unref();
+
+    // the hello every socket gets, owner or not
+    const sendHello = (ws: WebSocket) => {
+      try {
+        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: caps }));
+      } catch (e) {
+        reportError(hub, 'hello', e);
+      }
+    };
+
+    // the owner's wiring: replay (via the hub), state frames, hello. Returns nothing; the message handler is shared
+    const attachOwner = (ws: WebSocket) => {
+      const hubDetach = hub.attach({ send: (d) => ws.send(d) });
+      let detached = false;
+      const detach = () => { if (!detached) { detached = true; hubDetach(); } };
+      detachers.set(ws, detach);
+      if (oneTab) {
+        const me = { ws, alive: true };
+        owner = me;
+        ws.on('pong', () => { me.alive = true; });
+      }
       manager.clientAttached();
       try {
         ws.send(JSON.stringify({ kind: 'comments', items: currentComments() }));
@@ -210,19 +255,18 @@ export async function startServer(o: {
         reportError(hub, 'stats', e);
       }
       // what this server understands (see PROTOCOL); last, so the state above keeps its order
-      try {
-        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: caps }));
-      } catch (e) {
-        reportError(hub, 'hello', e);
-      }
-      ws.on('close', detach);
-      ws.on('error', (e) => reportError(hub, 'ws', e));
-      ws.on('message', guard(hub, 'ws', (data) => {
-        const msg = parseClientMessage(String(data));
-        if ('error' in msg) {
-          reportError(hub, 'ws', msg.error);
-          return;
-        }
+      sendHello(ws);
+      ws.on('close', () => {
+        detach();
+        if (owner?.ws === ws) owner = null;
+        ownerGone.emit('gone');
+      });
+    };
+    const detachers = new Map<WebSocket, () => void>();
+    const ownerGone = new EventEmitter();
+
+    // the owner's messages
+    const handleOwner = (ws: WebSocket, msg: ClientMessage) => {
         switch (msg.type) {
           case 'send':
             if (manager.switching()) {
@@ -301,7 +345,72 @@ export async function startServer(o: {
             manager.restart().catch(switchFailed);
             break;
         }
+    };
+
+    // a newer socket takes the window (R-M7-5): the owner is told and closed with 4001, then the newcomer attaches as on a connect
+    const takeover = (ws: WebSocket) => {
+      const old = owner;
+      if (old) {
+        owner = null;
+        detachers.get(old.ws)?.(); // no more frames to it, not even those between now and its close
+        try {
+          old.ws.send(JSON.stringify({ kind: 'taken-over' }));
+        } catch { /* already dying */ }
+        old.ws.close(TAKEN_OVER_CODE);
+      }
+      attachOwner(ws);
+      role.set(ws, 'owner');
+    };
+    const role = new WeakMap<WebSocket, 'pending' | 'occupied' | 'owner'>();
+
+    wss.on('connection', (ws) => {
+      ws.on('error', (e) => reportError(hub, 'ws', e));
+      ws.on('message', guard(hub, 'ws', (data) => {
+        const r = role.get(ws);
+        if (r === 'pending') return; // still waiting out the grace: nothing it says counts yet
+        const msg = parseClientMessage(String(data));
+        if (r === 'occupied') {
+          if (!('error' in msg) && msg.type === 'takeover') takeover(ws);
+          return; // everything else from an occupied socket is ignored
+        }
+        if ('error' in msg) {
+          reportError(hub, 'ws', msg.error);
+          return;
+        }
+        if (msg.type === 'takeover') return; // the owner has nothing to take
+        handleOwner(ws, msg);
       }));
+      if (!oneTab || !owner) {
+        role.set(ws, 'owner');
+        attachOwner(ws);
+        return;
+      }
+      // an owner exists: a reloading tab's old socket closes within the grace, so wait before answering occupied (R-M7-6)
+      role.set(ws, 'pending');
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settle = () => {
+        clearTimeout(timer);
+        ownerGone.off('gone', onGone);
+        ws.off('close', onClose);
+        if (ws.readyState !== ws.OPEN) return;
+        if (!owner) {
+          role.set(ws, 'owner');
+          attachOwner(ws);
+          return;
+        }
+        role.set(ws, 'occupied');
+        try {
+          ws.send(JSON.stringify({ kind: 'occupied' }));
+        } catch (e) {
+          reportError(hub, 'occupied', e);
+        }
+        sendHello(ws);
+      };
+      const onGone = () => settle();
+      const onClose = () => { clearTimeout(timer); ownerGone.off('gone', onGone); };
+      ownerGone.on('gone', onGone);
+      ws.on('close', onClose);
+      timer = setTimeout(settle, graceMs);
     });
 
     try {
@@ -335,6 +444,7 @@ export async function startServer(o: {
     let closing: Promise<void> | null = null;
     const close = () => (closing ??= new Promise<void>((resolve) => {
       hubs.delete(hub);
+      if (heartbeat) clearInterval(heartbeat);
       manager.close();
       for (const c of wss.clients) c.terminate();
       wss.close(() => {

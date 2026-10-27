@@ -240,6 +240,8 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'mode':
     case 'idle-compact': // the controls slice
     case 'hello':
+    case 'occupied': // the conn slice (M7-15)
+    case 'taken-over':
     case 'send-refused': // composer/refused.ts: restores the draft, never the feed
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;

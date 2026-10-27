@@ -98,7 +98,9 @@ export type ClientMessage =
   /** the user touched the UI (throttled by the client): the idle-compaction clock starts again */
   | { type: 'activity' }
   /** idle compaction on or off for this project */
-  | { type: 'idle-compact'; on: boolean };
+  | { type: 'idle-compact'; on: boolean }
+  /** from an occupied socket (R-M7-5): the window moves here; the old owner is closed with 4001 */
+  | { type: 'takeover' };
 
 /**
  * Idle compaction of this window's project. `on` is the project's setting; `blocked`: `"idleCompaction": false` in the
@@ -109,6 +111,10 @@ export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; away
 
 export type ServerEvent =
   /** right after the replay on every connection (servers before it send none: protocol 0) */
+  /** another tab owns the window (R-M7-5): to a later socket only, followed by `hello`; no replay, no state */
+  | { kind: 'occupied' }
+  /** to the owner just before it is closed with code 4001: another tab took the window over */
+  | { kind: 'taken-over' }
   | { kind: 'hello'; protocol: number; capabilities?: Capabilities }
   /** `earlier`: how many segments of this conversation, from before its compactions, `/history` holds (R-M7-4); absent for none */
   | { kind: 'replay'; events: ServerEvent[]; earlier?: number }
@@ -316,6 +322,8 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
       return { type: 'switch', id: m.id, dir: m.dir };
     case 'restart':
       return { type: 'restart' };
+    case 'takeover':
+      return { type: 'takeover' };
     case 'activity':
       return { type: 'activity' };
     case 'idle-compact':

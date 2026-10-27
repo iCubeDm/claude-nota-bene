@@ -35,7 +35,7 @@ const c = (id: string): Comment => ({
 } as unknown as Comment);
 
 async function boot(turns: FakeTurn[] = [{ text: 'hello' }]) {
-  const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend(turns), webDist: dist });
+  const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend(turns), webDist: dist, oneTab: false });
   closers.push(s.close);
   return s;
 }
@@ -167,7 +167,7 @@ describe('idle compaction', () => {
   const idle = { afterMs: 150, awayMs: 100, retryMs: 30, cacheMs: 400, minTokens: 100_000 };
   const big = { text: 'hello', context: { used: 500_000, max: 1_000_000, pct: 50 } };
   async function bootIdle(turns: FakeTurn[], off = false) {
-    const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend(turns), webDist: dist, idle, idleOffInSettings: () => off });
+    const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend(turns), webDist: dist, oneTab: false, idle, idleOffInSettings: () => off });
     closers.push(s.close);
     return s;
   }
