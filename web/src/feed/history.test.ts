@@ -99,3 +99,30 @@ it('a segment never reaches another slice: tasks, controls, comments and the liv
   expect(f1.items.map((i) => i.kind)).toEqual(['permission', 'user', 'done', ...f0.items.map((i) => i.kind)]);
   expect({ ...f1, items: f0.items, earlier: f0.earlier }).toEqual(f0);
 });
+
+it('two overlapping loads for the same segment prepend it once: one ok, one stale', async () => {
+  const answers: ((r: Response) => void)[] = [];
+  stubHistory(() => new Promise<Response>((r) => answers.push(r)));
+  const store = setup(2);
+  const measure = vi.fn();
+  const a = store.dispatch(loadEarlier(measure));
+  const b = store.dispatch(loadEarlier(measure));
+  expect(answers).toHaveLength(2);
+  answers[0]!(json({ events: [user('u2', 'second')], segment: 2, more: true }));
+  expect(await a).toBe('ok');
+  answers[1]!(json({ events: [user('u2', 'second')], segment: 2, more: true }));
+  expect(await b).toBe('stale');
+  expect(texts(store)).toEqual(['second', 'after']);
+  expect(store.getState().feed.earlier).toBe(1);
+  expect(measure).toHaveBeenCalledTimes(1);
+});
+
+it('a page the feed would ignore (a segment above `earlier`) is a failure and is not measured: nothing stays armed', async () => {
+  stubHistory(() => json({ events: [user('u2', 'second')], segment: 5, more: false }));
+  const store = setup(2);
+  const before = store.getState().feed;
+  const measure = vi.fn();
+  expect(await store.dispatch(loadEarlier(measure))).toBe('failed');
+  expect(measure).not.toHaveBeenCalled();
+  expect(store.getState().feed).toBe(before);
+});

@@ -39,6 +39,7 @@ export const en: Dict = {
   stopTip: 'Stop the agent · Esc',
   keysTip: 'Enter — send\nShift+Enter — new line\n⌘Enter — interrupt the agent and send\nEsc — stop the agent',
   composerPh: 'Message the agent… select text in the chat to comment on it',
+  askArchived: 'No answer was given before the compaction',
   allowQ: (tool) => `Allow ${tool}?`,
   allow: 'Allow',
   deny: 'Deny',

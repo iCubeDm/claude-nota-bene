@@ -13,13 +13,15 @@ export function PermissionCard({ item }: { item: Extract<FeedItem, { kind: 'perm
       data-kind="permission"
       className={
         'my-2.5 rounded-[10px] border bg-card px-3 py-2 text-[13px] ' +
-        (resolved ? 'border-border-soft opacity-60' : 'border-warn')
+        (resolved || item.archived ? 'border-border-soft opacity-60' : 'border-warn')
       }
     >
       <b>{t('allowQ', item.toolName)}</b>
       <pre className="my-1.5 max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-xs">{body}</pre>
       {resolved ? (
         <span>{t(item.answer ? 'allowed' : 'denied')}</span>
+      ) : item.archived ? (
+        <span data-archived>{t('askArchived')}</span>
       ) : (
         <>
           <button

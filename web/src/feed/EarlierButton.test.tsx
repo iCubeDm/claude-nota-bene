@@ -63,12 +63,33 @@ it('shows loading while the request runs, and a failure (a 409) with the button 
   expect(screen.queryByText('second')).toBeNull();
 });
 
+/**
+ * jsdom has no layout. The pane sits at top 0; the feed's first keyed item (u9, the one the reader saw before a prepend) sits at
+ * `100 - scrollTop` while nothing is prepended and `h.px` lower once the fragment "first" is in the DOM.
+ */
+function layout(h: { px: number }) {
+  const pane = document.querySelector<HTMLElement>('[data-chat-pane]')!;
+  const feed = pane.firstElementChild as HTMLElement;
+  const rect = (top: number) => ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON() {} }) as DOMRect;
+  const marker = () => feed.querySelector('[data-item-id="u9"]');
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    if (this === marker()) return rect(100 + (pane.textContent!.includes('first') ? h.px : 0) - pane.scrollTop);
+    return rect(0);
+  });
+  Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 600 });
+  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => 3000 + (pane.textContent!.includes('first') ? h.px : 0) });
+  return pane;
+}
+let resize: (() => void) | null = null;
+beforeEach(() => {
+  resize = null;
+  vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { resize = cb; } observe() {} disconnect() { resize = null; } });
+});
+
 it('a prepend keeps the reader\'s place: no autoscroll, no "new" dot', async () => {
   setup(1, () => page([user('u1', 'first'), user('u2', 'second')], 1, false));
-  const pane = document.querySelector<HTMLElement>('[data-chat-pane]')!;
-  // the prepended content is 1200 px tall: the height follows the DOM
-  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => (pane.textContent!.includes('first') ? 4200 : 3000) });
-  Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 600 });
+  const h = { px: 1200 };
+  const pane = layout(h);
   pane.scrollTop = 500; // reading near the top, far from the end
   fireEvent.scroll(pane);
   const latest = screen.getByRole('button', { name: 'Jump to the latest' });
@@ -80,14 +101,71 @@ it('a prepend keeps the reader\'s place: no autoscroll, no "new" dot', async () 
 
 it('a short feed (stuck to the end): a prepend does not jump to the end, the old top stays in view', async () => {
   setup(1, () => page([user('u1', 'first')], 1, false));
-  const pane = document.querySelector<HTMLElement>('[data-chat-pane]')!;
-  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => (pane.textContent!.includes('first') ? 1000 : 600) });
-  Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 600 });
+  const pane = layout({ px: 400 });
   pane.scrollTop = 0;
   fireEvent.scroll(pane);
   fireEvent.click(show()!);
   await waitFor(() => expect(screen.getByText('first')).toBeInTheDocument());
-  expect(pane.scrollTop).toBe(400); // not 1000: what was on screen is still on screen
+  expect(pane.scrollTop).toBe(400); // not the end (3400): what was on screen is still on screen
+});
+
+it('content above that grows late (an image, a diagram) keeps being compensated for about a second, until the reader acts', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    setup(1, () => page([user('u1', 'first')], 1, false));
+    const h = { px: 400 };
+    const pane = layout(h);
+    pane.scrollTop = 300;
+    fireEvent.scroll(pane);
+    fireEvent.click(show()!);
+    await waitFor(() => expect(screen.getByText('first')).toBeInTheDocument());
+    expect(pane.scrollTop).toBe(700);
+    h.px = 650; // an image above loaded
+    resize!();
+    expect(pane.scrollTop).toBe(950);
+    fireEvent.scroll(pane); // our own scroll event does not end the window
+    h.px = 700;
+    resize!();
+    expect(pane.scrollTop).toBe(1000);
+    fireEvent.wheel(pane); // the reader takes over
+    expect(resize).toBeNull();
+    h.px = 900;
+    expect(pane.scrollTop).toBe(1000);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('the compensation window ends after a second without any reader action', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    setup(1, () => page([user('u1', 'first')], 1, false));
+    const h = { px: 400 };
+    const pane = layout(h);
+    pane.scrollTop = 300;
+    fireEvent.scroll(pane);
+    fireEvent.click(show()!);
+    await waitFor(() => expect(screen.getByText('first')).toBeInTheDocument());
+    vi.setSystemTime(Date.now() + 1100);
+    h.px = 650;
+    resize!();
+    expect(pane.scrollTop).toBe(700); // too late: left alone
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('the reader scrolling (not our own scroll) ends the window', async () => {
+  setup(1, () => page([user('u1', 'first')], 1, false));
+  const h = { px: 400 };
+  const pane = layout(h);
+  pane.scrollTop = 300;
+  fireEvent.scroll(pane);
+  fireEvent.click(show()!);
+  await waitFor(() => expect(screen.getByText('first')).toBeInTheDocument());
+  pane.scrollTop = 123;
+  fireEvent.scroll(pane);
+  expect(resize).toBeNull();
 });
 
 it('a page that adds nothing (a 404) leaves the feed scrolling as before: the next message still follows the end', async () => {
@@ -103,4 +181,14 @@ it('a page that adds nothing (a 404) leaves the feed scrolling as before: the ne
   height = 900;
   act(() => void store.dispatch(serverEvent({ kind: 'agent', ts: 70, e: { t: 'message', id: 'a7:0', text: 'live' } })));
   expect(pane.scrollTop).toBe(900); // stuck to the end, as without the click
+});
+
+it('an unanswered ask from an archived segment reads as read-only, with no Allow or Deny', async () => {
+  const ask: ServerEvent = { kind: 'permission', id: 'p1', toolName: 'Bash', input: { command: 'rm x' }, ts: 2 };
+  const { view } = setup(1, () => page([ask, user('u1', 'first')], 1, false));
+  fireEvent.click(show()!);
+  await waitFor(() => expect(screen.getByText('first')).toBeInTheDocument());
+  const card = view.container.querySelector('[data-kind="permission"]')!;
+  expect(card).toHaveTextContent('No answer was given before the compaction');
+  expect(card.querySelectorAll('button')).toHaveLength(0);
 });

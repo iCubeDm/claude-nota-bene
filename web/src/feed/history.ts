@@ -35,6 +35,7 @@ export const loadEarlier = (beforePrepend?: () => void): AppThunk<Promise<Earlie
     return stale() ? 'stale' : 'failed';
   }
   if (stale()) return 'stale';
+  if (page.segment > earlier) return 'failed'; // not the page asked for: the reducer would ignore it, so nothing is measured
   beforePrepend?.();
   dispatch(historyPrepended({ ...page, session, epoch }));
   return 'ok';

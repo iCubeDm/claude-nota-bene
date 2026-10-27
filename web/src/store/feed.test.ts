@@ -349,7 +349,7 @@ describe('history before a compaction (R-M7-4)', () => {
     expect(next.earlier).toBe(1);
   });
 
-  test('an item already in the feed is not prepended again: a running send kept across the cut, a queued one replayed from the transcript', () => {
+  test('an item already in the feed moves to its segment position (the live object), its later slot goes: a running send kept across the cut, a queued one replayed from the transcript', () => {
     // the running send u5 stays before the boundary; the queued u6 came back as a historic event of the transcript
     const s = reduce(emptyFeed, {
       kind: 'replay', earlier: 1,
@@ -358,7 +358,27 @@ describe('history before a compaction (R-M7-4)', () => {
     const seg = [user({ id: 'u4', text: 'older' }), result(), user({ id: 'u5', text: 'running' }), message('a5:0', 'half'), user({ id: 'u6', text: 'queued' })];
     const next = prependHistory(s, page(s, seg, 1, false));
     expect(next.items.filter((i) => i.kind === 'user').map((i) => (i as { id: string }).id)).toEqual(['u4', 'u5', 'u6']);
-    expect(next.items.map((i) => i.kind)).toEqual(['user', 'done', 'assistant', 'user', 'marker', 'user']);
+    // the prompt, the first half of its replies, then the marker; the queued send sits where the segment had it
+    expect(next.items.map((i) => i.kind)).toEqual(['user', 'done', 'user', 'assistant', 'user', 'marker']);
+    expect(next.items.map((i) => ('id' in i ? i.id : i.kind))).toEqual(['u4', 'done', 'u5', 'a5:0', 'u6', 'marker']);
+    const live = s.items.filter((i) => i.kind === 'user');
+    expect(next.items[2]).toBe(live[0]); // the live object, not the segment's copy
+    expect(next.items[4]).toBe(live[1]);
+  });
+
+  test('a permission item from a segment is archived (read-only); one kept across the cut stays live', () => {
+    const s = reduce(emptyFeed, {
+      kind: 'replay', earlier: 1,
+      events: [session(), { kind: 'permission', id: 'p2', toolName: 'Bash', input: { command: 'ls' }, ts: 3 }, marker],
+    });
+    const seg: ServerEvent[] = [
+      { kind: 'permission', id: 'p1', toolName: 'Bash', input: { command: 'rm' }, ts: 2 },
+      { kind: 'permission', id: 'p2', toolName: 'Bash', input: { command: 'ls' }, ts: 3 },
+    ];
+    const next = prependHistory(s, page(s, seg, 1, false));
+    const [p1, p2] = next.items as Extract<(typeof next.items)[number], { kind: 'permission' }>[];
+    expect(p1).toMatchObject({ id: 'p1', archived: true });
+    expect(p2!.archived).toBeUndefined();
   });
 
   test('a page for another session, an older epoch or a segment already loaded is dropped', () => {

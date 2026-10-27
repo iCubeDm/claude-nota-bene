@@ -37,6 +37,7 @@ export const ru = {
   stopTip: 'Остановить агента · Esc',
   keysTip: 'Enter — отправить\nShift+Enter — новая строка\n⌘Enter — прервать агента и отправить\nEsc — остановить агента',
   composerPh: 'Сообщение агенту… выдели текст в чате, чтобы прокомментировать',
+  askArchived: 'Ответа до сжатия не было',
   allowQ: (tool: string) => `Разрешить ${tool}?`,
   allow: 'Разрешить',
   deny: 'Запретить',

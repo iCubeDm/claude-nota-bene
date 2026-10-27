@@ -14,6 +14,13 @@ import { UserMessage } from './UserMessage.tsx';
 /** Farther from the end than this, the "jump to the latest" button shows. */
 const AWAY_PX = 200;
 
+/** How long after a prepend the reader's anchor is kept: late images and diagrams above it grow the page. */
+const ANCHOR_MS = 1000;
+
+/** An element the reader was looking at before an archived segment went in, and where it stood in the pane. */
+type Anchor = { el: HTMLElement; offset: number };
+const offsetIn = (pane: HTMLElement, el: HTMLElement) => el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+
 /** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
 export function Feed() {
   const { items, compacting, busy, epoch, earlier } = useAppSelector(selectFeed);
@@ -22,8 +29,10 @@ export function Feed() {
   const root = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const lastLen = useRef(0);
-  /** the pane's distance from the end, measured right before an archived segment is prepended; null otherwise */
-  const prepending = useRef<number | null>(null);
+  /** set right before an archived segment is prepended: what the reader sees stays where it is; null otherwise */
+  const prepending = useRef<{ anchor: Anchor | null } | null>(null);
+  /** ends the short window in which the anchor is re-applied (resize, timeout, the reader scrolling) */
+  const settling = useRef<(() => void) | null>(null);
   const [away, setAway] = useState(false);
   const [unread, setUnread] = useState(false); // something new arrived below while away
   const chatPane = () => root.current?.closest<HTMLElement>('[data-chat-pane]') ?? null;
@@ -44,13 +53,13 @@ export function Feed() {
 
   useLayoutEffect(() => {
     const pane = root.current?.closest<HTMLElement>('[data-chat-pane]');
-    // an archived segment went in above: keep what the reader looks at in place (same distance from the end), and
-    // neither scroll to the end nor mark it as new below
-    const fromEnd = prepending.current;
+    // an archived segment went in above: keep what the reader looks at in place, and neither scroll to the end nor
+    // mark it as new below
+    const pre = prepending.current;
     prepending.current = null;
-    if (fromEnd !== null) {
+    if (pre !== null) {
       lastLen.current = items.length;
-      if (pane) pane.scrollTop = pane.scrollHeight - fromEnd;
+      if (pane && pre.anchor) hold(pane, pre.anchor);
       return;
     }
     // a new user message always scrolls down, like the prototype; everything else only when already near the bottom
@@ -63,9 +72,50 @@ export function Feed() {
     // `earlier`: a page that added nothing new (all kept items, or a 404) still ends its prepend here
   }, [items, compacting, earlier]);
 
+  useLayoutEffect(() => () => settling.current?.(), []);
+
+  /**
+   * Puts `anchor` back where it was, now and for ANCHOR_MS after: images and diagrams in the new content load late and
+   * grow it above the reader. Ends at the first wheel, touch, key, pointer press or scroll that is not ours.
+   */
+  const hold = (pane: HTMLElement, anchor: Anchor) => {
+    settling.current?.();
+    let ours = NaN;
+    const apply = () => {
+      if (!anchor.el.isConnected) return;
+      const delta = offsetIn(pane, anchor.el) - anchor.offset;
+      if (!delta) return;
+      pane.scrollTop += delta;
+      ours = pane.scrollTop;
+    };
+    const until = Date.now() + ANCHOR_MS;
+    const onResize = () => (Date.now() >= until ? stop() : apply());
+    const onScroll = () => {
+      if (pane.scrollTop !== ours) stop();
+    };
+    const events = ['wheel', 'touchstart', 'touchmove', 'pointerdown', 'keydown'] as const;
+    const ro = typeof ResizeObserver === 'undefined' || !root.current ? null : new ResizeObserver(onResize);
+    if (root.current) ro?.observe(root.current);
+    const timer = setTimeout(() => stop(), ANCHOR_MS);
+    function stop() {
+      ro?.disconnect();
+      clearTimeout(timer);
+      pane.removeEventListener('scroll', onScroll);
+      for (const ev of events) pane.removeEventListener(ev, stop);
+      if (settling.current === stop) settling.current = null;
+    }
+    apply();
+    pane.addEventListener('scroll', onScroll);
+    for (const ev of events) pane.addEventListener(ev, stop, { passive: true });
+    settling.current = stop;
+  };
+
   const beforePrepend = () => {
     const p = chatPane();
-    prepending.current = p ? p.scrollHeight - p.scrollTop : null;
+    // the first item with a stable key (the lines keyed by position, e.g. markers, are remounted by a prepend)
+    const kids = [...(root.current?.children ?? [])].filter((c) => !c.hasAttribute('data-earlier')) as HTMLElement[];
+    const el = kids.find((c) => c.hasAttribute('data-item-id') || c.querySelector('[data-item-id]')) ?? kids[0];
+    prepending.current = { anchor: p && el ? { el, offset: offsetIn(p, el) } : null };
   };
 
   const toLatest = () => {

@@ -18,7 +18,7 @@ export type FeedItem =
    */
   | { kind: 'marker'; what: 'compacted' | 'compactFailed' | 'cleared'; pre?: number; ms?: number; error?: string; ts: number }
   | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
-  | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean }
+  | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean; archived?: true }
   /** `text`: the resumed session id; translated at render. (Server errors are toasts, not feed items: R-M4-5.) */
   | { kind: 'notice'; text: string };
 
@@ -60,20 +60,32 @@ export const historyPrepended = createAction<HistoryPrepend>('feed/historyPrepen
 /**
  * Puts an archived segment's feed items before the feed's. A segment holds every kind of event (session, permission,
  * task, user sends that ran live, turn-ends): it is reduced on its own from an empty feed and only its items are kept,
- * so it never touches live state. An item already in the feed is left out: the cut archives what it keeps (a running
- * or queued send, an open ask) and the transcript replays queued sends under the same id. A page for another session,
+ * so it never touches live state. An item already in the feed (the cut archives what it keeps: a running or queued
+ * send, an open ask; the transcript replays queued sends under the same id) is not duplicated: the live object moves to
+ * its segment copy's position and its later slot goes, so a prompt reads before its own earlier replies. A page for another session,
  * an older epoch or a segment already loaded changes nothing.
  */
 export function prependHistory(s: FeedState, p: HistoryPrepend): FeedState {
   if (p.epoch !== s.epoch || p.session !== s.session?.id || p.segment > s.earlier) return s;
   const key = (it: FeedItem) => ('id' in it ? `${it.kind}:${it.id}` : null);
-  const have = new Set(s.items.map(key).filter((k) => k !== null));
-  const fresh = p.events.reduce(reduce, emptyFeed).items.filter((it) => {
+  const live = new Map<string, FeedItem>();
+  for (const it of s.items) {
     const k = key(it);
-    return k === null || !have.has(k);
+    if (k !== null) live.set(k, it);
+  }
+  const moved = new Set<FeedItem>();
+  const head = p.events.reduce(reduce, emptyFeed).items.map((it) => {
+    const mine = live.get(key(it) ?? '');
+    if (mine) {
+      moved.add(mine); // the live object (its live fields) takes the segment copy's place
+      return mine;
+    }
+    // an ask in the archive can no longer be answered: nobody is waiting for it
+    return it.kind === 'permission' ? { ...it, archived: true as const } : it;
   });
+  const tail = moved.size ? s.items.filter((it) => !moved.has(it)) : s.items;
   const earlier = p.more ? Math.max(0, p.segment - 1) : 0;
-  return { ...s, earlier, items: fresh.length ? [...fresh, ...s.items] : s.items };
+  return { ...s, earlier, items: head.length ? [...head, ...tail] : s.items };
 }
 
 export const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
