@@ -25,7 +25,7 @@ function setup() {
 // a tab is recorded once it stays active RECENT_DWELL_MS
 const dwell = () => act(() => new Promise<void>((r) => setTimeout(r, RECENT_DWELL_MS + 30)));
 const items = () => [...document.querySelectorAll<HTMLElement>('[data-recent]')].map((b) => b.dataset.recent);
-// Ctrl+E itself is the keymap's (shell/keymap.test.tsx); here the modal opens as the keymap opens it
+// Alt+E itself is the keymap's (shell/keymap.test.tsx); here the modal opens as the keymap opens it
 const ctrlE = () => act(() => recentModal.open());
 
 it('a file tab that stays active is recorded, newest first, once each, at most 50 (M6-13)', async () => {

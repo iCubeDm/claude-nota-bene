@@ -14,7 +14,7 @@ const key = (f: SavedFile) => `${f.src ?? 'here'}:${f.path}`;
 const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 
 /**
- * Cmd/Ctrl+E (M6-13, IntelliJ's Recent Files): the recently opened files of this root. An empty query lists them,
+ * Alt+E (M6-13, IntelliJ's Recent Files): the recently opened files of this root. An empty query lists them,
  * with the previous file selected (Enter flips back); a query filters them and searches the whole project through
  * `/complete` (files only, recent matches first). ↑↓ Enter Esc.
  */

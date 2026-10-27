@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// M6-16: the workspace frame of Package B and C in a real browser — strips, tab overflow, Cmd/Ctrl+E, the hotkeys and
+// M6-16: the workspace frame of Package B and C in a real browser — strips, tab overflow, Alt+E, the hotkeys and
 // the Settings tab. The `files` fixture (its project has docs/, src/, media/ and big.log).
 const composer = (page: Page) => page.getByPlaceholder(/Message the agent|Сообщение агенту/);
 const sheet = (page: Page) => page.locator('#tree-sheet');
@@ -83,24 +83,30 @@ test('tab overflow: no scrollbar, the active tab stays in view, ▾ lists the hi
   await expect(activeTab(page)).toBeFocused();
 });
 
-test('Ctrl/⌘+E: the recent files with the previous one selected; Enter flips back; a query searches the project @files', async ({ page }) => {
+test('Alt+E: the recent files with the previous one selected; Enter flips back; a query searches the project @files', async ({ page }) => {
   await start(page);
   // a tab counts as visited once it stays active 300 ms
   await open(page, ['src/a.ts']);
   await page.waitForTimeout(400);
   await open(page, ['big.log']);
   await page.waitForTimeout(400);
-  await page.keyboard.press('ControlOrMeta+KeyE');
+  await page.keyboard.press('Alt+KeyE');
   const list = page.getByRole('listbox', { name: /^(Recent files|Недавние файлы)$/ });
   await expect(list.getByRole('option').first()).toHaveAttribute('data-recent', 'big.log');
   await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-recent', 'src/a.ts');
   await page.keyboard.press('Enter');
   await expect(activeTab(page)).toHaveAttribute('data-tab', 'file:src/a.ts');
-  await page.keyboard.press('ControlOrMeta+KeyE');
+  await page.keyboard.press('Alt+KeyE');
   await page.keyboard.type('pic');
   await expect(list.locator('[data-recent="docs/pic.png"]')).toBeVisible(); // from /complete, never opened
   await page.keyboard.press('Escape');
   await expect(list).toBeHidden();
+  // from the composer too, and nothing is typed there
+  await composer(page).click();
+  await page.keyboard.press('Alt+KeyE');
+  await expect(list).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(composer(page)).toHaveValue('');
 });
 
 test('hotkeys: Alt+W closes, Alt+Shift+T reopens, Alt+1 is the chat, Alt+← steps, Alt+F1 reveals, / focuses the composer @files', async ({ page }) => {

@@ -28,7 +28,7 @@ export function pushRecent(root: string, f: SavedFile): void {
   try { localStorage.setItem(recentKey(root), JSON.stringify(next)); } catch { /* storage unavailable: not persisted */ }
 }
 
-// the modal's open state: opened by the keymap (Cmd/Ctrl+E), read by RecentFiles
+// the modal's open state: opened by the keymap (Alt+E), read by RecentFiles
 let isOpen = false;
 const subs = new Set<() => void>();
 const emit = () => { for (const f of subs) f(); };

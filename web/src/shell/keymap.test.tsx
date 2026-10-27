@@ -69,7 +69,7 @@ it('in a text field: Alt and Ctrl bindings work, Alt+←/→ and the plain keys 
   expect(s.getState().tree.open).toBe(false);
 });
 
-it('Ctrl+Shift+F and Ctrl+Shift+C toggle the panels; Ctrl+E toggles recent files; Alt+F1 reveals the active file', async () => {
+it('Ctrl+Shift+F and Ctrl+Shift+C toggle the panels; Alt+E toggles recent files; Alt+F1 reveals the active file', async () => {
   const s = setup(['src/deep/x.ts']);
   const tree = s.getState().tree.open;
   key('KeyF', { mod: true, shift: true });
@@ -77,7 +77,9 @@ it('Ctrl+Shift+F and Ctrl+Shift+C toggle the panels; Ctrl+E toggles recent files
   const panel = s.getState().comments.ui.panelOpen;
   key('KeyC', { mod: true, shift: true });
   expect(s.getState().comments.ui.panelOpen).toBe(!panel);
-  key('KeyE', { mod: true });
+  key('KeyE', { mod: true }); // Ctrl/⌘+E is not ours (Claude in Chrome takes ⌘E)
+  expect(recentModal.get()).toBe(false);
+  key('KeyE', { alt: true });
   expect(await screen.findByRole('listbox', { name: 'Recent files' })).toBeInTheDocument();
   expect(recentModal.get()).toBe(true);
   act(() => recentModal.close());
@@ -113,7 +115,7 @@ it('/ and Esc on empty space focus the composer; not inside a field, and not whe
 
 it('the ? help lists every hotkey with its keys', () => {
   expect(BINDINGS.map(keysLabel)).toEqual([
-    'Alt+W', 'Alt+Shift+T', 'Alt+←', 'Alt+→', 'Alt+1…9', 'Ctrl+E', 'Ctrl+Shift+F', 'Ctrl+Shift+C', 'Alt+F1', '/, Esc',
+    'Alt+W', 'Alt+Shift+T', 'Alt+←', 'Alt+→', 'Alt+1…9', 'Alt+E', 'Ctrl+Shift+F', 'Ctrl+Shift+C', 'Alt+F1', '/, Esc',
   ]);
 });
 
@@ -146,10 +148,10 @@ it('on a Mac: ⌘ is the mod key, Option+letter/digit types in a field but works
     const box = document.getElementById('composer-input')!;
     keyEv(box, { code: 'Digit2', key: '“', altKey: true });
     expect(active(s)).toBe('file:b.ts');
-    // ⌘E opens recent files, Ctrl+E does not
-    keyEv(document.body, { code: 'KeyE', key: 'e', ctrlKey: true });
-    expect(recentModal.get()).toBe(false);
+    // Option+E (the ´ dead key) opens recent files, also from the composer; ⌘E does not
     keyEv(document.body, { code: 'KeyE', key: 'e', metaKey: true });
+    expect(recentModal.get()).toBe(false);
+    keyEv(box, { code: 'KeyE', key: 'Dead', altKey: true });
     expect(recentModal.get()).toBe(true);
     act(() => recentModal.close());
     expect(BINDINGS.map(keysLabel).slice(0, 2)).toEqual(['⌥W', '⌥⇧T']);
@@ -176,15 +178,15 @@ it('AltGr (Ctrl+Alt off a Mac) is never ours; a key someone handled is skipped; 
   expect(document.activeElement).toBe(box);
 });
 
-it('behind a modal dialog only Ctrl+E runs: the tabs behind the overlay stay', async () => {
+it('behind a modal dialog only Alt+E runs: the tabs behind the overlay stay', async () => {
   const s = setup();
-  key('KeyE', { mod: true });
+  key('KeyE', { alt: true });
   const box = await screen.findByRole('combobox', { name: /Search recent files/ });
   key('KeyW', { alt: true }, box);
   key('Digit1', { alt: true }, box);
   expect(ids(s)).toHaveLength(4);
   expect(active(s)).toBe('file:c.ts');
-  key('KeyE', { mod: true }, box); // toggles its own dialog
+  key('KeyE', { alt: true }, box); // toggles its own dialog
   expect(recentModal.get()).toBe(false);
 });
 

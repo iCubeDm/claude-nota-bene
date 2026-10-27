@@ -162,7 +162,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
       }
     }
     if (st.tabs !== tabs) {
-      // a file tab became active and stays so a moment: the most recent file of this root (Cmd/Ctrl+E, M6-13)
+      // a file tab became active and stays so a moment: the most recent file of this root (Alt+E, M6-13)
       if (restoredRoot && st.tabs.active !== tabs.active) {
         clearTimeout(recentTimer);
         const f = st.tabs.open.find((x) => x.id === st.tabs.active);

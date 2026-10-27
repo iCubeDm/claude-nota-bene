@@ -52,7 +52,7 @@ Chrome reserves Cmd/Ctrl+W/T/1–9 and Ctrl+Tab, so the bindings are:
 | Alt+Shift+T | reopen closed tab |
 | Alt+←/→ | previous/next tab |
 | Alt+1…9 | tab N (1 = chat) |
-| Cmd/Ctrl+E | recent files + search |
+| Alt+E | recent files + search (was Cmd/Ctrl+E; Claude in Chrome takes ⌘E — the user, 2026-10-27) |
 | Cmd/Ctrl+Shift+F | toggle Files |
 | Cmd/Ctrl+Shift+C | toggle Comments |
 | Alt+F1 | reveal the current file in the tree |
@@ -134,16 +134,16 @@ The hotkey list appears in the `?` help.
 - [x] No horizontal scrollbar. The wheel scrolls the strip, and the active tab scrolls into view.
 - [x] A "▾" button on the right lists the hidden tabs (and all tabs), with search. Ruling (2026-10-26): "▾" is always shown, not only on overflow (it doubles as a searchable list of all tabs; no layout probe needed).
 
-### M6-13: Recent files (Cmd/Ctrl+E)
+### M6-13: Recent files (Alt+E)
 - [x] A modal with the recently opened files of this root (persisted, up to 50) and a search field. An empty query shows the recent files; typing searches the whole project through `/complete`.
-- [x] Keys: ↑↓ Enter Esc. The previous file is preselected, so Cmd+E, Enter flips back (IntelliJ). The Cmd/Ctrl+E listener lives in RecentFiles until M6-14's keymap takes it.
+- [x] Keys: ↑↓ Enter Esc. The previous file is preselected, so Alt+E, Enter flips back (IntelliJ). The Cmd/Ctrl+E listener lives in RecentFiles until M6-14's keymap takes it.
 - [x] File-type icons.
 
 ### M6-14: Hotkeys (R-M6-5)
 - [x] One keymap module (no scattered listeners) that respects the Esc protocol and text fields: Alt combos work in fields, `/` does not.
 - [x] The `?` help lists every hotkey.
 - [x] Tests for each binding.
-- Rulings (2026-10-26): Alt+←/→ do not fire inside a text field (a Mac field's word jump); after the Package B review, Option+letter/digit on a Mac fire outside text fields only (non-US layouts type [ ] { } | with Option), and behind a modal dialog only Cmd/Ctrl+E runs; Alt+9 is the last tab, as in Chrome; Esc focuses the composer without consuming the key (it still stops a busy agent); the help is the composer's ? tooltip, generated from the keymap.
+- Rulings (2026-10-26): Alt+←/→ do not fire inside a text field (a Mac field's word jump); after the Package B review, Option+letter/digit on a Mac fire outside text fields only (non-US layouts type [ ] { } | with Option), and behind a modal dialog only Alt+E runs; Alt+9 is the last tab, as in Chrome; Esc focuses the composer without consuming the key (it still stops a busy agent); the help is the composer's ? tooltip, generated from the keymap.
 
 ## Package C — settings
 
