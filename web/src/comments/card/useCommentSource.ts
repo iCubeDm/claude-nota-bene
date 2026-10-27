@@ -87,10 +87,11 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
     // a file: open (or activate) its tab; the view scrolls once its text is loaded (files.jump)
     if (src.kind === 'file') return void dispatch(jumpToFileComment(src.path, c.id, src.ref));
     // an action's panel exists only while it and its group are open (R-M7-19): open both, and render, before looking
-    if (src.id.startsWith(TOOL_SRC)) flushSync(() => { dispatch(activate('chat')); dispatch(revealToolOf(src.id.slice(TOOL_SRC.length))); });
+    const tool = src.id.startsWith(TOOL_SRC);
+    if (tool) flushSync(() => { dispatch(activate('chat')); dispatch(revealToolOf(src.id.slice(TOOL_SRC.length))); });
     const root = itemRoot(src.id);
     if (!root) return;
-    flushSync(() => dispatch(activate('chat'))); // a hidden chat pane cannot scroll: show it before measuring
+    if (!tool) flushSync(() => dispatch(activate('chat'))); // a hidden chat pane cannot scroll: show it before measuring
     const range = rangeForAnchor(root, c.anchor);
     // a panel's command and output scroll inside their own box: bring the fragment into it first
     const box = range?.startContainer.parentElement?.closest('pre');

@@ -122,3 +122,29 @@ it('a tool comment whose action is not in the feed is an orphan', () => {
   setup([{ id: 't1', command: 'a', output: 'one' }], [comment('gone', 'one', 'a ')], 'c1');
   expect(screen.getByText(/fragment changed/)).toBeInTheDocument();
 });
+
+it('the command always renders in full, so a comment on the output keeps its offsets whatever the output cap', () => {
+  const long = 'echo ' + 'y'.repeat(25_000);
+  setup([{ id: 't1', command: long, output: 'ok' }]);
+  fireEvent.click(screen.getByRole('button', { name: /Bash · echo/ }));
+  expect(panel().querySelectorAll('pre')[0]!.textContent).toBe(long);
+  expect(screen.queryByRole('button', { name: /show all/i })).toBeNull();
+});
+
+it('a commented output renders up to its furthest comment plus a margin, not all of it, and the mark resolves', async () => {
+  const before = 'a'.repeat(50_000) + ' ';
+  const output = before + 'MID-MARK ' + 'b'.repeat(50_000);
+  const { view } = setup([{ id: 't1', command: 'c', output }], [comment('t1', 'MID-MARK', 'c ' + before, 'pending')], 'c1');
+  fireEvent.click(screen.getByText('MID-MARK'));
+  const shown = outputPre().textContent!.length;
+  expect(shown).toBeGreaterThan(before.length + 'MID-MARK'.length + 1_900);
+  expect(shown).toBeLessThan(55_000);
+  expect(screen.getByRole('button', { name: /show all/i })).toBeInTheDocument(); // the rest is still a click away
+  await waitFor(() => expect(view.container.querySelectorAll('[data-hl="pending"]')).toHaveLength(1));
+});
+
+it('a jump to an action that is not in the feed opens nothing', () => {
+  const { store } = setup([{ id: 't1', command: 'a', output: 'one' }], [comment('gone', 'one', 'a ', 'pending')], 'c1');
+  fireEvent.click(screen.getByText('one'));
+  expect(store.getState().feedUi).toEqual({ openTools: [], openGroups: [] });
+});

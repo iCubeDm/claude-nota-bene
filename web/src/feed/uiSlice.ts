@@ -48,9 +48,12 @@ export function groupOf(items: FeedItem[], toolId: string): string | null {
   return end - first > 1 ? (items[first] as Extract<FeedItem, { kind: 'tool' }>).id : null;
 }
 
-/** Opens an action's panel and its group, read from the feed at call time (a jump from a comment card). */
-export const revealToolOf = (toolId: string): AppThunk => (d, getState) =>
-  void d(revealTool({ tool: toolId, group: groupOf(getState().feed.items, toolId) }));
+/** Opens an action's panel and its group, read from the feed at call time (a jump from a comment card); an action not in the feed opens nothing. */
+export const revealToolOf = (toolId: string): AppThunk => (d, getState) => {
+  const items = getState().feed.items;
+  if (!items.some((it) => it.kind === 'tool' && it.id === toolId)) return;
+  d(revealTool({ tool: toolId, group: groupOf(items, toolId) }));
+};
 
 /** Comments (pending and sent) per tool id, for the folded heads: a comment inside a closed panel is never invisible. */
 export const selectToolCommentCounts = createSelector([(s: RootState) => s.comments.items], (items) => {
@@ -58,6 +61,18 @@ export const selectToolCommentCounts = createSelector([(s: RootState) => s.comme
   for (const c of items) {
     const src = c.anchor.source;
     if (src.kind === 'message' && src.id.startsWith(TOOL_SRC)) m[src.id.slice(TOOL_SRC.length)] = (m[src.id.slice(TOOL_SRC.length)] ?? 0) + 1;
+  }
+  return m;
+});
+
+/** The furthest anchor end (in the panel's anchor text) per tool id: how much of a commented output must be rendered. */
+export const selectToolAnchorEnds = createSelector([(s: RootState) => s.comments.items], (items) => {
+  const m: Record<string, number> = {};
+  for (const c of items) {
+    const src = c.anchor.source;
+    if (src.kind !== 'message' || !src.id.startsWith(TOOL_SRC) || !('end' in c.anchor)) continue;
+    const id = src.id.slice(TOOL_SRC.length);
+    m[id] = Math.max(m[id] ?? 0, c.anchor.end);
   }
   return m;
 });

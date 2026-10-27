@@ -2,7 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ARG_KEYS, type FeedItem } from '@/store/feed.ts';
-import { selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
+import { selectToolAnchorEnds, selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
 
 type Tool = Extract<FeedItem, { kind: 'tool' }>;
 
@@ -26,14 +26,44 @@ export function inputText(name: string, input: Record<string, unknown>): string 
     .join('\n\n');
 }
 
-/** `full`: render it all at once (a commented panel, so an anchor past the cap still resolves, on a jump and for the mark). */
-function Clipped({ text, className, full }: { text: string; className: string; full: boolean }) {
+/** Rendered text past a commented output's furthest anchor, so the quote's suffix context is there too. */
+const MARGIN = 2_000;
+const WS = /[\s\u00a0]/;
+
+/** The length of `text` in the anchor model (anchors/text.ts): whitespace runs collapse to one space, ends trimmed. */
+function normalLength(text: string): number {
+  let n = 0;
+  let space = false;
+  for (const ch of text) {
+    if (WS.test(ch)) space = n > 0;
+    else { n += (space ? 1 : 0) + 1; space = false; }
+  }
+  return n;
+}
+
+/** The raw index in `text` where its normalised offset `n` falls (the inverse of the collapse above). */
+function rawIndex(text: string, n: number): number {
+  let k = 0;
+  let space = false;
+  for (let i = 0; i < text.length; i++) {
+    if (k >= n) return i;
+    if (WS.test(text[i]!)) space = k > 0;
+    else { k += (space ? 1 : 0) + 1; space = false; }
+  }
+  return text.length;
+}
+
+/**
+ * A `pre` showing the first `cap` characters until the reader asks for the rest. What is rendered is always a prefix
+ * of the full text, so an anchor inside it keeps its offsets whatever the cap.
+ */
+function Clipped({ text, className, cap = LAZY_CHARS }: { text: string; className: string; cap?: number }) {
   const t = useT();
   const [all, setAll] = useState(false);
-  const cut = !all && !full && text.length > LAZY_CHARS;
+  const cut = !all && text.length > cap;
   return (
     <>
-      <pre className={className}>{cut ? text.slice(0, LAZY_CHARS) : text}</pre>
+      <pre className={className}>{cut ? text.slice(0, cap) : text}</pre>
       {cut && (
         <button type="button" data-anchor-skip className="mt-1 text-[11px] underline" onClick={() => setAll(true)}>
           {t('showAll')}
@@ -45,12 +75,18 @@ function Clipped({ text, className, full }: { text: string; className: string; f
 
 const BOX = 'max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-[11.5px] leading-snug';
 
-function Panel({ item, id, full }: { item: Tool; id: string; full: boolean }) {
+/** `end`: the furthest comment's anchor end in this panel's text (0 = none), so the output renders at least up to it. */
+function Panel({ item, id, end }: { item: Tool; id: string; end: number }) {
   const t = useT();
   const busy = useAppSelector(selectBusy);
   // computed only while the panel is open (it is mounted only then), and once per input
   const input = useMemo(() => inputText(item.name, item.input), [item.name, item.input]);
   const failed = item.result?.isError;
+  // the command renders in full (it is what is commented most, and the output's offsets start after it); the output is
+  // cut past its furthest comment plus a margin, never below the lazy cap
+  const out = item.result?.text ?? '';
+  const outStart = useMemo(() => { const n = normalLength(input); return n ? n + 1 : 0; }, [input]);
+  const cap = end > outStart ? Math.max(LAZY_CHARS, rawIndex(out, end - outStart) + MARGIN) : LAZY_CHARS;
   const none = <div data-anchor-skip className="text-[11.5px] italic text-muted-foreground">{t('toolNoOutput')}</div>;
   return (
     // a commentable root (R-M7-18): its anchor text is the command, then the output; labels and hints stay out of it
@@ -58,12 +94,12 @@ function Panel({ item, id, full }: { item: Tool; id: string; full: boolean }) {
       {input && (
         <>
           <div data-anchor-skip className="mb-0.5 text-[10.5px] text-muted-foreground">{t('toolInput')}</div>
-          <Clipped text={input} className={BOX} full={full} />
+          <Clipped text={input} className={BOX} cap={Infinity} />
         </>
       )}
       <div data-anchor-skip className="mb-0.5 mt-1.5 text-[10.5px] text-muted-foreground">{t('toolOutput')}</div>
       {item.result ? (
-        item.result.text ? <Clipped text={item.result.text} className={BOX + (failed ? ' text-destructive' : '')} full={full} /> : none
+        item.result.text ? <Clipped text={out} className={BOX + (failed ? ' text-destructive' : '')} cap={cap} /> : none
       ) : busy ? (
         <div data-anchor-skip className="text-[11.5px] italic text-muted-foreground">{t('toolRunning')}</div>
       ) : (
@@ -79,6 +115,7 @@ export function ToolLine({ item }: { item: Tool }) {
   const dispatch = useAppDispatch();
   const open = useAppSelector((s) => selectToolOpen(s, item.id));
   const comments = useAppSelector((s) => selectToolCommentCounts(s)[item.id] ?? 0);
+  const end = useAppSelector((s) => selectToolAnchorEnds(s)[item.id] ?? 0);
   const panelId = useId();
   return (
     <div data-kind="tool">
@@ -98,7 +135,7 @@ export function ToolLine({ item }: { item: Tool }) {
         {item.arg ? ` · ${item.arg}` : ''}
         {!open && comments > 0 && <span className="text-nb-accent"> · {t('nComments', comments)}</span>}
       </button>
-      {open && <Panel item={item} id={panelId} full={comments > 0} />}
+      {open && <Panel item={item} id={panelId} end={end} />}
     </div>
   );
 }
