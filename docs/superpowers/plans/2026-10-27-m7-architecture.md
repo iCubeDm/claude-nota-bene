@@ -288,6 +288,25 @@ The mapping follows today's `web/src/store/feed.ts` `reduceSdk`, `web/src/tasks/
 
 - [ ] `npm test` and `npm run e2e` exit 0, with e2e green again. Commit with `Task: M7-08`.
 
+### M7-17: Comments on agent actions (runs right after M7-08)
+
+The user, 2026-10-27, wants agent and subagent actions folded but still visible and commentable: "можно было посмотреть и откомментить команду/скрипт/действие". Folding ("N действий", collapsed, the latest action live) landed on `main` as 6d81603 or a later commit. **First step: merge `main` into `m7-architecture`.**
+
+**Rulings**
+- **R-M7-18.** The tool panel's command and output become anchorable text. The anchor source is `{ kind: 'message', id: 'tool:<tool_use_id>' }`; tool_use ids are stable across a replay and a server restart, so no protocol change is needed. The toggle line itself stays out of anchors (`data-anchor-skip`).
+- **R-M7-19.** The open state of groups and tool panels moves from component state to a small slice `feedUi: { openTools: string[]; openGroups: string[] }`, so a jump from a comment card can open the group and the panel. It is not persisted.
+- **R-M7-20.** The batch names the place as `t('srcTool', name, arg)`: «команда Bash (npm test)» / "Bash command (npm test)", `arg` cut to 60 characters. A collapsed group whose actions carry comments shows `nComments` on its head, so a comment is never hidden.
+
+**Files:**
+- Modify: `web/src/feed/ToolLine.tsx`, `web/src/feed/ToolGroup.tsx`, `web/src/store/store.ts` (`selectReplyLabel` for `tool:` ids), `web/src/comments/HighlightLayer.tsx` and `web/src/comments/card/useCommentSource.ts` (find and jump to `tool:` roots), `web/src/comments/SelectionButton.tsx` (selection inside a tool panel)
+- Create: `web/src/feed/uiSlice.ts`
+- i18n: `srcTool`
+- Test: selecting inside a tool's output creates a comment anchored to `tool:<id>`; the batch line names it; a collapsed group shows the count; a jump opens the group and the panel and highlights the text; e2e: comment a command's output, reload, and the highlight is back.
+
+Steps:
+- [ ] Merge `main`; red, then green; `npm test` and `npm run e2e` exit 0.
+- [ ] Commit with `Task: M7-17`.
+
 ### M7-09: Capabilities (R-M7-15)
 
 **Files:**
