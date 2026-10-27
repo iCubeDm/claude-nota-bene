@@ -1,4 +1,4 @@
-import { configureStore, createAction, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
+import { configureStore, createAction, createListenerMiddleware, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, useStore, type TypedUseSelectorHook } from 'react-redux';
 import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
 import { connect as realConnect } from '../net/socket.ts';
@@ -7,19 +7,17 @@ import { composerSlice } from '../composer/slice.ts';
 import { refusedMiddleware } from '../composer/refused.ts';
 import { controlsListener, controlsSlice } from '../controls/slice.ts';
 import { commentsSlice, resyncComments } from '../comments/slice.ts';
-import { activate, enterRoot, readSavedTabs, serializeTabs, tabsKey, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
-import { clearRefCache } from '../refs/refs.ts';
-import { loadSources } from '../files/sources.ts';
-import { pushRecent, RECENT_DWELL_MS } from '../files/recent.ts';
+import { activate, tabsSlice, type Tab, type TabsState } from '../tabs/slice.ts';
 import { AUDIO, VIDEO } from '../files/kinds.ts';
 import { browserPip, MediaController, type PipApi } from '../media/mediaController.ts';
 import { filesSlice } from '../files/slice.ts';
 import { markupSlice } from '../media/markup/slice.ts';
-import { readSavedDirs, treeKey, treeSlice } from '../tree/slice.ts';
+import { treeSlice } from '../tree/slice.ts';
 import { statsSlice } from '../stats/slice.ts';
 import { tasksSlice } from '../tasks/slice.ts';
 import { toast } from '../shell/toast.ts';
 import { recordCompactMs } from '../feed/compactTiming.ts';
+import { persistListeners, type PersistState } from './persist.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** A live compaction's duration feeds the estimate of the next one (a replay is history: it would count twice). */
@@ -74,8 +72,9 @@ const mediaByStore = new WeakMap<object, MediaController>();
  * dispatch, so before React renders the new pane, and still inside the click's user activation (PiP needs one).
  */
 const mediaMiddleware = (media: MediaController): Middleware => (api) => {
-  // diffed against the last tabs it reported, not the state before this action: the store's subscriber dispatches
-  // (enterRoot) from inside this dispatch, and that nested change must be reported once, not again on the way out
+  // diffed against the last tabs it reported, not the state before this action, so a change is reported once however
+  // the dispatches nest. The persistence listener (enterRoot on a new root) sits outside this middleware: it dispatches
+  // after the triggering action has come back through here, so that restore is its own pass, never nested in this one
   let seen: TabsState | null = null;
   return (next) => (action) => {
     seen ??= (api.getState() as { tabs: TabsState }).tabs;
@@ -111,76 +110,14 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
       return tab?.kind === 'file' && (VIDEO.test(tab.path) || AUDIO.test(tab.path));
     },
   });
+  const persist = createListenerMiddleware<PersistState>();
+  persistListeners(persist);
   const store = configureStore({
     reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware, persist.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
   mediaByStore.set(store, media);
-  // the ONE place that persists UI state, whoever changed it (toggle, ×, auto-open after adding a comment, tab changes)
-  let panelOpen = store.getState().comments.ui.panelOpen;
-  let treeOpen = store.getState().tree.open;
-  let tabs = store.getState().tabs;
-  let dirs = store.getState().tree.dirs;
-  let restoredRoot: string | null = null;
-  let recentTimer: ReturnType<typeof setTimeout> | undefined;
-  store.subscribe(() => {
-    let st = store.getState();
-    const now = st.comments.ui.panelOpen;
-    if (now !== panelOpen) {
-      panelOpen = now;
-      try { localStorage.setItem('panel:comments', now ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
-    }
-    if (st.tree.open !== treeOpen) {
-      treeOpen = st.tree.open;
-      try { localStorage.setItem('panel:tree', treeOpen ? '1' : '0'); } catch { /* storage unavailable: not persisted */ }
-    }
-    const root = st.feed.session?.root;
-    if (root && root !== restoredRoot) {
-      // every root change (the first one, a switch to another folder, a switch back): that root's saved tabs and tree.
-      // Read before the dispatch: it re-enters this subscriber, which persists under the new root at once.
-      const first = restoredRoot === null;
-      restoredRoot = root;
-      const saved = readSavedTabs(root);
-      const savedDirs = readSavedDirs(root);
-      // source ids are stable (M3-16): every saved tab comes back at once, whatever /sources says; a tab whose source
-      // is gone keeps its place and says so in its view. The load feeds the picker and absolute refs; another root has
-      // other worktrees and branches, and its paths other HEAD answers, so both caches are dropped then.
-      if (!first) clearRefCache();
-      void loadSources(!first);
-      store.dispatch(enterRoot({ root, first, tabs: saved, dirs: savedDirs }));
-      // the restore re-entered this subscriber, which persisted it; `st` is stale now and would write the
-      // pre-restore state back over it
-      st = store.getState();
-      dirs = st.tree.dirs;
-      tabs = st.tabs;
-    }
-    if (st.tree.dirs !== dirs) {
-      dirs = st.tree.dirs;
-      if (restoredRoot) {
-        try { localStorage.setItem(treeKey(restoredRoot, st.tree.src), JSON.stringify(dirs)); } catch { /* not persisted */ }
-      }
-    }
-    if (st.tabs !== tabs) {
-      // a file tab became active and stays so a moment: the most recent file of this root (Alt+E, M6-13)
-      if (restoredRoot && st.tabs.active !== tabs.active) {
-        clearTimeout(recentTimer);
-        const f = st.tabs.open.find((x) => x.id === st.tabs.active);
-        const at = restoredRoot;
-        if (f?.kind === 'file') {
-          recentTimer = setTimeout(() => {
-            const now = store.getState().tabs;
-            if (now.active === f.id && now.root === at) pushRecent(at, { path: f.path, ...(f.src !== 'here' && { src: f.src }), ...(f.ref && { ref: f.ref }) });
-          }, RECENT_DWELL_MS);
-        }
-      }
-      tabs = st.tabs;
-      // before the root is known there is nothing to key by; the restore merges these tabs in later
-      if (restoredRoot) {
-        try { localStorage.setItem(tabsKey(restoredRoot), JSON.stringify(serializeTabs(tabs))); } catch { /* not persisted */ }
-      }
-    }
-  });
   conn = connectFn(
     o.url,
     (ev) => store.dispatch(serverEvent(ev)),
