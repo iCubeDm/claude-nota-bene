@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentSession } from '../agent/types.ts';
 import { AgentSlot } from './agentSlot.ts';
+import type { PhaseKind } from './phase.ts';
 
 /** A stand-in agent: `end()` ends its message loop; close() is recorded (and can be made to throw). */
 function fakeAgent(log: string[], name: string, o: { closeThrows?: boolean } = {}) {
@@ -19,6 +20,7 @@ function make(o: { closeThrows?: boolean; loopNeverEnds?: boolean } = {}) {
   const log: string[] = [];
   const errors: string[] = [];
   const agents: ReturnType<typeof fakeAgent>[] = [];
+  const phase = { kind: 'live' as PhaseKind };
   const slot: AgentSlot = new AgentSlot({
     start: (g) => { const f = fakeAgent(log, `a${agents.length + 1}`, o); agents.push(f); log.push(`start g${g}`); return f.a; },
     pump: async (a, g) => {
@@ -29,16 +31,17 @@ function make(o: { closeThrows?: boolean; loopNeverEnds?: boolean } = {}) {
       log.push(`loop end g${g}`);
     },
     onError: (where, e) => errors.push(`${where}: ${(e as Error).message}`),
+    phase: () => phase.kind,
   });
-  return { slot, log, errors, agents };
+  return { slot, log, errors, agents, phase };
 }
 
 describe('AgentSlot', () => {
   it('ensure starts one agent in the current generation and pumps it; later calls return the same agent', () => {
     const { slot, log } = make();
     expect(slot.agent).toBeNull();
-    const a = slot.ensure('live');
-    expect(slot.ensure('live')).toBe(a);
+    const a = slot.ensure();
+    expect(slot.ensure()).toBe(a);
     expect(slot.agent).toBe(a);
     expect(slot.gen).toBe(0);
     expect(slot.isCurrent(a, 0)).toBe(true);
@@ -46,18 +49,20 @@ describe('AgentSlot', () => {
   });
 
   it('ensure returns a running agent in any phase, but starts none unless live', () => {
-    const { slot, log } = make();
-    const a = slot.ensure('live');
-    expect(slot.ensure('switching')).toBe(a);
+    const { slot, log, phase } = make();
+    const a = slot.ensure();
+    phase.kind = 'switching';
+    expect(slot.ensure()).toBe(a);
     slot.close();
-    expect(() => slot.ensure('switching')).toThrow('the session is switching');
-    expect(() => slot.ensure('closed')).toThrow('the session is closed');
+    expect(() => slot.ensure()).toThrow('the session is switching');
+    phase.kind = 'closed';
+    expect(() => slot.ensure()).toThrow('the session is closed');
     expect(log.filter((l) => l.startsWith('start'))).toHaveLength(1);
   });
 
   it('teardown: gen++, the slot is empty, release runs before the close, then it waits for the old loop', async () => {
     const { slot, log, agents } = make();
-    const a = slot.ensure('live');
+    const a = slot.ensure();
     const done = slot.teardown(1000, () => log.push(`release gen=${slot.gen} agent=${slot.agent}`));
     expect(slot.gen).toBe(1);
     expect(slot.agent).toBeNull();
@@ -69,7 +74,7 @@ describe('AgentSlot', () => {
     agents[0]!.end();
     await done;
     expect(log.slice(2)).toEqual(['release gen=1 agent=null', 'close a1', 'loop end g0']);
-    slot.ensure('live');
+    slot.ensure();
     expect(log.at(-2)).toBe('start g1');
   });
 
@@ -77,7 +82,7 @@ describe('AgentSlot', () => {
     const { slot } = make({ loopNeverEnds: true });
     await slot.teardown(5);
     expect(slot.gen).toBe(1);
-    slot.ensure('live');
+    slot.ensure();
     const t0 = Date.now();
     await slot.teardown(30);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(25);
@@ -86,7 +91,7 @@ describe('AgentSlot', () => {
 
   it('close: synchronous teardown without the wait; a close that throws is reported', () => {
     const { slot, log, errors } = make({ closeThrows: true });
-    slot.ensure('live');
+    slot.ensure();
     slot.close(() => log.push('release'));
     expect(slot.gen).toBe(1);
     expect(slot.agent).toBeNull();
@@ -98,17 +103,17 @@ describe('AgentSlot', () => {
 
   it('died: the slot is emptied in the same generation and the agent closed; the next ensure starts a new one', () => {
     const { slot, log } = make();
-    const a = slot.ensure('live');
+    const a = slot.ensure();
     slot.died(a);
     expect(slot.agent).toBeNull();
     expect(slot.gen).toBe(0);
     expect(log.at(-1)).toBe('close a1');
-    expect(slot.ensure('live')).not.toBe(a);
+    expect(slot.ensure()).not.toBe(a);
   });
 
   it('died for an agent that is not the current one is a programmer error', () => {
     const { slot } = make();
-    const a = slot.ensure('live');
+    const a = slot.ensure();
     slot.close();
     expect(() => slot.died(a)).toThrow(/not the current agent/);
   });
@@ -116,7 +121,7 @@ describe('AgentSlot', () => {
   it('stopTurn: interrupts the agent, waits up to waitMs; a rejection inside the wait is reported, a later one is not', async () => {
     const { slot, errors } = make();
     expect(await slot.stopTurn(10)).toBeUndefined(); // no agent: nothing
-    const a = slot.ensure('live');
+    const a = slot.ensure();
     let reject!: (e: Error) => void;
     let calls = 0;
     a.interrupt = () => { calls++; return new Promise<void>((_, r) => { reject = r; }); };

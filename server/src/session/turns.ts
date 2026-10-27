@@ -24,9 +24,14 @@ export class TurnLedger {
   private clearResultDue = false;
   private compactedInTurn = false;
 
+  /** throws when the id is known; registers nothing (a refused send must have no side effects) */
+  assertNew(id: string): void {
+    if (this.sends.has(id)) throw new Error(`send ${id} is already known`);
+  }
+
   /** a new send: queued; throws when the id is known */
   sent(id: string, o: { command?: 'compact' | 'clear' } = {}): void {
-    if (this.sends.has(id)) throw new Error(`send ${id} is already known`);
+    this.assertNew(id);
     this.sends.set(id, { state: 'queued', commandDue: !!o.command });
     if (o.command) {
       this.clearSent = o.command === 'clear';

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { AgentEvent, IdleCompact, ImageRef, Mode, Stats } from '@nota-bene/shared';
+import type { AgentEvent } from '@nota-bene/shared';
 import { AttachmentStore } from './attachments.ts';
 import type { AgentBackend, AgentSession } from './agent/types.ts';
 import { reportError } from './errors.ts';
@@ -20,59 +20,13 @@ import { SendQueue } from './session/sendQueue.ts';
 import { checkTarget } from './session/target.ts';
 import { TitleTracker } from './session/title.ts';
 import { TurnLedger, activity } from './session/turns.ts';
+import type { SessionManager } from './session/types.ts';
 import { stateDir } from './state.ts';
 import { StatsService } from './stats.ts';
 
 export { SwitchError };
+export type { SessionManager };
 
-export type SessionManager = {
-  /** Returns 'switching' for a send refused during a switch (nothing sent or emitted; the server tells the asking socket), else null. */
-  send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): 'switching' | null;
-  interrupt(): void;
-  answer(permissionId: string, allow: boolean): void;
-  mode(): Mode;
-  /** Asks the agent, then persists and announces; a refusal is reported and the current mode re-announced. */
-  /** answers with one `mode` event carrying `ack: id` (unless a session switch takes over, which announces its own) */
-  setMode(mode: Mode, id?: string): Promise<void>;
-  info(): { id: string | null; root: string; title: string | null; model: string | null };
-  /** A send not yet answered by a result, a waiting permission, or a switch in progress (R-M4-4). */
-  busy(): boolean;
-  /** True from the start of a switch's checks to the new session's announcement. */
-  switching(): boolean;
-  /**
-   * Closes the agent, moves to `dir` (absolute, an existing directory; for an id, the session's own cwd) and resumes
-   * `id` there, or starts a new session for null. Rejects with a SwitchError while busy or for a bad target, before
-   * anything is torn down.
-   */
-  switch(o: { id: string | null; dir: string }): Promise<void>;
-  /**
-   * switch({ id: current id, dir: root }): the same session resumed by a fresh agent; a fresh start when there is no
-   * id yet. Allowed while busy (the stuck-agent escape hatch): it interrupts first (2 s cap); only a switch blocks it.
-   */
-  restart(): Promise<void>;
-  /**
-   * `/compact` or `/clear`: shown in the feed as a user event, then sent to the agent as the plain string. Refused
-   * (reported as `busy`) while the agent is busy or the session is switching (R-M4-4).
-   */
-  command(name: 'compact' | 'clear'): void;
-  /** The UI was used (any socket): the idle-compaction clock starts again. */
-  activity(): void;
-  idleCompact(): IdleCompact;
-  /** Persists for this project and announces it to every socket. */
-  setIdleCompact(on: boolean): void;
-  /** Called at the end of a switch, after the session, mode and stats events (the server sends the comments there). */
-  onSwitch(cb: (id: string | null, o: { restart: boolean }) => void): void;
-  /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
-  fileSuggestions(query: string): Promise<string[]>;
-  /** Context, plan limits and cost as last measured (what a new socket gets). */
-  stats(): Stats;
-  /** A socket attached: the stats catch up when the skipped 5-minute ticks left them stale. */
-  clientAttached(): void;
-  /** Stops the stats timers and closes the agent. Idempotent. */
-  close(): void;
-  /** Called whenever the session id changes to a real id (first init, or a different id after resume/restart). */
-  onSessionId(cb: (id: string, prev: string | null) => void): void;
-};
 
 const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after close() must not hold the switch
 const INTERRUPT_TIMEOUT_MS = 2000; // a busy restart's interrupt; a stuck CLI must not hold the restart
@@ -83,6 +37,8 @@ const HISTORY_TIMEOUT_MS = 20_000; // a transcript read that hangs must not hold
  * hand-over. Phase: live/switching/closed. TurnLedger: every send, the turn facts. PermissionBroker: the open asks.
  * TitleTracker: the title. AgentSlot: agent, loop, generation. SessionIdentity: id, root, model, fork, `session`.
  * ModeKeeper: the mode. SendQueue: the user's sends in order. See the M7-11 report for the old-flag owners.
+ * The one cycle, titles ⇄ who: TitleTracker.onChange → who.announce() (an emit), and who's `title` option reads
+ * titles.title (read-only); neither calls back into the other's state changes.
  */
 export async function createSessionManager(o: SessionOptions): Promise<SessionManager> {
   const { hub, backend } = o;
@@ -105,8 +61,9 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     start: (g) => backend.start({ ...who.startOptions(), permissionMode: modes.mode, ask: permissions.ask(() => slot.gen, g) }),
     pump,
     onError: report,
+    phase: () => phase.kind,
   });
-  const queue = new SendQueue({ gen: () => slot.gen, agent: () => slot.ensure(phase.kind), running: (id) => turns.running(id), report, fail: (e, id) => failTurn(e, id) });
+  const queue = new SendQueue({ gen: () => slot.gen, agent: () => slot.ensure(), running: (id) => turns.running(id), report, fail: (e, id) => failTurn(e, id) });
   /** A send not yet answered, a waiting permission, or a switch in progress (R-M4-4); `closed` is not part of it. */
   const busy = () => phase.switching || activity(turns, permissions) !== 'idle';
   const stats = new StatsService({
@@ -257,7 +214,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       phase.endSwitch();
       // after the history replay, so no frame of the new agent can be wiped by it; a close() meanwhile: no agent
       if (tornDown && phase.kind === 'live') {
-        try { slot.ensure(phase.kind); } catch (e) { report('agent', e); }
+        try { slot.ensure(); } catch (e) { report('agent', e); }
         stats.start();
       }
     }
@@ -275,7 +232,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     const text = `/${name}`;
     const g = slot.gen;
     try {
-      const a = slot.ensure(phase.kind);
+      const a = slot.ensure();
       hub.emit({ kind: 'user', id, text, ...(isIdle ? { idle: true } : {}) }); // before the agent sees it, as in the prototype
       turns.sent(id, { command: name });
       turns.running(id);
@@ -288,17 +245,18 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
   }
 
   await load(who.id);
-  slot.ensure(phase.kind);
+  slot.ensure();
   stats.start();
 
   return {
     send({ id, text, force, images }) {
       if (phase.switching) return 'switching';
+      turns.assertNew(id); // first: a reused id is refused with no side effects
       turns.userTurn(); // a real turn follows: its result is a normal one
       idle.touch();
-      slot.ensure(phase.kind);
+      slot.ensure();
       const { refs, payload } = resolveImages(attachments, images, (e) => report('attach', e));
-      turns.sent(id); // before the user event: a reused id is refused with nothing emitted
+      turns.sent(id);
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
       queue.push({ id, text, force, images: payload }); // handed over in order, after a forced send's interrupt
       return null;

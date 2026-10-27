@@ -78,6 +78,14 @@ describe('TurnLedger: illegal steps throw (programmer errors)', () => {
     expect(() => t.sent('a')).toThrow(/already known/);
   });
 
+  it('assertNew: throws for a known id, registers nothing', () => {
+    const t = new TurnLedger();
+    t.assertNew('a');
+    expect(t.state('a')).toBeUndefined();
+    t.sent('a');
+    expect(() => t.assertNew('a')).toThrow(/already known/);
+  });
+
   it('running an id we never registered, or running a send twice', () => {
     const t = new TurnLedger();
     expect(() => t.running('nope')).toThrow(/unknown send/);

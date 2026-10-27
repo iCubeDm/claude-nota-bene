@@ -28,7 +28,8 @@ export class PermissionBroker {
       const id = randomUUID();
       let state: AskState = 'open';
       const finish = (allow: boolean, to: AskState) => {
-        if (state !== 'open') throw new Error(`permission ${id} is already ${state}`);
+        // the first settle stands; unreachable through the interface (answer/abort/denyAll each find an open ask only)
+        if (state !== 'open') return;
         state = to;
         this.open.delete(id);
         signal.removeEventListener('abort', onAbort);

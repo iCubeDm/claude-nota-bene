@@ -9,6 +9,8 @@ type SlotOptions = {
   /** the agent's message loop; it checks isCurrent(a, g) before acting on anything */
   pump: (a: AgentSession, g: number) => Promise<void>;
   onError: (where: string, e: unknown) => void;
+  /** the session's phase: only a live one may start an agent */
+  phase: () => PhaseKind;
 };
 
 /**
@@ -40,8 +42,9 @@ export class AgentSlot {
   }
 
   /** The running agent; with none, starts one, which only a live phase may (mid-switch the switch starts it). */
-  ensure(phase: PhaseKind): AgentSession {
+  ensure(): AgentSession {
     if (this.a) return this.a;
+    const phase = this.o.phase();
     if (phase !== 'live') throw new Error(`the session is ${phase}`);
     const g = this.g;
     const a = this.o.start(g);
