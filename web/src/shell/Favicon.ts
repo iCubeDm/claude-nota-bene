@@ -13,10 +13,10 @@ export const faviconSvg = (fill: string) =>
   '<g fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M7.5 21.5v-11l6.5 11v-11"/><path d="M18 10.5h3.2a2.75 2.75 0 0 1 0 5.5H18z"/><path d="M18 16h3.7a2.75 2.75 0 0 1 0 5.5H18z"/></g></svg>';
 
-/** wait > work > done > idle */
+/** wait > work > done > idle; a live background task (subagent, shell) is work too, after the turn that started it ends */
 export function favState(s: RootState, done: boolean): FavState {
   if (s.feed.items.some((it) => it.kind === 'permission' && it.answer === undefined)) return 'wait';
-  if (s.feed.busy) return 'work';
+  if (s.feed.busy || Object.keys(s.tasks).length > 0) return 'work';
   return done ? 'done' : 'idle';
 }
 

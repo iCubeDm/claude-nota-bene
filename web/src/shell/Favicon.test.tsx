@@ -91,3 +91,17 @@ it('a replayed result never lights done', () => {
   ev({ kind: 'replay', events: [user, result] } as ServerEvent);
   expect(fill()).toBe(FAV.idle);
 });
+
+it('a background task (subagent, shell) keeps it working after the turn ends; done only once the task ends', () => {
+  const { ev, fill } = setup();
+  ev(user);
+  ev(sdk({ type: 'system', subtype: 'task_started', task_id: 't1', description: 'review' }));
+  focused = false;
+  ev(result); // the main turn ended while away, the subagent still runs
+  expect(fill()).toBe(FAV.workHi);
+  act(() => void vi.advanceTimersByTime(700));
+  expect(fill()).toBe(FAV.work);
+  ev(sdk({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed' }));
+  expect(fill()).toBe(FAV.done);
+  expect(vi.getTimerCount()).toBe(0);
+});
