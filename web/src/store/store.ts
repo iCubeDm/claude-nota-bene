@@ -1,7 +1,7 @@
 import { configureStore, createAction, createListenerMiddleware, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, useStore, type TypedUseSelectorHook } from 'react-redux';
 import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
-import { connect as realConnect } from '../net/socket.ts';
+import { connect as realConnect, type Connection, type SocketState } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
 import { refusedMiddleware } from '../composer/refused.ts';
@@ -39,7 +39,7 @@ const toastMiddleware: Middleware = () => (next) => (action) => {
 
 /** The only way server data enters the store. */
 export const serverEvent = createAction<ServerEvent>('server/event');
-export const connState = createAction<'open' | 'closed'>('conn/state');
+export const connState = createAction<ConnState>('conn/state');
 
 // reduce() is pure and returns a new object. Returning a new state from an Immer case reducer is
 // allowed, so we hand it the draft cast to FeedState: reduce only reads it and spreads/slices
@@ -54,7 +54,8 @@ export const feedSlice = createSlice({
     .addCase(historyPrepended, (state, a) => prependHistory(state as FeedState, a.payload)),
 });
 
-export type ConnState = 'connecting' | 'open' | 'closed'; // connecting = never open yet; closed = dropped after an open
+// connecting = never open yet; closed = dropped after an open; occupied = another tab owns the window; taken = another tab took it from us (M7-15)
+export type ConnState = 'connecting' | 'open' | 'closed' | 'occupied' | 'taken';
 
 export const connSlice = createSlice({
   name: 'conn',
@@ -64,6 +65,7 @@ export const connSlice = createSlice({
 });
 
 type Send = (m: ClientMessage) => boolean;
+type Extra = { send: Send; takeOver(): void };
 
 /** Whether Redux DevTools are on: dev builds only. Read at call time so tests can stub it. */
 export const devToolsEnabled = (): boolean => import.meta.env.DEV;
@@ -101,10 +103,26 @@ const mediaMiddleware = (media: MediaController): Middleware => (api) => {
  * Creates the store and exactly one socket connection. The socket lives only in this closure
  * (reached by thunks through the thunk `extra` argument), never in Redux state: it is not serializable.
  */
-export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: PipApi }) {
+export function makeStore(o: {
+  url: string;
+  connect?: (url: string, onEvent: (ev: ServerEvent) => void, onState: (s: SocketState) => void) => Connection;
+  pip?: PipApi;
+}) {
   const connectFn = o.connect ?? realConnect;
-  let conn: ReturnType<typeof realConnect> | null = null;
+  let conn: Connection | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
+  // «Работать здесь» was pressed: the next `occupied` is answered with `takeover` at once (and never shown)
+  let takeoverWanted = false;
+  const takeOver = () => {
+    takeoverWanted = true;
+    if (store.getState().conn.state === 'occupied') {
+      send({ type: 'takeover' });
+      takeoverWanted = false;
+    } else {
+      store.dispatch(connState('connecting'));
+      conn?.reconnect?.();
+    }
+  };
   // one media controller per store; it holds DOM elements, so it lives here and not in state (components reach it via useMedia)
   const media: MediaController = new MediaController({
     pip: o.pip ?? browserPip,
@@ -118,13 +136,26 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   persistListeners(persist);
   const store = configureStore({
     reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer, feedUi: feedUiSlice.reducer },
-    middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware, persist.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
+    middleware: (gdm) => gdm({ thunk: { extraArgument: { send, takeOver } satisfies Extra } }).prepend(controlsListener.middleware, persist.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
   mediaByStore.set(store, media);
   conn = connectFn(
     o.url,
-    (ev) => store.dispatch(serverEvent(ev)),
+    (ev) => {
+      if (ev.kind === 'occupied') {
+        if (takeoverWanted) {
+          takeoverWanted = false;
+          send({ type: 'takeover' });
+        } else store.dispatch(connState('occupied'));
+      } else if (ev.kind === 'taken-over') store.dispatch(connState('taken'));
+      else if (ev.kind === 'replay') {
+        // a replay is only ever sent to the owner: the takeover went through (or the other tab had gone)
+        takeoverWanted = false;
+        if (store.getState().conn.state === 'occupied') store.dispatch(connState('open'));
+      }
+      store.dispatch(serverEvent(ev));
+    },
     (s) => {
       store.dispatch(connState(s));
       if (s === 'open') store.dispatch(resyncComments());
@@ -136,7 +167,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
 export type AppStore = ReturnType<typeof makeStore>;
 export type RootState = ReturnType<AppStore['getState']>;
 export type AppDispatch = AppStore['dispatch'];
-export type AppThunk<R = void> = ThunkAction<R, RootState, { send: Send }, UnknownAction>;
+export type AppThunk<R = void> = ThunkAction<R, RootState, Extra, UnknownAction>;
 
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
 export const useAppDispatch: () => AppDispatch = useDispatch;
@@ -164,6 +195,9 @@ export const sendMessage =
 export const interrupt = (): AppThunk => (_d, getState, { send }) => {
   if (selectBusy(getState())) send({ type: 'interrupt' });
 };
+
+/** «Работать здесь»: take the window over from the other tab (R-M7-5/8). */
+export const takeOver = (): AppThunk => (_d, _g, extra) => extra.takeOver();
 
 export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _g, { send }) => {
   send({ type: 'permission', id, allow });

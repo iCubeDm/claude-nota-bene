@@ -99,13 +99,10 @@ test.afterEach(async ({ page }) => {
   await setMode(page, t, 'default');
 });
 
-test('Shift+Tab cycles the modes in order and the other window follows the server echo @controls', async ({ page, context }) => {
+test('Shift+Tab cycles the modes in order and the pill follows the server echo @controls', async ({ page }) => {
   const t = track(page);
   await open(page);
   await setMode(page, t, 'default');
-  const other = await context.newPage();
-  await open(other);
-  await expect(pill(other)).toHaveText(en.mode_default);
 
   await composer(page).focus();
   await expect(composer(page)).toBeFocused();
@@ -113,12 +110,9 @@ test('Shift+Tab cycles the modes in order and the other window follows the serve
   for (const mode of ['acceptEdits', 'plan', 'auto', 'default'] as const) {
     await page.keyboard.press('Shift+Tab');
     await expect(pill(page)).toHaveText(en[`mode_${mode}`]);
-    // the second window has no key press of its own: it can only know from the server's broadcast
-    await expect(pill(other)).toHaveText(en[`mode_${mode}`]);
   }
   expect(modeSends(t, from).map((f) => f.mode)).toEqual(['acceptEdits', 'plan', 'auto', 'default']);
   await expect(composer(page)).toBeFocused(); // Shift+Tab never moves the focus away
-  await other.close();
 });
 
 test('an init frame with permissionMode changes the pill @controls', async ({ page }) => {
@@ -322,8 +316,7 @@ test('background tasks: the row appears, ticks and disappears @controls', async 
   await expect(donesAfter(page, text).first()).toBeVisible();
 });
 
-test('a server error is one toast; the same error again is ×2; a busy refusal is no toast @controls', async ({ page }) => {
-  const t = track(page);
+test('a server error is one toast; the same error again is ×2 @controls', async ({ page }) => {
   await open(page);
   const first = `[boom] ${uniq('crash')}`;
   await send(page, first);
@@ -342,29 +335,11 @@ test('a server error is one toast; the same error again is ×2; a busy refusal i
   await expect(donesAfter(page, second).first()).toBeVisible();
   await toasts(page).getByRole('button', { name: en.close }).click();
   await expect(toasts(page)).toHaveCount(0);
-
-  // busy: another socket asks for /compact while the agent works; the server answers `busy` to every window
-  const slow = `[slow] ${uniq('slow')}`;
-  await send(page, slow);
-  await expect(page.getByText(en.working)).toBeVisible();
-  await page.evaluate(() => new Promise<void>((resolve) => {
-    const ws = new WebSocket(`ws://${location.host}/ws`);
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'command', name: 'compact' }));
-      setTimeout(() => { ws.close(); resolve(); }, 200);
-    };
-  }));
-  await expect.poll(() => t.got.some((f) => f.kind === 'server-error' && f.where === 'busy')).toBe(true);
-  await expect(toasts(page)).toHaveCount(0);
-  await expect(donesAfter(page, slow).first()).toBeVisible();
-  await expect(toasts(page)).toHaveCount(0);
 });
 
-test('switching sessions: both pages follow, the file tabs follow the root, sends wait and the draft stays @controls', async ({ page, context }) => {
+test('switching sessions: the file tabs follow the root, sends wait and the draft stays @controls', async ({ page }) => {
   const t = track(page);
   await open(page);
-  const other = await context.newPage();
-  await open(other);
   const root = (p: Page) => p.locator('#root-path');
 
   // a file tab of this root
@@ -404,10 +379,6 @@ test('switching sessions: both pages follow, the file tabs follow the root, send
   expect(t.sent.filter((f) => f.type === 'send').length).toBe(sentBefore);
   await expect(page.locator('[data-tab="file:notes.md"]')).toHaveCount(0);
   await expect(page.locator('[role="tab"]')).toHaveCount(1); // only the chat
-  // the second page was not asked anything and follows the server
-  await expect(root(other)).toHaveText(/\/other$/);
-  await expect(other.getByText('beta answer')).toBeVisible();
-  await expect(other.getByText('alpha answer')).toHaveCount(0);
 
   // the new root has its own tabs
   // the tree starts open (R-M6-3) unless an earlier test closed it
@@ -426,8 +397,4 @@ test('switching sessions: both pages follow, the file tabs follow the root, send
   await page.locator('[data-tab="chat"]').click();
   await expect(page.getByText('alpha answer')).toBeVisible();
   await expect(page.locator('[data-tab="file:other.md"]')).toHaveCount(0);
-  await expect(root(other)).not.toHaveText(/\/other$/);
-  await expect(other.getByText('alpha answer')).toHaveCount(1); // in the DOM; the page may show a restored file tab over it
-  await expect(other.getByText('beta answer')).toHaveCount(0);
-  await other.close();
 });

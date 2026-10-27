@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStore } from 'react-redux';
 import { sendBatch } from './comments/send.ts';
-import { useAppDispatch, useAppSelector, type AppStore } from './store/store.ts';
+import { selectConn, useAppDispatch, useAppSelector, type AppStore } from './store/store.ts';
 import { selectTabs } from './tabs/slice.ts';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { CommentCardPopover } from './comments/CommentCard.tsx';
@@ -17,6 +17,7 @@ import { Panes } from './tabs/Panes.tsx';
 import { TabStrip } from './tabs/TabStrip.tsx';
 import { Header } from './shell/Header.tsx';
 import { LeftStrip, RightStrip } from './shell/ToolStrip.tsx';
+import { OneTab } from './shell/OneTab.tsx';
 import { Toasts } from './shell/Toasts.tsx';
 import { useFavicon } from './shell/Favicon.ts';
 import { RecentFiles } from '@/files/RecentFiles.tsx';
@@ -33,8 +34,12 @@ export function App() {
   const close = useCallback(() => setPending(null), []);
   // another root: the tree's loaded folders belong to the old one (its open/closed state is in the store and stays)
   const rootGen = useAppSelector((s) => selectTabs(s).rootGen);
+  // another tab owns the window (M7-15): the app stays mounted but inert under the overlay
+  const conn = useAppSelector(selectConn);
+  const blocked = conn === 'occupied' || conn === 'taken';
   return (
     <TooltipProvider>
+      <div className="contents" inert={blocked}>
       <Header />
       {/*
         IntelliJ-style (R-M6-3): the strips and their panels run the full height under the header; an open panel is
@@ -70,6 +75,8 @@ export function App() {
       <CommentCardPopover />
       <Toasts />
       <RecentFiles />
+      </div>
+      <OneTab />
     </TooltipProvider>
   );
 }

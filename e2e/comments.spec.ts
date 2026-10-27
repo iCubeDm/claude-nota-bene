@@ -277,27 +277,37 @@ test('a comment on an action’s output: named in its card, back after a reload 
   await clearPending(page);
 });
 
-test('two windows see the same comment @chat', async ({ page, browser }, testInfo) => {
+test('a second window takes over: the comment follows through the server, the first window is parked @chat', async ({ page, browser }, testInfo) => {
   await open(page);
   await clearPending(page);
   const text = await turn(page, 'two windows');
-  // a separate context: own localStorage, so the sync can only travel through the server
-  const ctx = await browser.newContext({ baseURL: testInfo.project.use.baseURL, locale: 'en-US' });
-  const other = await ctx.newPage();
-  await open(other);
-  await settled(other, text);
-
   await openPopup(page, text);
   await commentBox(page).fill('from window A');
   await page.getByRole('button', { name: /^(Add|Добавить)$/ }).click();
+  await expect(cards(page)).toHaveCount(1);
 
+  // a separate context: own localStorage, so the comment can only travel through the server
+  const ctx = await browser.newContext({ baseURL: testInfo.project.use.baseURL, locale: 'en-US' });
+  const other = await ctx.newPage();
+  await other.goto('/');
+  await expect(other.getByTestId('onetab')).toHaveAttribute('data-state', 'occupied');
+  await other.getByRole('button', { name: 'Work here' }).click();
+  await expect(other.getByTestId('onetab')).toHaveCount(0);
+  await expect(page.getByTestId('onetab')).toHaveAttribute('data-state', 'taken');
+
+  await settled(other, text);
   await openPanel(other);
   await expect(cards(other)).toHaveCount(1);
   await expect(cards(other).first()).toContainText('from window A');
   await expect(marks(other, 'pending').first()).toBeVisible();
 
-  // and deletion travels back
+  // and deletion reaches the server: the first window takes the window back and finds the set empty
   await cards(other).first().getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
+  await expect(cards(other)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Work here' }).click();
+  await expect(page.getByTestId('onetab')).toHaveCount(0);
+  await expect(other.getByTestId('onetab')).toHaveAttribute('data-state', 'taken');
+  await openPanel(page);
   await expect(cards(page)).toHaveCount(0);
   await expect(marks(page, 'pending')).toHaveCount(0);
   await ctx.close();

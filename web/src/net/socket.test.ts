@@ -7,7 +7,7 @@ class FakeWS {
   readyState = 0;
   sent: string[] = [];
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((e: { code: number }) => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
   url: string;
   constructor(url: string) {
@@ -19,15 +19,15 @@ class FakeWS {
   }
   close() {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code: 1000 });
   }
   open() {
     this.readyState = 1;
     this.onopen?.();
   }
-  drop() {
+  drop(code = 1006) {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 }
 const WS = FakeWS as unknown as typeof WebSocket;
@@ -76,6 +76,23 @@ describe('connect', () => {
     c2.close();
     vi.advanceTimersByTime(5000);
     expect(FakeWS.instances).toHaveLength(2);
+  });
+
+  it('does not reconnect after close code 4001, reports taken, and reconnect() opens a new socket', () => {
+    const states: string[] = [];
+    const c = connect('ws://x/ws', () => {}, (s) => states.push(s), WS);
+    FakeWS.instances[0].open();
+    FakeWS.instances[0].drop(4001);
+    expect(states).toEqual(['open', 'taken']);
+    vi.advanceTimersByTime(10_000);
+    expect(FakeWS.instances).toHaveLength(1);
+    c.reconnect();
+    expect(FakeWS.instances).toHaveLength(2);
+    FakeWS.instances[1].open();
+    FakeWS.instances[1].drop(); // an ordinary drop reconnects again
+    vi.advanceTimersByTime(1100);
+    expect(FakeWS.instances).toHaveLength(3);
+    expect(states).toEqual(['open', 'taken', 'open', 'closed']);
   });
 
   it('parses frames and ignores unparseable ones', () => {

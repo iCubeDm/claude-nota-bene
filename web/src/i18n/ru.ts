@@ -9,6 +9,9 @@ export const ru = {
   earlierLoading: 'Загружаю…',
   earlierFailed: 'Не удалось загрузить',
   srcBeforeCompact: 'до сжатия',
+  occupiedTitle: 'Окно уже открыто в другой вкладке',
+  takenTitle: 'Открыто в другой вкладке',
+  workHere: 'Работать здесь',
   connecting: 'подключение…', // new in M0 (the prototype set the label from markup)
   offline: 'нет связи с сервером…',
   serverError: (w?: string) => `Ошибка сервера${w ? ' · ' + w : ''}`,

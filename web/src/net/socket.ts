@@ -1,6 +1,11 @@
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
 
 const RECONNECT_MS = 1000;
+/** the server closes the owner with this when another tab takes the window over (R-M7-5): never reconnect after it */
+export const TAKEN_OVER_CODE = 4001;
+
+export type SocketState = 'open' | 'closed' | 'taken';
+export type Connection = { send(m: ClientMessage): boolean; close(): void; reconnect?(): void };
 
 export function defaultSocketUrl(loc: Location | URL): string {
   return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/ws`;
@@ -9,9 +14,9 @@ export function defaultSocketUrl(loc: Location | URL): string {
 export function connect(
   url: string,
   onEvent: (ev: ServerEvent) => void,
-  onState: (s: 'open' | 'closed') => void,
+  onState: (s: SocketState) => void,
   WS: typeof WebSocket = WebSocket,
-): { send(m: ClientMessage): boolean; close(): void } {
+): Required<Connection> {
   let ws: WebSocket | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
@@ -35,8 +40,15 @@ export function connect(
       }
       onEvent(ev);
     };
-    sock.onclose = () => {
+    sock.onclose = (e) => {
       if (ws === sock) ws = null;
+      if (e.code === TAKEN_OVER_CODE && !stopped) {
+        // another tab owns the window now: stay down until the user asks (reconnect())
+        stopped = true;
+        reportedClosed = true;
+        onState('taken');
+        return;
+      }
       if (!reportedClosed) {
         reportedClosed = true;
         onState('closed');
@@ -51,6 +63,13 @@ export function connect(
       if (!ws || ws.readyState !== WS.OPEN) return false;
       ws.send(JSON.stringify(m));
       return true;
+    },
+    /** after a 4001: opens a new socket (the caller sends `takeover` once `occupied` arrives) */
+    reconnect() {
+      if (ws) return;
+      stopped = false;
+      if (timer) clearTimeout(timer);
+      open();
     },
     close() {
       stopped = true;
