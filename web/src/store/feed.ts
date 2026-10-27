@@ -118,7 +118,8 @@ function reduceSdk(s: FeedState, m: Sdk, ts: number): FeedState {
     case 'system':
       // a compaction: status compacting, then status null with its compact_result, then (on success) the boundary
       if (m.subtype === 'status') {
-        if (m.status === 'compacting') return { ...s, compacting: ts };
+        // the CLI repeats it as a keepalive (every 30 s) and at each phase: the compaction started at the first one
+        if (m.status === 'compacting') return s.compacting === null ? { ...s, compacting: ts } : s;
         if (m.status !== null || s.compacting === null) return s;
         if (m.compact_result !== 'failed') return { ...s, compacting: null };
         const failed: FeedItem = { kind: 'marker', what: 'compactFailed', ts, ...(m.compact_error ? { error: m.compact_error } : {}) };

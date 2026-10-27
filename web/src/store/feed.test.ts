@@ -285,6 +285,11 @@ test('a reload mid-compaction keeps its start time; a failed one leaves its erro
   expect(failed.items.at(-1)).toEqual({ kind: 'marker', what: 'compactFailed', error: 'prompt too long', ts: 30 });
 });
 
+test('the CLI repeats status compacting while it compacts (every 30 s, and per phase): the elapsed time keeps its start', () => {
+  const running = fold([status('compacting', {}, 20), status('compacting', {}, 30_020), status('compacting', {}, 60_020)]);
+  expect(running.compacting).toBe(20);
+});
+
 test('other status frames leave the compaction alone; a result or a clear ends a stuck one', () => {
   const running = fold([status('compacting', {}, 20)]);
   expect(reduce(running, status('requesting')).compacting).toBe(20);
