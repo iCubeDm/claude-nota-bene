@@ -252,3 +252,8 @@ describe('mapSdk: tasks, suggestion, rate limit', () => {
     expect(map({})).toEqual([]);
   });
 });
+
+it('an id-less tool_use or tool_result maps to nothing (they could only pair through an empty id)', () => {
+  expect(mapSdk({ type: 'assistant', uuid: 'a', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } } as never)).toEqual([]);
+  expect(mapSdk({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x' }] } } as never)).toEqual([]);
+});

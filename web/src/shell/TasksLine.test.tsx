@@ -12,50 +12,50 @@ afterEach(() => { cleanup(); vi.useRealTimers(); });
 function setup() {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   render(<Provider store={store}><TasksLine /></Provider>);
-  const sdk = (e: Task, ts = Date.now()) => act(() => { store.dispatch(serverEvent({ kind: 'agent', e, ts })); });
-  return { store, sdk };
+  const task = (e: Task, ts = Date.now()) => act(() => { store.dispatch(serverEvent({ kind: 'agent', e, ts })); });
+  return { store, task };
 }
 type Task = Extract<WireAgentEvent, { t: 'task' }>;
 const started = (extra: Partial<Task> = {}): Task => ({ t: 'task', phase: 'started', id: 't1', desc: 'Explore repo', type: '', ...extra });
 const done = (id: string): Task => ({ t: 'task', id, phase: 'done' });
 
 it('started -> progress -> notification lifecycle', () => {
-  const { sdk } = setup();
+  const { task } = setup();
   expect(screen.queryByText('Explore repo')).toBeNull();
-  sdk(started());
+  task(started());
   expect(screen.getByText('Explore repo')).toBeInTheDocument();
   expect(screen.getByText('0s')).toBeInTheDocument();
-  sdk({ t: 'task', id: 't1', phase: 'progress', tokens: 45678, tool: 'Grep', summary: 'looking' });
+  task({ t: 'task', id: 't1', phase: 'progress', tokens: 45678, tool: 'Grep', summary: 'looking' });
   expect(screen.getByText('0s · 46k tok · Grep')).toBeInTheDocument();
   expect(screen.getByTitle('looking')).toBeInTheDocument();
-  sdk(done('t1'));
+  task(done('t1'));
   expect(screen.queryByText('Explore repo')).toBeNull();
 });
 
 // the description fallbacks (subagent_type, task_type) and skipping ambient / transcript-less tasks are the mapper's (map.test.ts)
 it('a started task without a description shows as task', () => {
-  const { sdk } = setup();
-  sdk({ t: 'task', id: 'c', phase: 'started' });
+  const { task } = setup();
+  task({ t: 'task', id: 'c', phase: 'started' });
   expect(screen.getByText('task')).toBeInTheDocument();
 });
 
 it('updated renames, done removes; both ignore an unknown id', () => {
-  const { sdk, store } = setup();
-  sdk(started());
-  sdk({ t: 'task', id: 't1', phase: 'updated', desc: 'Renamed' });
+  const { task, store } = setup();
+  task(started());
+  task({ t: 'task', id: 't1', phase: 'updated', desc: 'Renamed' });
   expect(screen.getByText('Renamed')).toBeInTheDocument();
   const before = store.getState().tasks;
-  sdk({ t: 'task', id: 'zz', phase: 'progress', tokens: 1 });
-  sdk({ t: 'task', id: 'zz', phase: 'updated', desc: 'Ghost' });
-  sdk(done('zz'));
+  task({ t: 'task', id: 'zz', phase: 'progress', tokens: 1 });
+  task({ t: 'task', id: 'zz', phase: 'updated', desc: 'Ghost' });
+  task(done('zz'));
   expect(store.getState().tasks).toBe(before);
-  sdk(done('t1'));
+  task(done('t1'));
   expect(screen.queryByText('Renamed')).toBeNull();
 });
 
 it('a replay resets, and replayed task events rebuild with the true elapsed time', () => {
-  const { sdk, store } = setup();
-  sdk(started());
+  const { task, store } = setup();
+  task(started());
   act(() => { store.dispatch(serverEvent({ kind: 'replay', events: [] } as unknown as ServerEvent)); });
   expect(screen.queryByText('Explore repo')).toBeNull();
   const ev: ServerEvent = { kind: 'agent', e: started({ id: 'r', desc: 'Replayed' }), ts: Date.now() - 65_000 };
@@ -73,22 +73,22 @@ it('elapsed formatting: Ns under a minute, else m:ss', () => {
 });
 
 it('ticks once per second while live; the interval stops when the list is empty', () => {
-  const { sdk } = setup();
+  const { task } = setup();
   expect(vi.getTimerCount()).toBe(0);
-  sdk(started());
+  task(started());
   expect(vi.getTimerCount()).toBe(1);
   act(() => { vi.advanceTimersByTime(3000); });
   expect(screen.getByText('3s')).toBeInTheDocument();
-  sdk(started({ id: 't2' }));
+  task(started({ id: 't2' }));
   expect(vi.getTimerCount()).toBe(1);
-  sdk(done('t1'));
-  sdk(done('t2'));
+  task(done('t1'));
+  task(done('t2'));
   expect(vi.getTimerCount()).toBe(0);
 });
 
 it('unmount clears the interval', () => {
-  const { sdk } = setup();
-  sdk(started());
+  const { task } = setup();
+  task(started());
   expect(vi.getTimerCount()).toBe(1);
   cleanup();
   expect(vi.getTimerCount()).toBe(0);

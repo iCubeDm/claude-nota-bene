@@ -146,13 +146,14 @@ export function mapSdk(msg: SDKMessage): AgentEvent[] {
       const out: AgentEvent[] = [];
       blocks(m).forEach((b, idx) => {
         if (b.type === 'text' && !sub) out.push({ t: 'message', id: `${m.uuid}:${idx}`, text: b.text ?? '' });
-        else if (b.type === 'tool_use') out.push({ t: 'tool-call', id: b.id ?? '', name: b.name ?? '', input: b.input ?? {}, sub });
+        // an id-less tool or result could only ever pair with each other through '': both are dropped
+        else if (b.type === 'tool_use' && b.id) out.push({ t: 'tool-call', id: b.id, name: b.name ?? '', input: b.input ?? {}, sub });
       });
       return out;
     }
     case 'user': // never a bubble (user text arrives as `user` events); only tool results matter
       return blocks(m).filter((b) => b.type === 'tool_result')
-        .map((b) => ({ t: 'tool-update', id: b.tool_use_id ?? '', text: resultText(b.content), isError: !!b.is_error }));
+        .flatMap((b): AgentEvent[] => (b.tool_use_id ? [{ t: 'tool-update', id: b.tool_use_id, text: resultText(b.content), isError: !!b.is_error }] : []));
     case 'result':
       return [turnEnd(m)];
     case 'command_lifecycle': {
