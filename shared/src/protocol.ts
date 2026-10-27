@@ -310,3 +310,5 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
       return { error: `unknown message type: ${String(m.type)}` };
   }
 }
+
+export type { AgentEvent, StopReason } from './agent.ts';

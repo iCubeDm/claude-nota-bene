@@ -6,7 +6,7 @@ import type { IdleCompact, ImageRef, Mode, ServerEvent, Stats } from '@nota-bene
 import { AttachmentStore } from './attachments.ts';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './agent/types.ts';
-import { stripUserFrameImages } from './agent/transcript.ts';
+import { stripUserFrameImages } from './agent/claude/transcript.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { IdleCompactor, idleConfig, offInClaudeSettings, type IdleConfig } from './idle.ts';

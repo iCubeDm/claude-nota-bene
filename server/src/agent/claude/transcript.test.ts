@@ -3,7 +3,7 @@ import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { afterAll, describe, expect, it } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { AttachmentStore } from '../attachments.ts';
+import { AttachmentStore } from '../../attachments.ts';
 import { stripUserFrameImages, transcriptToEvents } from './transcript.ts';
 
 const dirs: string[] = [];
@@ -18,7 +18,7 @@ afterAll(() => {
 const store = (dir = tmpDir()) => new AttachmentStore({ dir });
 
 const msgs = JSON.parse(
-  fs.readFileSync(new URL('../../test/fixtures/transcript.json', import.meta.url), 'utf8'),
+  fs.readFileSync(new URL('../../../test/fixtures/transcript.json', import.meta.url), 'utf8'),
 ) as SessionMessage[];
 
 describe('transcriptToEvents', () => {

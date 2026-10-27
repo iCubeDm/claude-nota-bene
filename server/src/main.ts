@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeFromScript } from './agent/fake.ts';
-import { sdkBackend } from './agent/sdk.ts';
+import { sdkBackend } from './agent/claude/sdk.ts';
 import { importPrototypeStateSafely } from './migrate.ts';
 import { startServer } from './server.ts';
 import { transcriptExists } from './sessions.ts';

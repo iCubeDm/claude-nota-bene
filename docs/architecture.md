@@ -20,7 +20,7 @@ flowchart LR
     SM["SessionManager"]
     STORES["CommentStore · AttachmentStore · MarkFiles · prefs · state"]
     FR["fileRoutes · git · system"]
-    SDK["agent/sdk.ts → Claude Agent SDK"]
+    SDK["agent/claude/sdk.ts → Claude Agent SDK"]
   end
   CLI["Claude Code CLI (дочерний процесс SDK)"]
   L["bin/nota-bene.mjs: лаунчер-супервизор"]
@@ -78,9 +78,9 @@ sequenceDiagram
 | `hub.ts` | `EventHub`: in-memory история событий текущей сессии. При подключении сокет получает `replay`, затем живые события. `reset()` подменяет историю (switch, `/clear`, restart). |
 | `session.ts` | `SessionManager`, ядро (669 строк): агент, очередь отправок, разрешения, режим, switch/restart, `/compact`/`/clear`, заголовок, статистика, idle-компакция. |
 | `agent/types.ts` | Интерфейсы `AgentBackend` / `AgentSession`, шов для подмены агента. |
-| `agent/sdk.ts` | Реальный backend: `query()` со streaming input (`InputQueue`), `canUseTool` → `PermissionAsk`, preset-промпт `claude_code` + `APPEND` (mermaid, пути к файлам, батчи комментариев). |
+| `agent/claude/sdk.ts` | Реальный backend: `query()` со streaming input (`InputQueue`), `canUseTool` → `PermissionAsk`, preset-промпт `claude_code` + `APPEND` (mermaid, пути к файлам, батчи комментариев). |
 | `agent/fake.ts` | Скриптуемый backend для e2e. |
-| `agent/transcript.ts` | Транскрипт → `ServerEvent[]` для replay; картинки уходят в `AttachmentStore`. |
+| `agent/claude/transcript.ts` | Транскрипт → `ServerEvent[]` для replay; картинки уходят в `AttachmentStore`. |
 | `comments.ts` | `CommentStore`: `comments/<sessionId>.json`. Сессия без id живёт в памяти, `adopt()` переносит её под настоящий id. |
 | `attachments.ts` | Content-addressed картинки (`sha256.ext`) до 3.75 МБ. `POST /attach`, `GET /attach/<id>`, восстановление из корзины. |
 | `marks.ts` | Единственная запись в папку проекта: `<root>/.nota-bene/marks/<commentId>/{frame.jpg,layer.png}`. Проверка magic bytes, запрет симлинков. |
@@ -279,7 +279,7 @@ sequenceDiagram
 Слабые места по убыванию риска:
 
 1. **Web зависит от формы SDK-сообщений.**
-   - **Проблема.** Сервер пробрасывает сырые `SDKMessage` (`{kind:'sdk', m}`), а `web/src/store/feed.ts` разбирает их по «свободному» типу `Sdk`. Вдобавок `agent/sdk.ts` использует непубличные API: `q.request({subtype:'file_suggestions'})` и `usage_EXPERIMENTAL_...`.
+   - **Проблема.** Сервер пробрасывает сырые `SDKMessage` (`{kind:'sdk', m}`), а `web/src/store/feed.ts` разбирает их по «свободному» типу `Sdk`. Вдобавок `agent/claude/sdk.ts` использует непубличные API: `q.request({subtype:'file_suggestions'})` и `usage_EXPERIMENTAL_...`.
    - **Риск.** Обновление SDK может сломать ленту в браузере без единой ошибки компиляции.
    - **Что бы я сделал.** Нормализовать кадры на сервере в собственный узкий `FeedEvent` (text delta, tool start/result, done, marker) и закрепить версию SDK, прогоняя `server/test/fixtures/real-frames.json` при каждом обновлении. Переписывать редьюсер ленты при этом не нужно: он переедет на сервер почти целиком, и replay останется детерминированным.
    - **Когда это не нужно.** Если обновлять SDK только вручную и с фикстурами, хватит pin + контрактного теста на фикстурах. Это дешевле и закрывает ~80% риска. Начал бы с этого.

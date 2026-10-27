@@ -1,7 +1,7 @@
 import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageRef, ServerEvent } from '@nota-bene/shared';
-import { isImageType } from '../attachments.ts';
-import type { AttachmentStore } from '../attachments.ts';
+import { isImageType } from '../../attachments.ts';
+import type { AttachmentStore } from '../../attachments.ts';
 
 type Block = { type?: string; text?: string; content?: unknown; source?: { type?: string; media_type?: string; data?: string } };
 

@@ -1,9 +1,9 @@
 import { getSessionInfo, getSessionMessages, listSessions, query } from '@anthropic-ai/claude-agent-sdk';
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Mode } from '@nota-bene/shared';
-import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './types.ts';
+import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
 import { transcriptToEvents } from './transcript.ts';
-import { UsageUnavailableError, mapContextUsage, mapUsage } from '../stats.ts';
+import { UsageUnavailableError, mapContextUsage, mapUsage } from '../../stats.ts';
 
 const APPEND = `
 You are running inside a browser-based chat window that renders GitHub-flavored markdown.
