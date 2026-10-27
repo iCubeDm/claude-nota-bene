@@ -4,7 +4,7 @@ import { makeStore } from '../store/store.ts';
 import { MediaController } from '../media/mediaController.ts';
 import { filesSlice, setFileLoad } from '../files/slice.ts';
 import { setSource, toggleDir } from '../tree/slice.ts';
-import { activate, CLOSED_MAX, closeAll, closeOthers, closeRight, closeTab, fileTabId, openFile, reopenClosed, selectActiveTab, selectTabs } from './slice.ts';
+import { activate, CLOSED_MAX, closeAll, closeOthers, closeRight, closeTab, fileTabId, openDiagram, openFile, reopenClosed, selectActiveTab, selectTabs } from './slice.ts';
 
 function mk() {
   let onEvent!: (e: ServerEvent) => void;
@@ -236,4 +236,49 @@ it('another folder empties the closed-tab stack: its paths are other files (M6-1
   expect(selectTabs(store.getState()).closed).toEqual([]);
   store.dispatch(reopenClosed());
   expect(ids(store)).toEqual(['chat']);
+});
+
+// M7-01: a diagram opens in its own tab
+const SRC = 'graph TD; A-->B';
+const diagramIds = (s: ReturnType<typeof mk>['store']) => ids(s).filter((i) => i.startsWith('diagram:'));
+
+it('a diagram opens as a tab titled by its first line (40 chars), id diagram:<8 hex>', () => {
+  const { store } = mk();
+  store.dispatch(openDiagram({ source: `${'x'.repeat(50)}\nsecond`, lang: 'mermaid' }));
+  const tab = selectActiveTab(store.getState());
+  expect(tab).toMatchObject({ kind: 'diagram', lang: 'mermaid', title: 'x'.repeat(40) });
+  expect(tab.id).toMatch(/^diagram:[0-9a-f]{8}$/);
+});
+
+it('the same diagram opened twice reuses its tab; another source gets its own', () => {
+  const { store } = mk();
+  store.dispatch(openDiagram({ source: SRC, lang: 'mermaid' }));
+  store.dispatch(openFile('a.md'));
+  store.dispatch(openDiagram({ source: SRC, lang: 'mermaid' }));
+  expect(diagramIds(store)).toHaveLength(1);
+  expect(selectTabs(store.getState()).active).toBe(diagramIds(store)[0]);
+  store.dispatch(openDiagram({ source: 'graph LR; C-->D', lang: 'mermaid' }));
+  expect(diagramIds(store)).toHaveLength(2);
+});
+
+it('diagram tabs are saved with the file tabs, source included, and restored after a reload', () => {
+  const a = mk();
+  a.session('/p');
+  a.store.dispatch(openFile('a.md'));
+  a.store.dispatch(openDiagram({ source: SRC, lang: 'mermaid' }));
+  const id = diagramIds(a.store)[0];
+  expect(JSON.parse(localStorage.getItem('tabs:/p')!).diagrams).toEqual([{ source: SRC, lang: 'mermaid' }]);
+  const b = mk(); // a reload
+  b.session('/p');
+  expect(ids(b.store)).toEqual(['chat', 'file:a.md', id]);
+  expect(selectTabs(b.store.getState()).active).toBe(id);
+  expect(selectActiveTab(b.store.getState())).toMatchObject({ kind: 'diagram', source: SRC });
+});
+
+it('a closed diagram tab is not offered by reopen (only files are remembered)', () => {
+  const { store } = mk();
+  store.dispatch(openDiagram({ source: SRC, lang: 'svg' }));
+  store.dispatch(closeTab(diagramIds(store)[0]));
+  store.dispatch(reopenClosed());
+  expect(diagramIds(store)).toEqual([]);
 });

@@ -23,7 +23,7 @@
 .md td, .md th { border: 1px solid var(--border); padding: 4px 8px; }
 .md a { color: var(--primary); }
 .md blockquote { border-left: 2px solid var(--border); margin: 0.5em 0; padding-left: 12px; color: var(--muted-fg); }
-.mermaid-out, .svg-out { background: oklch(0.97 0.005 260); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+.mermaid-out, .svg-out { position: relative; background: oklch(0.97 0.005 260); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
 .mermaid-out { background: oklch(0.19 0.02 260); border: 1px solid var(--border-soft); }
 
 .ref { text-decoration: underline dotted var(--nb-accent); text-underline-offset: 3px; cursor: pointer; }
@@ -38,3 +38,8 @@
 .md-tight .md > :first-child { margin-top: 0; }
 .md-tight .md > :last-child { margin-bottom: 0; }
 .md-tight .md pre { margin: 0.4em 0; }
+
+/* ⤢ on a rendered diagram: shown on hover or keyboard focus (Markdown.tsx adds it after sanitizing) */
+.md-open-diagram { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; border: 1px solid var(--border); background: var(--card, oklch(0.22 0.02 260)); color: var(--foreground, #ddd); font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.mermaid-out:hover > .md-open-diagram, .svg-out:hover > .md-open-diagram, .md-open-diagram:focus-visible { opacity: 1; }
+.md-open-diagram:hover { background: var(--muted); }

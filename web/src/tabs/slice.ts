@@ -1,10 +1,14 @@
 import { createAction, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '../store/store.ts';
+import type { DiagramLang } from '../diagram/render.ts';
+import { sha1 } from '../diagram/sha1.ts';
 
 /** `src`: the stable source id ('here', 'ref:<branch>', 'dir:<hash>'); `ref`: its branch, only when it is not 'here' (M3-16). */
 export type FileTab = { id: `file:${string}`; kind: 'file'; path: string; src: string; ref?: string };
+/** One rendered diagram (M7-01, R-M7-12): it holds its source, so it survives a reload and needs no file. */
+export type DiagramTab = { id: `diagram:${string}`; kind: 'diagram'; source: string; lang: DiagramLang; title: string };
 /** `settings`: the one Settings tab (M6-15, R-M6-4); not saved with the file tabs. */
-export type Tab = { id: 'chat'; kind: 'chat' } | { id: 'settings'; kind: 'settings' } | FileTab;
+export type Tab = { id: 'chat'; kind: 'chat' } | { id: 'settings'; kind: 'settings' } | FileTab | DiagramTab;
 /**
  * open[0] is always the chat. `root`: the project the file tabs belong to (null until the first session event).
  * `rootGen`: bumped on every root change after the first, so views keyed by it remount (the same path in another root
@@ -32,6 +36,18 @@ const fileTab = (a: FileArg): FileTab => {
   return { id: fileTabId(f.path, f.src), kind: 'file', ...f };
 };
 
+/** The title of a diagram tab: the first line of its source, up to 40 characters. */
+const DIAGRAM_TITLE_MAX = 40;
+/** Same source, same id, so the same diagram opened twice reuses its tab. */
+export const diagramTabId = (source: string) => `diagram:${sha1(source).slice(0, 8)}` as const;
+const diagramTab = ({ source, lang }: SavedDiagram): DiagramTab => ({
+  id: diagramTabId(source),
+  kind: 'diagram',
+  source,
+  lang,
+  title: (source.split('\n').find((l) => l.trim()) ?? '').trim().slice(0, DIAGRAM_TITLE_MAX),
+});
+
 /**
  * The window's project root became known or changed (a switch to another folder, here or in another window). One action
  * for every slice, so the tabs, the tree and the file state change together: the tabs become that root's saved ones
@@ -55,6 +71,12 @@ export const tabsSlice = createSlice({
     openSettings: (s) => {
       if (idx(s, 'settings') < 0) s.open.push({ id: 'settings', kind: 'settings' });
       s.active = 'settings';
+    },
+    /** Opens (once per source) and activates a diagram's tab. */
+    openDiagram: (s, a: PayloadAction<SavedDiagram>) => {
+      const tab = diagramTab(a.payload);
+      if (idx(s, tab.id) < 0) s.open.push(tab);
+      s.active = tab.id;
     },
     activate: (s, a: PayloadAction<Tab['id']>) => {
       if (idx(s, a.payload) >= 0) s.active = a.payload;
@@ -118,25 +140,39 @@ function remember(s: TabsState, tabs: Tab[]): void {
 function restore(s: TabsState, saved: SavedTabs, merge: boolean): void {
   const have = new Set(merge ? s.open.map((t) => t.id) : ['chat']);
   const restored = saved.files.map(fileTab).filter((t) => !have.has(t.id) && have.add(t.id));
-  s.open = [CHAT, ...restored, ...(merge ? s.open.slice(1) : [])];
+  const diagrams = (saved.diagrams ?? []).map(diagramTab).filter((t) => !have.has(t.id) && have.add(t.id));
+  s.open = [CHAT, ...restored, ...diagrams, ...(merge ? s.open.slice(1) : [])];
   if (idx(s, saved.active) >= 0) s.active = saved.active as Tab['id'];
 }
 
-export const { openFile, openSettings, activate, closeTab, closeOthers, closeRight, closeAll, reopenClosed, restoreTabs } = tabsSlice.actions;
+export const { openFile, openSettings, openDiagram, activate, closeTab, closeOthers, closeRight, closeAll, reopenClosed, restoreTabs } = tabsSlice.actions;
 
 export const selectTabs = (s: RootState): TabsState => s.tabs;
 export const selectActiveTab = (s: RootState): Tab => s.tabs.open.find((t) => t.id === s.tabs.active) ?? CHAT;
 
 /** A saved file tab: `src`/`ref` only for another source. */
 export type SavedFile = { path: string; src?: string; ref?: string };
-export type SavedTabs = { files: SavedFile[]; active: string };
+/** A saved diagram tab: its source and language (the id and title are made from them). */
+export type SavedDiagram = { source: string; lang: DiagramLang };
+export type SavedTabs = { files: SavedFile[]; diagrams?: SavedDiagram[]; active: string };
 
-/** What is stored under `tabs:<root>`: the file tabs (with their source when not 'here') and the active id, never the chat tab. */
+/**
+ * What is stored under `tabs:<root>`: the file tabs (with their source when not 'here'), the diagram tabs (`diagrams`,
+ * only when there are some; they come back after the files) and the active id, never the chat tab.
+ */
 export const tabsKey = (root: string) => `tabs:${root}`;
-export const serializeTabs = (s: TabsState): SavedTabs => ({
-  files: s.open.flatMap((t) => (t.kind !== 'file' ? [] : t.src === 'here' ? [{ path: t.path }] : [{ path: t.path, src: t.src, ref: t.ref }])),
-  active: s.active,
-});
+export const serializeTabs = (s: TabsState): SavedTabs => {
+  const diagrams = s.open.flatMap((t) => (t.kind === 'diagram' ? [{ source: t.source, lang: t.lang }] : []));
+  return {
+    files: s.open.flatMap((t) => (t.kind !== 'file' ? [] : t.src === 'here' ? [{ path: t.path }] : [{ path: t.path, src: t.src, ref: t.ref }])),
+    ...(diagrams.length && { diagrams }),
+    active: s.active,
+  };
+};
+const isSavedDiagram = (d: unknown): d is SavedDiagram => {
+  const o = d as SavedDiagram;
+  return !!o && typeof o.source === 'string' && (o.lang === 'mermaid' || o.lang === 'svg');
+};
 const isSavedFile = (f: unknown): f is SavedFile => {
   const o = f as SavedFile;
   return !!o && typeof o.path === 'string' && (o.src === undefined || typeof o.src === 'string') && (o.ref === undefined || typeof o.ref === 'string');
@@ -146,7 +182,10 @@ export function readSavedTabs(root: string): SavedTabs | null {
   try {
     const v = JSON.parse(localStorage.getItem(tabsKey(root)) ?? 'null');
     const active = typeof v?.active === 'string' ? v.active : 'chat';
-    if (Array.isArray(v?.files) && v.files.every(isSavedFile)) return { files: v.files, active };
+    if (Array.isArray(v?.files) && v.files.every(isSavedFile)) {
+      const diagrams = Array.isArray(v.diagrams) ? v.diagrams.filter(isSavedDiagram) : [];
+      return { files: v.files, ...(diagrams.length && { diagrams }), active };
+    }
     if (Array.isArray(v?.paths) && v.paths.every((p: unknown) => typeof p === 'string')) return { files: v.paths.map((path: string) => ({ path })), active };
     return null;
   } catch {

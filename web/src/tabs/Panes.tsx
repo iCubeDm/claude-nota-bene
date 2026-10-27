@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useAppSelector } from '@/store/store.ts';
+import { DiagramView } from '@/diagram/DiagramView.tsx';
 import { FileView } from '@/files/FileView.tsx';
 import { SettingsView } from '@/settings/SettingsView.tsx';
 import { selectTabs } from './slice.ts';
@@ -21,7 +22,8 @@ export function Panes({ chat }: { chat: ReactNode }) {
             <div key="settings" data-pane="settings" data-anchor-skip hidden={active !== 'settings'} className="grid-pane relative min-h-0 flex-1 overflow-auto">
               <SettingsView active={active === 'settings'} />
             </div>
-          ) : null,
+          ) : tab.kind === 'diagram' ? <DiagramView key={`${rootGen}:${tab.id}`} tab={tab} active={active === tab.id} />
+          : null,
       )}
     </>
   );

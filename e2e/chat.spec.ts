@@ -38,6 +38,32 @@ test('streams a markdown reply and shows the done line @chat', async ({ page }) 
   await expect(page.locator('.mermaid-out svg').last()).toBeVisible();
 });
 
+// M7-01: a rendered diagram opens full size in its own tab (the chat reply above holds a mermaid block)
+test('a diagram opens in its own tab and keeps its tab after a reload @chat', async ({ page }) => {
+  await open(page);
+  const text = uniq('diagram');
+  await send(page, text);
+  await expect(donesAfter(page, text).first()).toHaveText(DONE);
+  const out = page.locator('.mermaid-out').last();
+  await expect(out.locator('svg')).toBeVisible();
+  await out.hover();
+  await out.getByRole('button', { name: /Open diagram|Открыть диаграмму/ }).click();
+  const tab = page.locator('[role="tab"][data-tab^="diagram:"]');
+  await expect(tab).toHaveCount(1);
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  const pane = page.locator('[data-pane^="diagram:"]');
+  await expect(pane.locator('svg')).toBeVisible();
+  // opening the same diagram again reuses the tab
+  await page.locator('[role="tab"]').first().click();
+  await out.hover();
+  await out.getByRole('button', { name: /Open diagram|Открыть диаграмму/ }).click();
+  await expect(tab).toHaveCount(1);
+  // the tab survives a reload, with its drawing
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await expect(pane.locator('svg')).toBeVisible();
+});
+
 test('mid-turn send is marked while working @slow', async ({ page }) => {
   await open(page);
   const a = uniq('first mid');

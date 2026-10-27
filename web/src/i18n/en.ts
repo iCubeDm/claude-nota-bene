@@ -125,6 +125,9 @@ export const en: Dict = {
   hk_composer: 'focus the message box (outside text fields)',
   hkTitle: 'Hotkeys',
   // Settings tab (M6-15)
+  // Diagram tab (M7-01)
+  openDiagram: 'Open diagram',
+  diagramTab: 'Diagram',
   settings: 'Settings',
   settingsTip: 'Settings: windows, storage, defaults',
   setWindows: 'Windows',

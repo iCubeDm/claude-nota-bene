@@ -3,8 +3,13 @@ import hljs from 'highlight.js';
 import mermaid from 'mermaid';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
+import { fireEvent } from '@testing-library/react';
+import { Provider } from 'react-redux';
 import { describe, expect, it, vi } from 'vitest';
-import { setLang } from '@/i18n/index.ts';
+import { makeStore } from '@/store/store.ts';
+import { selectActiveTab } from '@/tabs/slice.ts';
+import { textOf } from '@/anchors/text.ts';
+import { setLang, t } from '@/i18n/index.ts';
 import { Markdown } from './Markdown';
 
 vi.mock('mermaid', () => ({
@@ -119,5 +124,42 @@ describe('Markdown', () => {
     await waitFor(() => expect(first.container.querySelector('.mermaid-out')).toHaveTextContent('интерфейс обновился, перезагрузите страницу'));
     const second = render(<Fresh text={MERMAID} final />);
     await waitFor(() => expect(second.container.querySelector('.mermaid-out svg[data-test="m"]')).not.toBeNull());
+  });
+
+  describe('the open-diagram button (M7-01)', () => {
+    const SVG = '```svg\n<svg viewBox="0 0 10 10"><rect width="5" height="5"/></svg>\n```';
+    const store = () => makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+
+    it('every rendered diagram gets a button that is skipped by comment anchors', async () => {
+      const { container } = render(<Markdown text={`${MERMAID}\n\n${SVG}`} final />);
+      await waitFor(() => expect(container.querySelector('.mermaid-out svg')).not.toBeNull());
+      const buttons = container.querySelectorAll('.mermaid-out > button, .svg-out > button');
+      expect(buttons).toHaveLength(2);
+      for (const b of buttons) {
+        expect(b).toHaveAttribute('data-anchor-skip');
+        expect(b).toHaveAttribute('aria-label', t('openDiagram'));
+      }
+      expect(textOf(container.querySelector('.md')!)).not.toContain('⤢');
+    });
+
+    it('a diagram that failed to render has no button', async () => {
+      vi.mocked(mermaid.render).mockRejectedValueOnce(new Error('bad graph'));
+      const { container } = render(<Markdown text={MERMAID} final />);
+      await waitFor(() => expect(container.querySelector('.mermaid-out')).toHaveTextContent('bad graph'));
+      expect(container.querySelector('button')).toBeNull();
+    });
+
+    it('a click opens the diagram tab with its source and language', async () => {
+      const st = store();
+      const { container } = render(<Provider store={st}><Markdown text={MERMAID} final /></Provider>);
+      await waitFor(() => expect(container.querySelector('.mermaid-out > button')).not.toBeNull());
+      fireEvent.click(container.querySelector('.mermaid-out > button')!);
+      expect(selectActiveTab(st.getState())).toMatchObject({ kind: 'diagram', lang: 'mermaid', source: 'graph TD; A-->B' });
+    });
+
+    it('works without a store (the button is inert, nothing throws)', async () => {
+      const { container } = render(<Markdown text={SVG} final />);
+      fireEvent.click(container.querySelector('.svg-out > button')!);
+    });
   });
 });

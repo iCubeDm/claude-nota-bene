@@ -2,10 +2,13 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.min.css';
 import { marked } from 'marked';
-import { memo, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, type MouseEvent as ReactMouseEvent, useContext, useLayoutEffect, useMemo, useRef } from 'react';
+import { ReactReduxContext } from 'react-redux';
 import { t } from '@/i18n/index.ts';
 import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
 import { useSources } from '@/files/sources.ts';
+import { openDiagram } from '@/tabs/slice.ts';
+import { HARDEN, renderMermaid, sanitizeSvg, type DiagramLang } from '@/diagram/render.ts';
 import { markMentions, markRefs } from '@/refs/refs.ts';
 import './markdown.css';
 
@@ -45,31 +48,21 @@ marked.use({
   },
 });
 
-/**
- * Markdown from any repo branch is rendered, so it is hostile input: no <style> (global CSS), no form controls, and no
- * data-* attributes at all (content data-pane / data-file-path / data-lightbox would collide with app hooks; markRefs and
- * hljs add their own data-* after sanitizing).
- */
-const HARDEN = { FORBID_TAGS: ['style', 'form', 'input', 'button', 'select', 'textarea'], ALLOW_DATA_ATTR: false };
+/** The source and language behind each ⤢ button (kept out of the DOM: sanitized content must not be able to forge one). */
+const openers = new WeakMap<Element, { source: string; lang: DiagramLang }>();
 
-type MermaidApi = { render: (id: string, code: string) => Promise<{ svg: string }> };
-let mermaidP: Promise<MermaidApi> | undefined;
-function loadMermaid(): Promise<MermaidApi> {
-  mermaidP ??= import('mermaid').then((m) => {
-    m.default.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      securityLevel: 'strict',
-      themeVariables: { background: 'transparent', fontFamily: 'Inter, system-ui, sans-serif' },
-    });
-    return m.default as MermaidApi;
-  });
-  // a failed chunk load must not stick for the page's lifetime: the next diagram tries again
-  mermaidP.catch(() => { mermaidP = undefined; });
-  return mermaidP;
+/** The ⤢ button, made after sanitizing and skipped by comment anchors; shown on hover (markdown.css). */
+function addOpenButton(out: HTMLElement, source: string, lang: DiagramLang) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'md-open-diagram';
+  b.textContent = '⤢';
+  b.setAttribute('data-anchor-skip', '');
+  b.setAttribute('aria-label', t('openDiagram'));
+  b.title = t('openDiagram');
+  openers.set(b, { source: source.replace(/\s+$/, ''), lang });
+  out.appendChild(b);
 }
-
-let seq = 0;
 
 function postProcess(root: HTMLElement, final: boolean) {
   root.querySelectorAll<HTMLElement>('pre code').forEach((c) => {
@@ -79,27 +72,18 @@ function postProcess(root: HTMLElement, final: boolean) {
       const out = document.createElement('div');
       out.className = 'mermaid-out';
       pre.replaceWith(out);
-      loadMermaid()
-        .then(
-          (m) => {
-            const id = `m${++seq}`;
-            return m.render(id, c.textContent ?? '').then(
-              ({ svg }) => { out.innerHTML = svg; },
-              (e: unknown) => {
-                // on a syntax error mermaid leaves its error graphic (the "bomb") in <body>, under the app
-                document.getElementById(`d${id}`)?.remove();
-                document.getElementById(id)?.remove();
-                out.textContent = t('mermaidError', e instanceof Error ? e.message : String(e));
-              },
-            );
-          },
-          // the page is older than the build on disk (its chunk names are gone): a reload fixes it
-          () => { out.textContent = t('mermaidStale'); },
-        );
+      const code = c.textContent ?? '';
+      void renderMermaid(code).then((r) => {
+        if ('svg' in r) {
+          out.innerHTML = r.svg;
+          addOpenButton(out, code, 'mermaid');
+        } else out.textContent = r.error;
+      });
     } else if (final && lang === 'svg') {
       const out = document.createElement('div');
       out.className = 'svg-out';
-      out.innerHTML = DOMPurify.sanitize(c.textContent ?? '', { USE_PROFILES: { svg: true, svgFilters: true }, ...HARDEN });
+      out.innerHTML = sanitizeSvg(c.textContent ?? '');
+      addOpenButton(out, c.textContent ?? '', 'svg');
       pre.replaceWith(out);
     } else if (!c.dataset.highlighted) {
       hljs.highlightElement(c);
@@ -117,6 +101,8 @@ export const Markdown = memo(
    */
   function Markdown({ text, final, baseDir, src, breaks, mentions, noHtml }: { text: string; final: boolean; baseDir?: string; src?: string; breaks?: boolean; mentions?: boolean; noHtml?: boolean }) {
     const ref = useRef<HTMLDivElement>(null);
+    // Markdown is also rendered without a store in tests: the ⤢ button is then inert
+    const redux = useContext(ReactReduxContext);
     // absolute paths become refs only inside a known source's dir: re-mark when the list arrives or changes
     const sources = useSources();
     const html = useMemo(
@@ -146,7 +132,12 @@ export const Markdown = memo(
     useLayoutEffect(() => {
       if (ref.current) postProcess(ref.current, final);
     }, [html, final]);
-    return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />;
+    const onClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+      const b = (e.target as Element).closest('button.md-open-diagram');
+      const d = b && e.currentTarget.contains(b) ? openers.get(b) : undefined;
+      if (d) redux?.store.dispatch(openDiagram(d));
+    };
+    return <div ref={ref} className="md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
   },
   (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src && a.breaks === b.breaks && a.mentions === b.mentions && a.noHtml === b.noHtml,
 );
