@@ -95,13 +95,13 @@ it('a replayed result never lights done', () => {
 it('a background task (subagent, shell) keeps it working after the turn ends; done only once the task ends', () => {
   const { ev, fill } = setup();
   ev(user);
-  ev(sdk({ type: 'system', subtype: 'task_started', task_id: 't1', description: 'review' }));
+  ev({ kind: 'agent', ts: 1, e: { t: 'task', id: 't1', phase: 'started', desc: 'review' } });
   focused = false;
   ev(result); // the main turn ended while away, the subagent still runs
   expect(fill()).toBe(FAV.workHi);
   act(() => void vi.advanceTimersByTime(700));
   expect(fill()).toBe(FAV.work);
-  ev(sdk({ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed' }));
+  ev({ kind: 'agent', ts: 2, e: { t: 'task', id: 't1', phase: 'done' } });
   expect(fill()).toBe(FAV.done);
   expect(vi.getTimerCount()).toBe(0);
 });
@@ -114,7 +114,7 @@ it('a turn that failed while away is red until seen; a dropped connection is red
   const { ev, fill, store } = setup();
   focused = false;
   ev(user);
-  ev(sdk({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 5, errors: ['boom'], user_message_uuids: ['u1'] }));
+  ev({ kind: 'agent', ts: 2, e: { t: 'turn-end', stop: 'failed', secs: 0, error: 'boom', answers: ['u1'], queued: 0 } });
   expect(fill()).toBe(FAV.error);
   focused = true;
   act(() => void window.dispatchEvent(new Event('focus')));

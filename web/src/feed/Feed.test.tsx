@@ -164,7 +164,7 @@ it('scrolled up: a "jump to the latest" button appears, marks new items, and scr
   fireEvent.scroll(pane);
   const btn = screen.getByRole('button', { name: 'Jump to the latest' });
   expect(btn.dataset.unread).toBeUndefined();
-  act(() => { store.dispatch(serverEvent({ kind: 'sdk', ts: 1, m: { type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'new' }] } } } as never)); });
+  act(() => { store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'message', id: 'a1:0', text: 'new' } })); });
   expect(btn.dataset.unread).toBe('true'); // something new below while away
   fireEvent.click(btn);
   expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: 'smooth' });
@@ -174,16 +174,14 @@ it('scrolled up: a "jump to the latest" button appears, marks new items, and scr
 });
 
 describe('action groups', () => {
-  const tool = (id: string, name: string, cmd: string) => ({ type: 'tool_use', id, name, input: { command: cmd } });
-  const result = (id: string, isError = false) => ({ type: 'tool_result', tool_use_id: id, content: 'out', is_error: isError });
   function run(store: ReturnType<typeof makeStore>, n: number, o: { errors?: number; end?: boolean } = {}) {
     act(() => {
       store.dispatch(serverEvent({ kind: 'user', id: 'u1', text: 'go', ts: 0 } as never));
       for (let i = 1; i <= n; i++) {
-        store.dispatch(serverEvent({ kind: 'sdk', ts: i, m: { type: 'assistant', uuid: `a${i}`, message: { content: [tool(`t${i}`, 'Bash', `cmd-${i}`)] } } as never }));
-        store.dispatch(serverEvent({ kind: 'sdk', ts: i, m: { type: 'user', message: { content: [result(`t${i}`, i <= (o.errors ?? 0))] } } as never }));
+        store.dispatch(serverEvent({ kind: 'agent', ts: i, e: { t: 'tool-call', id: `t${i}`, name: 'Bash', input: { command: `cmd-${i}` }, sub: false } }));
+        store.dispatch(serverEvent({ kind: 'agent', ts: i, e: { t: 'tool-update', id: `t${i}`, text: 'out', isError: i <= (o.errors ?? 0) } }));
       }
-      if (o.end) store.dispatch(serverEvent({ kind: 'sdk', ts: 99, m: { type: 'result', subtype: 'success', duration_ms: 1000, user_message_uuids: ['u1'] } as never }));
+      if (o.end) store.dispatch(serverEvent({ kind: 'agent', ts: 99, e: { t: 'turn-end', stop: 'done', secs: 1, answers: ['u1'], queued: 0 } }));
     });
   }
 
