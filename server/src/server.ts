@@ -202,7 +202,7 @@ export async function startServer(o: {
     const oneTab = o.oneTab ?? true;
     const graceMs = o.takeoverGraceMs ?? TAKEOVER_GRACE_MS;
     // the owner socket (R-M7-5); only used with oneTab. `alive`: false while a ping waits for its pong
-    let owner: { ws: WebSocket; alive: boolean } | null = null;
+    let owner: { ws: WebSocket; alive: boolean; tab: string | null } | null = null;
     const heartbeat = oneTab
       ? setInterval(() => {
         if (!owner) return;
@@ -223,13 +223,13 @@ export async function startServer(o: {
     };
 
     // the owner's wiring: replay (via the hub), state frames, hello. Returns nothing; the message handler is shared
-    const attachOwner = (ws: WebSocket) => {
+    const attachOwner = (ws: WebSocket, tab: string | null) => {
       const hubDetach = hub.attach({ send: (d) => ws.send(d) });
       let detached = false;
       const detach = () => { if (!detached) { detached = true; hubDetach(); } };
       detachers.set(ws, detach);
       if (oneTab) {
-        const me = { ws, alive: true };
+        const me = { ws, alive: true, tab };
         owner = me;
         ws.on('pong', () => { me.alive = true; });
       }
@@ -348,7 +348,7 @@ export async function startServer(o: {
     };
 
     // a newer socket takes the window (R-M7-5): the owner is told and closed with 4001, then the newcomer attaches as on a connect
-    const takeover = (ws: WebSocket) => {
+    const takeover = (ws: WebSocket, tab: string | null) => {
       const old = owner;
       if (old) {
         owner = null;
@@ -358,19 +358,21 @@ export async function startServer(o: {
         } catch { /* already dying */ }
         old.ws.close(TAKEN_OVER_CODE);
       }
-      attachOwner(ws);
+      attachOwner(ws, tab);
       role.set(ws, 'owner');
     };
     const role = new WeakMap<WebSocket, 'pending' | 'occupied' | 'owner'>();
 
-    wss.on('connection', (ws) => {
+    wss.on('connection', (ws, req) => {
+      // this page instance's id (in memory on the page): the same tab reconnecting after a drop is not a second tab
+      const tab = new URL(req.url ?? '/', 'http://x').searchParams.get('tab') || null;
       ws.on('error', (e) => reportError(hub, 'ws', e));
       ws.on('message', guard(hub, 'ws', (data) => {
         const r = role.get(ws);
         if (r === 'pending') return; // still waiting out the grace: nothing it says counts yet
         const msg = parseClientMessage(String(data));
         if (r === 'occupied') {
-          if (!('error' in msg) && msg.type === 'takeover') takeover(ws);
+          if (!('error' in msg) && msg.type === 'takeover') takeover(ws, tab);
           return; // everything else from an occupied socket is ignored
         }
         if ('error' in msg) {
@@ -380,9 +382,16 @@ export async function startServer(o: {
         if (msg.type === 'takeover') return; // the owner has nothing to take
         handleOwner(ws, msg);
       }));
+      if (oneTab && owner && tab !== null && owner.tab === tab) {
+        // the owner's own reconnect (its old socket is a zombie the server has not noticed yet): out with the old, no grace
+        const old = owner;
+        owner = null;
+        detachers.get(old.ws)?.();
+        old.ws.terminate();
+      }
       if (!oneTab || !owner) {
         role.set(ws, 'owner');
-        attachOwner(ws);
+        attachOwner(ws, tab);
         return;
       }
       // an owner exists: a reloading tab's old socket closes within the grace, so wait before answering occupied (R-M7-6)
@@ -395,7 +404,7 @@ export async function startServer(o: {
         if (ws.readyState !== ws.OPEN) return;
         if (!owner) {
           role.set(ws, 'owner');
-          attachOwner(ws);
+          attachOwner(ws, tab);
           return;
         }
         role.set(ws, 'occupied');

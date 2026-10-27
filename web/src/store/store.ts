@@ -103,12 +103,18 @@ const mediaMiddleware = (media: MediaController): Middleware => (api) => {
  * Creates the store and exactly one socket connection. The socket lives only in this closure
  * (reached by thunks through the thunk `extra` argument), never in Redux state: it is not serializable.
  */
+/** This page instance's id, in memory only (not sessionStorage: a duplicated tab would copy it and steal the window). */
+const newTabId = () => crypto.randomUUID();
+
 export function makeStore(o: {
   url: string;
   connect?: (url: string, onEvent: (ev: ServerEvent) => void, onState: (s: SocketState) => void) => Connection;
   pip?: PipApi;
 }) {
   const connectFn = o.connect ?? realConnect;
+  // the server recognises a reconnect of the owning tab by it: no grace, no occupied (M7-15 fix round 1)
+  const tabId = newTabId();
+  const url = `${o.url}${o.url.includes('?') ? '&' : '?'}tab=${tabId}`;
   let conn: Connection | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
   // «Работать здесь» was pressed: the next `occupied` is answered with `takeover` at once (and never shown)
@@ -141,7 +147,7 @@ export function makeStore(o: {
   });
   mediaByStore.set(store, media);
   conn = connectFn(
-    o.url,
+    url,
     (ev) => {
       if (ev.kind === 'occupied') {
         if (takeoverWanted) {

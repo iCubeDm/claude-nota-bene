@@ -84,3 +84,35 @@ it('an occupied or taken tab is idle grey in the favicon, not the red of a dropp
   h.state('closed');
   expect(favState(h.store.getState(), null)).toBe('error');
 });
+
+it('the page sends its tab id in the url; a resync and a send wait for the attach, an occupied socket never resyncs', async () => {
+  const { addComment } = await import('@/comments/slice.ts');
+  const { sendMessage } = await import('@/store/store.ts');
+  let ev!: (e: ServerEvent) => void;
+  let state!: (s: SocketState) => void;
+  let url = '';
+  const sent: ClientMessage[] = [];
+  let attached = false; // what socket.ts does: nothing goes out before the replay (but `takeover`)
+  const store = makeStore({
+    url: 'ws://x/ws',
+    connect: (u, onEvent, onState) => {
+      url = u; ev = onEvent; state = onState;
+      return { send: (m) => { if (!attached && m.type !== 'takeover') return false; sent.push(m); return true; }, close() {} };
+    },
+  });
+  expect(url).toMatch(/^ws:\/\/x\/ws\?tab=[0-9a-f-]{36}$/);
+  // a comment written while offline, and a send typed during the grace: neither goes out
+  act(() => { store.dispatch(addComment({ source: { kind: 'message', id: 'm' }, quote: 'q', text: 't', anchor: { start: 0, end: 1 } } as never) as never); });
+  expect(store.getState().comments.unsynced).toBe(true);
+  expect(store.dispatch(sendMessage('typed in the grace', false))).toBe(false);
+  expect(sent).toEqual([]);
+  // occupied: still nothing
+  act(() => ev({ kind: 'occupied' }));
+  expect(sent).toEqual([]);
+  // attached: the replay arrives, the socket layer reports open, the offline comment is re-sent, and a send now goes
+  attached = true;
+  act(() => { state('open'); ev({ kind: 'replay', events: [] }); });
+  expect(sent.map((m) => m.type)).toEqual(['comments']);
+  expect(store.dispatch(sendMessage('after attach', false))).toBe(true);
+  expect(sent.map((m) => m.type)).toEqual(['comments', 'send']);
+});

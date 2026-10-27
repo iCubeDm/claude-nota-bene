@@ -142,6 +142,29 @@ describe('one tab', () => {
     expect(kinds(b)).not.toContain('occupied');
   });
 
+  it('the owner reconnecting with its tab id is attached at once, no grace and no occupied', async () => {
+    const s = await boot({ grace: 5000 }); // a grace this long would fail the test if it were waited
+    const a = await connect(`${s.url}/ws?tab=T1`);
+    await until(() => kinds(a).includes('hello'));
+    // A's network died: the server still holds its socket (no close frame). The same page comes back
+    const a2 = await connect(`${s.url}/ws?tab=T1`);
+    await until(() => kinds(a2).includes('hello'));
+    expect(kinds(a2)).not.toContain('occupied');
+    expect(kinds(a2)).toContain('replay');
+    await a.closed; // the zombie was terminated
+    expect((await info(s.url)).clients).toBe(1);
+  });
+
+  it('a different tab id (a reload) still goes through the grace and is occupied', async () => {
+    const s = await boot({ grace: 50 });
+    const a = await connect(`${s.url}/ws?tab=T1`);
+    await until(() => kinds(a).includes('hello'));
+    const b = await connect(`${s.url}/ws?tab=T2`);
+    await until(() => kinds(b).includes('hello'));
+    expect(kinds(b)).toEqual(['occupied', 'hello']);
+    expect(a.ws.readyState).toBe(WebSocket.OPEN);
+  });
+
   it('an owner that answers pings is kept', async () => {
     const s = await boot({ heartbeat: 40 });
     const a = await connect(s.url);

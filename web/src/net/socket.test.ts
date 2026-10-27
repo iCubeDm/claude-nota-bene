@@ -30,6 +30,7 @@ class FakeWS {
     this.onclose?.({ code });
   }
 }
+const replay = (ws: FakeWS) => ws.onmessage?.({ data: '{"kind":"replay","events":[]}' });
 const WS = FakeWS as unknown as typeof WebSocket;
 
 beforeEach(() => {
@@ -46,6 +47,7 @@ describe('connect', () => {
     const c = connect('ws://x/ws', () => {}, () => {}, WS);
     expect(c.send({ type: 'interrupt' } as never)).toBe(false);
     FakeWS.instances[0].open();
+    replay(FakeWS.instances[0]);
     expect(c.send({ type: 'interrupt' } as never)).toBe(true);
     expect(FakeWS.instances[0].sent).toEqual([JSON.stringify({ type: 'interrupt' })]);
   });
@@ -54,6 +56,8 @@ describe('connect', () => {
     const states: string[] = [];
     connect('ws://x/ws', () => {}, (s) => states.push(s), WS);
     FakeWS.instances[0].open();
+    expect(states).toEqual([]); // a socket is not attached until the replay
+    replay(FakeWS.instances[0]);
     FakeWS.instances[0].drop();
     expect(states).toEqual(['open', 'closed']);
     vi.advanceTimersByTime(1100);
@@ -82,6 +86,7 @@ describe('connect', () => {
     const states: string[] = [];
     const c = connect('ws://x/ws', () => {}, (s) => states.push(s), WS);
     FakeWS.instances[0].open();
+    replay(FakeWS.instances[0]);
     FakeWS.instances[0].drop(4001);
     expect(states).toEqual(['open', 'taken']);
     vi.advanceTimersByTime(10_000);
@@ -89,10 +94,24 @@ describe('connect', () => {
     c.reconnect();
     expect(FakeWS.instances).toHaveLength(2);
     FakeWS.instances[1].open();
+    replay(FakeWS.instances[1]);
     FakeWS.instances[1].drop(); // an ordinary drop reconnects again
     vi.advanceTimersByTime(1100);
     expect(FakeWS.instances).toHaveLength(3);
     expect(states).toEqual(['open', 'taken', 'open', 'closed']);
+  });
+
+  it('an unattached socket (no replay: the grace or occupied) sends nothing but takeover and reports no state', () => {
+    const states: string[] = [];
+    const c = connect('ws://x/ws', () => {}, (s) => states.push(s), WS);
+    const ws = FakeWS.instances[0];
+    ws.open();
+    ws.onmessage?.({ data: '{"kind":"occupied"}' });
+    ws.onmessage?.({ data: '{"kind":"hello","protocol":5}' });
+    expect(c.send({ type: 'interrupt' })).toBe(false);
+    expect(c.send({ type: 'takeover' })).toBe(true);
+    expect(ws.sent).toEqual([JSON.stringify({ type: 'takeover' })]);
+    expect(states).toEqual([]);
   });
 
   it('parses frames and ignores unparseable ones', () => {

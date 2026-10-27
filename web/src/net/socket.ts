@@ -26,10 +26,9 @@ export function connect(
     timer = null;
     const sock = new WS(url);
     ws = sock;
-    sock.onopen = () => {
-      reportedClosed = false;
-      onState('open');
-    };
+    // not `open` on the WebSocket's open: a socket is attached only when the server's replay arrives. A newcomer in the
+    // reload grace, or an occupied one, gets none, and must neither resync nor send (M7-15 fix round 1)
+    sock.onopen = () => {};
     sock.onmessage = (e) => {
       let ev: ServerEvent;
       try {
@@ -37,6 +36,10 @@ export function connect(
       } catch (err) {
         console.warn('socket: dropped unparseable frame', err);
         return;
+      }
+      if (ev.kind === 'replay' && ws === sock && reportedClosed) {
+        reportedClosed = false;
+        onState('open');
       }
       onEvent(ev);
     };
@@ -60,7 +63,7 @@ export function connect(
 
   return {
     send(m) {
-      if (!ws || ws.readyState !== WS.OPEN) return false;
+      if (!ws || ws.readyState !== WS.OPEN || (reportedClosed && m.type !== 'takeover')) return false; // not attached yet (grace, occupied): only `takeover` goes out
       ws.send(JSON.stringify(m));
       return true;
     },
