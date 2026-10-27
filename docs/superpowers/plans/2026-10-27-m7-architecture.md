@@ -84,6 +84,44 @@ Behaviour rules:
 
   `forkPending`, `sessionId`, `root`, `mode` and `model` stay in the façade.
 
+**Diagrams (B)** — the states the parts implement; `busy()` is true in `turn`, `asking` and `switching`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> live : start, history loaded, agent started
+  state live {
+    [*] --> idle
+    idle --> turn : send or command
+    turn --> turn : another send queued
+    turn --> asking : agent asks a permission
+    asking --> turn : answered or aborted
+    turn --> idle : every waiting send answered
+    turn --> idle : agent died, error result
+  }
+  live --> switching : switch when idle, or restart at any time
+  switching --> live : new session loaded, new agent
+  switching --> live : target refused, old agent kept
+  live --> closed : close
+  switching --> closed : close, no agent afterwards
+  closed --> [*]
+```
+
+```mermaid
+flowchart LR
+  F["session.ts (facade, SessionManager API unchanged)"]
+  F --> P["Phase: live, switching, closed"]
+  F --> T["TurnLedger: waiting, commands, clear, compacted"]
+  F --> B["PermissionBroker: pending asks"]
+  F --> TT["TitleTracker: throttled title"]
+  F --> S["AgentSlot: agent, loop, gen"]
+  S --> A["AgentSession (SDK or fake)"]
+  A -- "messages" --> PU["pump"]
+  PU -- "result, reset, cancelled, boundary" --> T
+  PU -- "frames of the current gen only" --> H["EventHub"]
+  A -- "canUseTool" --> B
+  B -- "permission events" --> H
+```
+
 ## Review Focus
 
 1. **The owning tab is reloaded.** It must come back as the owner, without the occupied overlay flashing. Test in M7-10: e2e reloads the page twice and expects no overlay.
