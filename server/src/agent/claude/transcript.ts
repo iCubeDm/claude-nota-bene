@@ -1,7 +1,7 @@
 import type { SDKMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageRef, ServerEvent } from '@nota-bene/shared';
 import { isImageType } from '../../attachments.ts';
-import { mapSdk } from './map.ts';
+import { isWire, mapSdk } from './map.ts';
 import type { AttachmentStore } from '../../attachments.ts';
 
 type Block = { type?: string; text?: string; content?: unknown; source?: { type?: string; media_type?: string; data?: string } };
@@ -13,7 +13,7 @@ const LABEL_RE = /^\[[^\]\n]{1,200}\]$/;
 const TS = 0;
 
 function agent(out: ServerEvent[], frame: Record<string, unknown>): void {
-  for (const e of mapSdk(frame as unknown as SDKMessage)) out.push({ kind: 'agent', e, ts: TS });
+  for (const e of mapSdk(frame as unknown as SDKMessage).filter(isWire)) out.push({ kind: 'agent', e, ts: TS });
 }
 
 /** Ports the prototype's "rebuild the feed from the transcript" block; pasted images go into `attachments`. */

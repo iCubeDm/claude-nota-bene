@@ -190,6 +190,19 @@ describe('idle compaction', () => {
     expect(errors(a)).toEqual([]);
   });
 
+  it('a compaction that ends with no boundary (hook-blocked: compacting, bare status null) leaves the turn to arm it', async () => {
+    const blocked = { ...big, frames: [{ type: 'system', subtype: 'status', status: 'compacting' }, { type: 'system', subtype: 'status', status: null }] };
+    const s = await bootIdle([blocked]);
+    const a = await connect(s.url);
+    a.send({ type: 'send', id: 'u1', text: 'hi' });
+    await until(() => results(a).length === 1);
+    const ts = a.events.map(agentEv).flatMap((e) => (e ? [e.t] : []));
+    expect(ts).toContain('compact-end');
+    expect(ts).not.toContain('compacted');
+    await until(() => idleUsers(a).length === 1); // the normal turn-end armed it
+    expect(idleUsers(a)[0]).toMatchObject({ text: '/compact', idle: true });
+  });
+
   it('activity until the cache runs out holds it off; turned off for the project it never runs, and the setting is announced and kept', async () => {
     const s = await bootIdle([big]);
     const a = await connect(s.url);

@@ -1,4 +1,4 @@
-import type { AgentEvent } from './agent.ts';
+import type { WireAgentEvent } from './agent.ts';
 
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
 export type AnchorSource = { kind: 'message'; id: string } | { kind: 'file'; path: string; ref?: string };
@@ -100,7 +100,7 @@ export type ServerEvent =
   | { kind: 'hello'; protocol: number }
   | { kind: 'replay'; events: ServerEvent[] }
   /** what the agent said (R-M7-14); `init` and `rate-limit` are server-internal and never sent */
-  | { kind: 'agent'; e: AgentEvent; ts: number }
+  | { kind: 'agent'; e: WireAgentEvent; ts: number }
   /**
    * @deprecated Protocol 4 and older: a raw SDK frame. No server sends it any more; it stays only until the web reads
    * `agent` events (M7-08), so that the web reducers still compile.
@@ -318,4 +318,4 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
   }
 }
 
-export type { AgentEvent, StopReason } from './agent.ts';
+export type { AgentEvent, StopReason, WireAgentEvent } from './agent.ts';

@@ -21,3 +21,6 @@ export type AgentEvent =
   | { t: 'task'; id: string; phase: 'started' | 'progress' | 'updated' | 'done'; desc?: string; type?: string; tokens?: number; tool?: string; summary?: string }
   | { t: 'suggestion'; text: string }
   | { t: 'rate-limit'; info: unknown };                      // server-internal (stats)
+
+/** What reaches the clients (R-M7-14): every AgentEvent but the server-internal `init` and `rate-limit`. */
+export type WireAgentEvent = Exclude<AgentEvent, { t: 'init' } | { t: 'rate-limit' }>;

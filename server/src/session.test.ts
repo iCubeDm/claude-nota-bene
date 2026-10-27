@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ServerEvent } from '@nota-bene/shared';
+import type { AgentEvent, ServerEvent } from '@nota-bene/shared';
 import { mapFrames } from './agent/claude/map.ts';
 import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
@@ -352,7 +352,7 @@ describe('session manager', () => {
     s.send({ id: 'u2', text: 'two' });
     await until(() => agentOf(events, 'turn-end').length === 2);
     // the CLI sends init at the start of every turn; it is server-internal (R-M7-14), never sent to the clients
-    expect(events.some((e) => e.kind === 'agent' && e.e.t === 'init')).toBe(false);
+    expect(events.some((e) => e.kind === 'agent' && (e.e as AgentEvent).t === 'init')).toBe(false);
     expect(events.filter((e) => e.kind === 'resumed')).toHaveLength(1);
     expect(events.filter((e) => e.kind === 'session')).toHaveLength(1); // same id: no new session event
     expect(lastSession('/proj')).toBe('old-session');
@@ -512,6 +512,67 @@ describe('busy cannot get stuck', () => {
       await until(() => agentOf(events, 'turn-end').length === 1);
       expect(agentOf(events, 'message').map((e) => e.e)).toMatchObject([{ text: 'ok\nimages: 2' }]);
     });
+  });
+});
+
+describe('compact-end and idle compaction', () => {
+  const idle = { afterMs: 60, awayMs: 0, retryMs: 30, cacheMs: 2000, minTokens: 100 };
+  // an agent whose frames the test pushes; a big context, so an armed compactor fires
+  function pushed() {
+    const sends: { uuid: string; text: string }[] = [];
+    let push: (f: object) => void = () => {};
+    const backend: AgentBackend = {
+      ...noSessions,
+      history: async () => [],
+      start: () => {
+        const q: object[] = [];
+        let wake: (() => void) | null = null;
+        push = (f) => { q.push(f); wake?.(); };
+        return {
+          messages: mapFrames((async function* () {
+            while (true) {
+              while (q.length) yield q.shift() as never;
+              await new Promise<void>((r) => { wake = r; });
+            }
+          })()),
+          send: (m) => { sends.push({ uuid: m.uuid, text: m.text }); },
+          interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [],
+          contextUsage: async () => ({ used: 500_000, max: 1_000_000, pct: 50 }), usage: async () => ({ cost: null, limits: null }), close() {},
+        };
+      },
+    };
+    return { backend, sends, push: (f: object) => push(f) };
+  }
+  const result = (uuids: string[]) => ({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, terminal_reason: 'completed', user_message_uuids: uuids });
+  const bareNull = { type: 'system', subtype: 'status', status: null }; // -> compact-end
+  const idleSends = (sends: { text: string }[]) => sends.filter((x) => x.text === '/compact');
+
+  it('compact-end does not arm it: after a command\'s turn-end (which never arms) it stays quiet', async () => {
+    const { backend, sends, push } = pushed();
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj', idle, idleOffInSettings: () => false });
+    s.command('compact');
+    await until(() => sends.length === 1);
+    push(result([sends[0]!.uuid])); // the command's own turn-end: refreshes the context, does not arm
+    push(bareNull);
+    await until(() => agentOf(events, 'compact-end').length === 1);
+    await new Promise((r) => setTimeout(r, idle.afterMs * 4));
+    expect(idleSends(sends)).toHaveLength(1); // only the manual /compact
+    s.close();
+  });
+
+  it('compact-end does not disarm it: a turn-end armed it, a bare status null after it changes nothing', async () => {
+    const { backend, sends, push } = pushed();
+    const { hub, events } = setup(backend);
+    const s = await createSessionManager({ hub, backend, cwd: '/proj', idle, idleOffInSettings: () => false });
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sends.length === 1);
+    push(result(['u1']));
+    push(bareNull);
+    await until(() => agentOf(events, 'compact-end').length === 1);
+    await until(() => idleSends(sends).length === 1);
+    expect(events.find((e) => e.kind === 'user' && e.idle)).toMatchObject({ text: '/compact' });
+    s.close();
   });
 });
 
@@ -679,7 +740,7 @@ describe('switch', () => {
           // ignores close(): the loop never ends, and it speaks again after the switch
           messages: mapFrames((async function* () {
             await late;
-            yield { type: 'assistant', uuid: 'late-from-old', message: { content: [] } } as never;
+            yield { type: 'assistant', uuid: 'late-from-old', message: { content: [{ type: 'text', text: 'late' }] } } as never;
             yield { type: 'system', subtype: 'init', session_id: 'old-late', permissionMode: 'plan' } as never;
             await new Promise(() => {});
           })()),

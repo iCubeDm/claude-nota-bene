@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, Mode, ServerEvent, Stats } from '@nota-bene/shared';
-import { mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
+import { isWire, mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
@@ -357,7 +357,7 @@ export function fakeBackend(
       return (sessions.find((e) => e.id === id)?.history ?? []).flatMap((h, i): ServerEvent[] => (h.role === 'user'
         ? [{ kind: 'user', id: `fake-h-${i}`, text: h.text, historic: true, ts: 0 }]
         : mapSdk(sdk({ type: 'assistant', uuid: `fake-h-${i}`, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: h.text }] } }))
-          .map((e) => ({ kind: 'agent', e, ts: 0 }))));
+          .filter(isWire).map((e) => ({ kind: 'agent', e, ts: 0 }))));
     },
   };
 }
