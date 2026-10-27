@@ -1,34 +1,29 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent, IdleCompact, ImageRef, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, IdleCompact, ImageRef, Mode, Stats } from '@nota-bene/shared';
 import { AttachmentStore } from './attachments.ts';
-import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from './agent/types.ts';
+import type { AgentBackend, AgentSession } from './agent/types.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
-import { IdleCompactor, idleConfig, offInClaudeSettings, type IdleConfig } from './idle.ts';
-import { prefsKey, readPrefs, setIdleCompactPref, setModePref } from './prefs.ts';
-import { cwdOf, titleOf } from './sessions.ts';
-import { saveSession, stateDir } from './state.ts';
+import { setIdleCompactPref } from './prefs.ts';
+import { titleOf } from './sessions.ts';
+import { AgentSlot } from './session/agentSlot.ts';
+import { readHistory } from './session/history.ts';
+import { SessionIdentity } from './session/identity.ts';
+import { idleCompaction } from './session/idleWiring.ts';
+import { resolveImages } from './session/images.ts';
+import { ModeKeeper } from './session/mode.ts';
+import type { SessionOptions } from './session/options.ts';
+import { PermissionBroker } from './session/permissions.ts';
+import { Phase, SwitchError } from './session/phase.ts';
+import { SendQueue } from './session/sendQueue.ts';
+import { checkTarget } from './session/target.ts';
+import { TitleTracker } from './session/title.ts';
+import { TurnLedger, activity } from './session/turns.ts';
+import { stateDir } from './state.ts';
 import { StatsService } from './stats.ts';
 
-/** The project's own mode, else Settings → Defaults, else auto. */
-const modeFor = (root: string): Mode => { const p = readPrefs(); return p.modes[prefsKey(root)] ?? p.defaultMode ?? 'auto'; };
-
-/**
- * A refused switch or restart. Reported as `where: 'switch'`, also when it was refused for being busy (a turn, a
- * permission or another switch in progress): the client ends its "switching" state on exactly this, never on a `busy`
- * error, which may answer some other socket's send or command (M4-10).
- */
-export class SwitchError extends Error {
-  readonly where: 'busy' | 'switch';
-  constructor(where: 'busy' | 'switch', message: string) {
-    super(message);
-    this.where = where;
-  }
-}
-
-class TimeoutError extends Error {}
+export { SwitchError };
 
 export type SessionManager = {
   /** Returns 'switching' for a send refused during a switch (nothing sent or emitted; the server tells the asking socket), else null. */
@@ -79,131 +74,65 @@ export type SessionManager = {
   onSessionId(cb: (id: string, prev: string | null) => void): void;
 };
 
-type TurnEnd = Extract<AgentEvent, { t: 'turn-end' }>;
-
-const SESSION_ID = /^[0-9a-f-]{36}$/i;
 const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after close() must not hold the switch
 const INTERRUPT_TIMEOUT_MS = 2000; // a busy restart's interrupt; a stuck CLI must not hold the restart
 const HISTORY_TIMEOUT_MS = 20_000; // a transcript read that hangs must not hold `switching`
-const TITLE_THROTTLE_MS = 10_000;
-const TITLE_TIMEOUT_MS = 5000;
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref());
-
-function realOr(p: string): string {
-  try {
-    return fs.realpathSync.native(p);
-  } catch {
-    return path.resolve(p);
-  }
-}
-
-export async function createSessionManager(o: {
-  hub: EventHub; backend: AgentBackend; cwd: string; resume?: string; fork?: boolean; attachments?: AttachmentStore;
-  /** how long a switch waits for the old agent's message loop to end (tests shorten it) */
-  closeTimeoutMs?: number;
-  /** how long a busy restart waits for its interrupt (tests shorten it) */
-  interruptTimeoutMs?: number;
-  /** how long a switch waits for the transcript read (tests shorten it) */
-  historyTimeoutMs?: number;
-  /** idle compaction timing (tests shorten it); default from the env, see idle.ts */
-  idle?: IdleConfig;
-  /** `"idleCompaction": false` in Claude Code's settings (tests stub it) */
-  idleOffInSettings?: () => boolean;
-}): Promise<SessionManager> {
+/**
+ * The façade (R-M7-11): it wires the parts under ./session/ and owns the pump, the switch procedure and the command
+ * hand-over. Phase: live/switching/closed. TurnLedger: every send, the turn facts. PermissionBroker: the open asks.
+ * TitleTracker: the title. AgentSlot: agent, loop, generation. SessionIdentity: id, root, model, fork, `session`.
+ * ModeKeeper: the mode. SendQueue: the user's sends in order. See the M7-11 report for the old-flag owners.
+ */
+export async function createSessionManager(o: SessionOptions): Promise<SessionManager> {
   const { hub, backend } = o;
+  const report = (where: string, e: unknown) => reportError(hub, where, e);
   const attachments = o.attachments ?? new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
-  let root = o.cwd; // changes only in a switch
-  let sessionId: string | null = o.resume ?? null;
-  let title: string | null = null;
-  let model: string | null = null;
-  let lastSession = ''; // the last `session` event sent, as JSON
-  let heard: string | null = o.resume ?? null; // the id the id listeners last heard of
-  let saved: string | null = null; // last id written to the registry
-  // a fork start: the agent branches off `resume`; until its init names the new id, sessionId is still the SOURCE,
-  // which must never be written to the registry
-  let forkPending = !!(o.fork && o.resume);
-  // the mode we START an agent in is clamped to the modes it offers (the pref stays as the user set it); a mode the
-  // agent itself reports (init/status) is adopted as it is: the pill shows the truth
-  const startMode = (dir: string): Mode => {
-    const m = modeFor(dir);
-    const { modes } = backend.capabilities;
-    return modes.includes(m) ? m : (modes[0] ?? m);
-  };
-  let mode: Mode = startMode(root);
-  let agent: AgentSession | null = null;
-  let loop: Promise<void> | null = null; // the running agent's message loop
-  // Bumped when a session is torn down (switch, close). Everything an agent can trigger later (its messages, its
-  // permission asks, a queued send, a mode or title answer) carries the generation it started in and is dropped
-  // when that is no longer current, so nothing of the old session reaches the new one's sockets.
-  let gen = 0;
-  let switching = false;
-  // a /clear command was sent (its reset not seen yet) / its reset was seen (its result not seen yet). The real CLI
-  // follows the reset with a result; it is live only, so a reload never shows a stray "done 0s" after the clear
-  let clearSent = false;
-  let clearResultDue = false;
-  let closed = false; // close() is final: a switch that ends after it must not start an agent
-  let chain: Promise<void> = Promise.resolve(); // keeps interrupt-then-send ordering across sends
-  const pending = new Map<string, (allow: boolean) => void>();
-  const waiting = new Set<string>(); // sends no result has answered yet (the web reducer's `waiting`)
-  let titleAt = -Infinity;
-  let titleTimer: NodeJS.Timeout | null = null;
-  const stats = new StatsService({
-    session: () => (backend.capabilities.usage ? agent : null), // no usage: no meters, nothing asked of the agent
-    emit: (s) => hub.emit({ kind: 'stats', stats: s }, { store: false }),
-    hasClients: () => hub.clients() > 0,
-    onError: (e) => reportError(hub, 'stats', e),
+  const titles: TitleTracker = new TitleTracker({
+    lookup: async (id, dir) => titleOf(await backend.sessionInfo(id, dir)),
+    current: () => ({ id: who.id, dir: who.root, gen: slot.gen }),
+    onChange: () => who.announce(),
   });
-  const idleCfg = o.idle ?? idleConfig();
-  const idleBlocked = o.idleOffInSettings ?? offInClaudeSettings;
-  const idleState = (): IdleCompact => ({
-    on: readPrefs().idleCompact[prefsKey(root)] ?? true,
-    blocked: idleBlocked(),
-    minutes: Math.round(idleCfg.afterMs / 60_000),
-    awayMinutes: Math.round(idleCfg.awayMs / 60_000),
-    minTokens: idleCfg.minTokens,
-  });
-  const idle = new IdleCompactor({
-    config: idleCfg,
-    enabled: () => { const st = idleState(); const c = backend.capabilities; return c.idleCompact && c.compact && st.on && !st.blocked; },
-    // no agent (it died): starting one only to compact, with nobody watching, is not ours to do
-    busy: () => switching || closed || agent === null || waiting.size > 0 || pending.size > 0,
-    contextUsed: () => stats.current().context?.used ?? null,
-    compact: () => runCommand('compact', true),
-    onFire: (why) => { if (why !== 'active' && why !== 'off') console.log(`[idle] ${why}`); }, // the retries would flood the log
-  });
-  let compactedInTurn = false;
-  const commandIds = new Set<string>(); // /compact and /clear sends whose result has not come yet
-  const idListeners: ((id: string, prev: string | null) => void)[] = [];
+  // root changes only in a switch
+  const who = new SessionIdentity({ root: o.cwd, resume: o.resume, fork: o.fork, title: () => titles.title, emit: (ev) => hub.emit(ev), report });
+  const modes = new ModeKeeper({ modes: backend.capabilities.modes, dir: who.root, emit: (ev) => hub.emit(ev, { store: false }), report });
   const switchListeners: ((id: string | null, o: { restart: boolean }) => void)[] = [];
 
-  const askFor = (g: number): PermissionAsk => (toolName, input, signal) =>
-    new Promise<boolean>((resolve) => {
-      if (g !== gen) return resolve(false); // an old agent asking after the switch: denied, never shown
-      const id = randomUUID();
-      const finish = (allow: boolean) => {
-        if (!pending.delete(id)) return;
-        signal.removeEventListener('abort', onAbort);
-        if (g === gen) hub.emit({ kind: 'permission-done', id, allow });
-        resolve(allow);
-      };
-      const onAbort = () => finish(false);
-      pending.set(id, finish);
-      signal.addEventListener('abort', onAbort, { once: true });
-      hub.emit({ kind: 'permission', id, toolName, input });
-      if (signal.aborted) onAbort();
-    });
+  const phase = new Phase();
+  const turns = new TurnLedger();
+  const permissions = new PermissionBroker({ emit: (ev) => hub.emit(ev) });
+  const slot: AgentSlot = new AgentSlot({
+    start: (g) => backend.start({ ...who.startOptions(), permissionMode: modes.mode, ask: permissions.ask(() => slot.gen, g) }),
+    pump,
+    onError: report,
+  });
+  const queue = new SendQueue({ gen: () => slot.gen, agent: () => slot.ensure(phase.kind), running: (id) => turns.running(id), report, fail: (e, id) => failTurn(e, id) });
+  /** A send not yet answered, a waiting permission, or a switch in progress (R-M4-4); `closed` is not part of it. */
+  const busy = () => phase.switching || activity(turns, permissions) !== 'idle';
+  const stats = new StatsService({
+    session: () => (backend.capabilities.usage ? slot.agent : null), // no usage: no meters, nothing asked of the agent
+    emit: (s) => hub.emit({ kind: 'stats', stats: s }, { store: false }),
+    hasClients: () => hub.clients() > 0,
+    onError: (e) => report('stats', e),
+  });
+  const { idle, state: idleState } = idleCompaction({
+    config: o.idle, offInSettings: o.idleOffInSettings, root: () => who.root, capabilities: backend.capabilities,
+    // no agent (it died): starting one only to compact, with nobody watching, is not ours to do
+    busy: () => phase.kind !== 'live' || slot.agent === null || busy(),
+    contextUsed: () => stats.current().context?.used ?? null,
+    compact: () => runCommand('compact', true),
+  });
 
+  /** The agent's message loop: only the current agent of the current generation reaches the hub. */
   async function pump(a: AgentSession, g: number): Promise<void> {
-    const current = () => g === gen && agent === a;
     try {
       for await (const e of a.messages) {
-        if (!current()) return;
+        if (!slot.isCurrent(a, g)) return;
         onAgent(e);
       }
-      if (current()) died(a, new Error('agent session ended'));
+      if (slot.isCurrent(a, g)) died(a, new Error('agent session ended'));
     } catch (e) {
-      if (current()) died(a, e);
+      if (slot.isCurrent(a, g)) died(a, e);
     }
   }
 
@@ -212,15 +141,8 @@ export async function createSessionManager(o: {
     switch (e.t) {
       case 'init':
         // the CLI sends init at the start of every turn: act only when something is new
-        if (e.mode) adoptMode(e.mode);
-        if (e.sessionId) {
-          forkPending = false;
-          sessionId = e.sessionId;
-          if (saved !== e.sessionId) { saved = e.sessionId; saveSession(root, e.sessionId); }
-        }
-        if (e.model) model = e.model;
-        emitSession();
-        if (e.sessionId) heardId(e.sessionId);
+        if (e.mode) modes.adopt(e.mode, who.root);
+        who.init(e);
         return;
       case 'rate-limit':
         stats.onAgent(e);
@@ -228,16 +150,21 @@ export async function createSessionManager(o: {
       case 'reset':
         onReset(e);
         return;
-      case 'turn-end':
-        onTurnEnd(e);
+      case 'turn-end': {
+        const { store, arm } = turns.turnEnd(e);
+        hub.emit({ kind: 'agent', e }, store ? {} : { store: false }); // the result that follows a /clear's reset is live only
+        stats.onAgent(e);
+        titles.afterResult();
+        if (arm) idle.turnEnded();
         return;
+      }
       case 'cancelled':
-        waiting.delete(e.sendId); // a cancelled queued send never gets a result of its own
+        turns.cancelled(e.sendId);
         break;
       case 'compacted':
         // any compaction (manual, auto, idle) disarms; the turn that compacted (a /compact's own result too) does not
         // arm again: the next one waits for a turn after it
-        compactedInTurn = true;
+        turns.compactBoundary();
         idle.disarm();
         break;
       // `compact-end` (a compaction that ended with no boundary) neither arms nor disarms: the turn's end decides
@@ -247,21 +174,7 @@ export async function createSessionManager(o: {
     hub.emit({ kind: 'agent', e });
     stats.onAgent(e);
     // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
-    if (e.t === 'mode') adoptMode(e.mode);
-  }
-
-  function onTurnEnd(e: TurnEnd): void {
-    settle(e.answers);
-    // the result that follows a /clear's reset is live only (see clearSent)
-    hub.emit({ kind: 'agent', e }, clearResultDue ? { store: false } : {});
-    clearResultDue = false;
-    stats.onAgent(e);
-    scheduleTitle();
-    // a command's result (a /compact that failed or was stopped, a /clear) never arms: a failed idle compaction
-    // would otherwise retry every idle stretch, keeping its own cache warm forever
-    const ofCommand = Array.isArray(e.answers) && e.answers.some((x) => commandIds.delete(x));
-    if (!compactedInTurn && !ofCommand) idle.turnEnded();
-    compactedInTurn = false;
+    if (e.t === 'mode') modes.adopt(e.mode, who.root);
   }
 
   /**
@@ -271,273 +184,80 @@ export async function createSessionManager(o: {
    * never adopts the unsent set. The reset event itself is live only: the web renders its line from it.
    */
   function onReset(e: Extract<AgentEvent, { t: 'reset' }>): void {
-    waiting.clear(); // the CLI's result for a /clear follows the reset; waiting must not depend on it
-    clearResultDue = clearSent;
-    clearSent = false;
+    turns.reset();
     hub.reset();
-    lastSession = '';
-    title = null;
-    titleAt = -Infinity;
-    // the mapper passes any non-empty string; only a session id is adopted
-    const next = e.newId && SESSION_ID.test(e.newId) ? e.newId : null;
-    if (next) {
-      forkPending = false;
-      sessionId = next;
-      saved = next;
-      try { saveSession(root, next); } catch (err) { reportError(hub, 'session', err); }
-    }
+    titles.reset();
+    const next = who.reset(e.newId);
     hub.emit({ kind: 'agent', e }, { store: false });
-    emitSession();
+    who.announce();
     stats.onAgent(e);
-    if (next) heardId(next);
-  }
-
-  /** Mirrors the web reducer: a turn-end answers the sends it names; `all` (an error naming none) answers every one. */
-  function settle(answers: TurnEnd['answers']): void {
-    if (answers === 'all') waiting.clear();
-    else if (answers !== 'none') for (const id of answers) waiting.delete(id);
-  }
-
-  function adoptMode(next: Mode): void {
-    if (next === mode) return;
-    mode = next;
-    try { setModePref(root, next); } catch (e) { reportError(hub, 'mode', e); }
-    hub.emit({ kind: 'mode', mode }, { store: false });
-  }
-
-  /** Sends `session` when any of its fields changed since the last one. */
-  function emitSession(): void {
-    const ev = { kind: 'session' as const, id: sessionId, root, title, model };
-    const json = JSON.stringify(ev);
-    if (json === lastSession) return;
-    lastSession = json;
-    hub.emit(ev);
-  }
-
-  function heardId(id: string): void {
-    if (id === heard) return;
-    const prev = heard;
-    heard = id;
-    for (const cb of idListeners) {
-      try { cb(id, prev); } catch (e) { reportError(hub, 'session-id', e); }
-    }
-  }
-
-  /** The title as the CLI lists it; undefined when the lookup failed (the caller keeps what it had). */
-  async function fetchTitle(id: string, dir: string): Promise<string | null | undefined> {
-    let timer: NodeJS.Timeout | undefined;
-    try {
-      const info = await Promise.race([
-        backend.sessionInfo(id, dir),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('session info timeout')), TITLE_TIMEOUT_MS); }),
-      ]);
-      return titleOf(info);
-    } catch (e) {
-      console.error('[title]', e); // cosmetic and retried after the next result: not a toast
-      return undefined;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async function refreshTitle(): Promise<void> {
-    const g = gen;
-    const id = sessionId;
-    if (!id) return;
-    titleAt = Date.now();
-    const t = await fetchTitle(id, root);
-    if (g !== gen || id !== sessionId || t === undefined || t === title) return;
-    title = t;
-    emitSession();
-  }
-
-  /** After a result: at most one lookup per 10 s, the last result's lookup trailing. */
-  function scheduleTitle(): void {
-    if (titleTimer) return;
-    const wait = titleAt + TITLE_THROTTLE_MS - Date.now();
-    if (wait <= 0) {
-      void refreshTitle();
-      return;
-    }
-    titleTimer = setTimeout(() => { titleTimer = null; void refreshTitle(); }, wait);
-    titleTimer.unref();
+    if (next) who.hear(next);
   }
 
   function died(a: AgentSession, e: unknown): void {
-    reportError(hub, 'agent', e);
-    agent = null;
-    loop = null;
-    try { a.close(); } catch (err) { reportError(hub, 'agent-close', err); }
-    for (const finish of [...pending.values()]) finish(false);
-    emitErrorResult(e);
+    report('agent', e);
+    slot.died(a);
+    permissions.denyAll();
+    failTurn(e);
   }
 
-  // a failed turn-end, as the mapper makes of an SDKResultError. With `answers` it names the send it stands in for;
-  // without, it answers every waiting send.
-  function emitErrorResult(e: unknown, answers?: string): void {
-    const message = e instanceof Error ? e.message : String(e);
-    const ev: TurnEnd = { t: 'turn-end', stop: 'failed', secs: 0, ...(message ? { error: message } : {}), answers: answers ? [answers] : 'all', queued: 0 };
-    settle(ev.answers);
-    hub.emit({ kind: 'agent', e: ev });
+  /** the server answers for the agent: the send `id` it could not hand over, or (no id) every waiting send */
+  function failTurn(e: unknown, id?: string): void {
+    hub.emit({ kind: 'agent', e: turns.failure(e, id) });
   }
 
-  function ensureAgent(): AgentSession {
-    if (agent) return agent;
-    // mid-switch nothing may start an agent: the switch starts the new one after the replay
-    if (switching) throw new Error('the session is switching');
-    const g = gen;
-    const a = backend.start({ cwd: root, permissionMode: mode, ...(sessionId ? { resume: sessionId } : {}), ...(forkPending ? { fork: true } : {}), ask: askFor(g) });
-    agent = a;
-    loop = pump(a, g);
-    return a;
-  }
-
-  /**
-   * The feed of `id` in `root`: every socket's feed is emptied, then a resumed session's transcript is replayed
-   * with its `resumed` marker; then the `session` event (with the title). At startup there are no sockets yet.
-   */
+  /** The feed of `id` in the root: emptied, then a resumed session's transcript with its `resumed` marker, then the
+   * `session` event (with the title). At startup there are no sockets yet. */
   async function load(id: string | null): Promise<void> {
     hub.reset();
-    lastSession = ''; // the history that held the last one is gone: always announce
+    who.forget(); // the history that held the last one is gone: always announce
     if (id) {
-      let history: ServerEvent[] = [];
-      let timer: NodeJS.Timeout | undefined;
-      try {
-        const read = backend.history(id, root, attachments, (e) => reportError(hub, 'attach', e));
-        read.catch(() => {}); // a read that loses the race may still reject later: no news
-        history = await Promise.race([
-          read,
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new TimeoutError('transcript read timed out')), o.historyTimeoutMs ?? HISTORY_TIMEOUT_MS);
-          }),
-        ]);
-      } catch (e) {
-        if (e instanceof TimeoutError) {
-          reportError(hub, 'switch', e); // the client ends its "switching" state on a switch error
-          history = [];
-        } else {
-          reportError(hub, 'history', e); // an unreadable transcript must not stop the server: start with an empty feed
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-      hub.reset(history);
+      const read = () => backend.history(id, who.root, attachments, (e) => report('attach', e));
+      hub.reset(await readHistory({ read, timeoutMs: o.historyTimeoutMs ?? HISTORY_TIMEOUT_MS, report }));
       hub.emit({ kind: 'resumed', id });
-      titleAt = Date.now();
-      title = (await fetchTitle(id, root)) ?? null;
+      await titles.load(id, who.root);
     }
-    emitSession(); // header gets the root (and a resumed id) before the first turn's init
-  }
-
-  /** Throws a SwitchError for a target that must not be opened; returns the realpath of `dir`. */
-  async function checkTarget(id: string | null, dir: string, ownSession: boolean): Promise<string> {
-    let real: string;
-    try {
-      if (!path.isAbsolute(dir)) throw new Error('relative');
-      real = await fs.promises.realpath(dir); // the promises realpath is the native one (case, firmlinks), like realOr
-      if (!(await fs.promises.stat(real)).isDirectory()) throw new Error('not a directory');
-      await fs.promises.access(real, fs.constants.R_OK | fs.constants.X_OK);
-    } catch {
-      throw new SwitchError('switch', `not an existing, readable directory: ${dir}`);
-    }
-    if (ownSession) return real;
-    if (id === null) {
-      // a new session may only open where a session already lives (or here): a local client must not be able to
-      // re-root /file at / or ~
-      if (real === realOr(root)) return real;
-      let list: Awaited<ReturnType<AgentBackend['listSessions']>>;
-      try {
-        list = await backend.listSessions();
-      } catch (e) {
-        throw new SwitchError('switch', `cannot list sessions: ${e instanceof Error ? e.message : String(e)}`);
-      }
-      const known = new Set<string>();
-      for (const x of list) {
-        const cwd = x.cwd || cwdOf(x.sessionId);
-        if (cwd && !known.has(cwd)) known.add(cwd);
-      }
-      for (const cwd of known) if (realOr(cwd) === real) return real;
-      throw new SwitchError('switch', `no session lives in ${real}`);
-    }
-    if (!SESSION_ID.test(id)) throw new SwitchError('switch', `invalid session id: ${id}`);
-    // the client sends the session's own cwd: a mismatch is a bug or a stale list, never something to guess around
-    let info: Awaited<ReturnType<AgentBackend['sessionInfo']>>;
-    try {
-      info = await backend.sessionInfo(id, real);
-    } catch (e) {
-      throw new SwitchError('switch', `cannot read session ${id.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    const cwd = info ? info.cwd ?? cwdOf(id) : null;
-    if (!info || (cwd !== null && realOr(cwd) !== real)) throw new SwitchError('switch', `session ${id.slice(0, 8)} does not belong to ${real}`);
-    return real;
+    who.announce(); // header gets the root (and a resumed id) before the first turn's init
   }
 
   // `restart` is the escape hatch for a stuck agent: it is not busy-gated (only another switch blocks it)
   async function switchTo(id: string | null, dir: string, restart: boolean): Promise<void> {
-    if (switching) throw new SwitchError('switch', 'a switch is already in progress');
-    if (!restart && (waiting.size > 0 || pending.size > 0)) throw new SwitchError('switch', 'the agent is busy');
-    switching = true;
+    const working = () => activity(turns, permissions) !== 'idle';
+    if (!phase.beginSwitch()) return; // closed: nothing to switch
     let tornDown = false;
     try {
-      const real = await checkTarget(id, dir, restart);
+      if (!restart && working()) throw new SwitchError('switch', 'the agent is busy');
+      const real = await checkTarget({ backend, root: who.root, id, dir, ownSession: restart });
       // sends are refused while switching, but the old agent may have asked for a permission during the checks
-      if (!restart && (waiting.size > 0 || pending.size > 0)) throw new SwitchError('switch', 'the agent is busy');
+      if (!restart && working()) throw new SwitchError('switch', 'the agent is busy');
       // a busy restart stops the turn first (best effort, capped), so the transcript it resumes ends cleanly
-      if (restart && agent && (waiting.size > 0 || pending.size > 0)) {
-        const a = agent;
-        let raced = false; // lost the race: the late rejection (the CLI's "Query closed" on close) is no news
-        const stopped = a.interrupt().catch((e) => { if (!raced) reportError(hub, 'interrupt', e); });
-        await Promise.race([stopped, sleep(o.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS)]);
-        raced = true;
-      }
+      if (restart && working()) await slot.stopTurn(o.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS);
       tornDown = true;
-      // 1. stop everything of the old session; nothing it does later may reach the hub (gen)
+      // 1. stop everything of the old session; nothing it does later may reach the hub (the slot's generation)
       stats.stop();
       idle.disarm(); // the new session gets compacted only after a turn of its own
-      compactedInTurn = false;
-      commandIds.clear();
-      gen++;
-      const old = agent;
-      const oldLoop = loop;
-      agent = null;
-      loop = null;
-      for (const finish of [...pending.values()]) finish(false);
-      try { old?.close(); } catch (e) { reportError(hub, 'agent-close', e); }
-      if (oldLoop) await Promise.race([oldLoop, sleep(o.closeTimeoutMs ?? CLOSE_TIMEOUT_MS)]);
-      if (titleTimer) clearTimeout(titleTimer);
-      titleTimer = null;
-      titleAt = -Infinity;
-      waiting.clear();
-      clearSent = clearResultDue = false;
-      chain = Promise.resolve();
+      await slot.teardown(o.closeTimeoutMs ?? CLOSE_TIMEOUT_MS, () => permissions.denyAll());
+      titles.stop();
+      titles.reset();
+      turns.clear();
+      queue.reset();
       // 2. the new session's state
-      const same = id === sessionId && real === realOr(root);
-      root = real;
-      // a restart before the fork's first init keeps forking; any other target ends the pending fork
-      if (!(forkPending && id === sessionId)) forkPending = false;
-      sessionId = id;
-      saved = forkPending ? null : id;
-      heard = id; // the server sends this id's comments in onSwitch, not through the id listeners
-      title = null;
-      model = null;
-      mode = startMode(root);
+      const same = who.enter(id, real);
+      modes.enter(who.root);
       stats.reset();
-      if (id && !forkPending) {
-        try { saveSession(root, id); } catch (e) { reportError(hub, 'session', e); }
-      }
       // 3. the feed, the header, the mode, the stats; the comments come from the onSwitch listeners
       await load(id);
-      hub.emit({ kind: 'mode', mode }, { store: false });
+      modes.ack();
       hub.emit({ kind: 'idle-compact', state: idleState() }, { store: false }); // a per-project setting: the root may have changed
       hub.emit({ kind: 'stats', stats: stats.current() }, { store: false });
       for (const cb of switchListeners) {
-        try { cb(id, { restart: same }); } catch (e) { reportError(hub, 'switch', e); }
+        try { cb(id, { restart: same }); } catch (e) { report('switch', e); }
       }
     } finally {
-      switching = false;
-      // after the history replay, so no frame of the new agent can be wiped by it
-      if (tornDown && !closed) {
-        try { ensureAgent(); } catch (e) { reportError(hub, 'agent', e); }
+      phase.endSwitch();
+      // after the history replay, so no frame of the new agent can be wiped by it; a close() meanwhile: no agent
+      if (tornDown && phase.kind === 'live') {
+        try { slot.ensure(phase.kind); } catch (e) { report('agent', e); }
         stats.start();
       }
     }
@@ -545,140 +265,86 @@ export async function createSessionManager(o: {
 
   /** `idle`: the server's own /compact after a quiet stretch (the feed shows it as such, not as the user's). */
   function runCommand(name: 'compact' | 'clear', isIdle: boolean): void {
-    if (switching || waiting.size > 0 || pending.size > 0) {
+    if (busy()) {
       if (isIdle) return; // nobody asked: no toast
-      reportError(hub, 'busy', new Error(switching ? 'the session is switching; the command was not sent' : 'the agent is busy; the command was not sent'));
+      report('busy', new Error(phase.switching ? 'the session is switching; the command was not sent' : 'the agent is busy; the command was not sent'));
       return;
     }
     if (!isIdle) idle.touch();
     const id = randomUUID();
     const text = `/${name}`;
-    const g = gen;
+    const g = slot.gen;
     try {
-      const a = ensureAgent();
+      const a = slot.ensure(phase.kind);
       hub.emit({ kind: 'user', id, text, ...(isIdle ? { idle: true } : {}) }); // before the agent sees it, as in the prototype
-      waiting.add(id);
-      commandIds.add(id);
-      clearSent = name === 'clear';
-      clearResultDue = false;
+      turns.sent(id, { command: name });
+      turns.running(id);
       a.send({ uuid: id, text, priority: 'next' });
     } catch (e) {
-      if (g !== gen) return;
-      reportError(hub, 'send', e);
-      emitErrorResult(e, id);
+      if (g !== slot.gen) return;
+      report('send', e);
+      failTurn(e, id);
     }
   }
 
-  await load(sessionId);
-  ensureAgent();
+  await load(who.id);
+  slot.ensure(phase.kind);
   stats.start();
 
   return {
     send({ id, text, force, images }) {
-      if (switching) return 'switching';
-      clearSent = clearResultDue = false; // a real turn follows: its result is a normal one
+      if (phase.switching) return 'switching';
+      turns.userTurn(); // a real turn follows: its result is a normal one
       idle.touch();
-      ensureAgent();
-      // resolve refs first: an unknown id is reported, the text and the other images still go out
-      const refs: ImageRef[] = [];
-      const payload: SendImage[] = [];
-      for (const ref of images ?? []) {
-        try {
-          const found = attachments.get(ref.id);
-          if (!found) throw new Error(`unknown attachment ${ref.id}`);
-          refs.push({ ...ref, mediaType: found.mediaType });
-          payload.push({ mediaType: found.mediaType, data: found.bytes.toString('base64'), label: ref.label });
-        } catch (e) {
-          reportError(hub, 'attach', e);
-        }
-      }
+      slot.ensure(phase.kind);
+      const { refs, payload } = resolveImages(attachments, images, (e) => report('attach', e));
+      turns.sent(id); // before the user event: a reused id is refused with nothing emitted
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
-      waiting.add(id);
-      const g = gen;
-      chain = chain.then(async () => {
-        // queued before a switch, or a switch began while it waited: it belongs to the old session (checked after
-        // every await; a stale interrupt rejection must neither toast nor start an agent)
-        if (g !== gen) return;
-        try {
-          // resolve the agent when this runs: a crash while queued restarts it
-          if (force) await ensureAgent().interrupt().catch((e) => { if (g === gen) reportError(hub, 'interrupt', e); }); // no-op when idle
-          if (g !== gen) return;
-          ensureAgent().send({ uuid: id, text, priority: force ? 'now' : 'next', ...(payload.length ? { images: payload } : {}) });
-        } catch (e) {
-          if (g !== gen) return;
-          reportError(hub, 'send', e);
-          emitErrorResult(e, id); // the user event is already out: answer it or the feed waits forever
-        }
-      });
+      queue.push({ id, text, force, images: payload }); // handed over in order, after a forced send's interrupt
       return null;
     },
-    command(name) {
-      runCommand(name, false);
-    },
+    command: (name) => runCommand(name, false),
     interrupt() {
-      const g = gen;
-      agent?.interrupt().catch((e) => { if (g === gen) reportError(hub, 'interrupt', e); });
+      const g = slot.gen;
+      slot.agent?.interrupt().catch((e) => { if (g === slot.gen) report('interrupt', e); });
     },
-    answer(permissionId, allow) {
-      pending.get(permissionId)?.(allow);
-    },
-    mode: () => mode,
+    answer: (permissionId, allow) => permissions.answer(permissionId, allow),
+    mode: () => modes.mode,
     async setMode(next, id) {
-      // Every `mode` gets exactly one answer carrying its ack: the sender ignores the other echoes until it has it.
-      const answer = () => hub.emit({ kind: 'mode', mode, ...(id && { ack: id }) }, { store: false });
       // mid-switch it is not applied: the answer says the mode as it stands, then the switch announces the new session's
-      if (switching) return answer();
-      const g = gen;
-      const dir = root;
+      if (phase.switching) return modes.ack(id);
+      const g = slot.gen;
+      const dir = who.root;
       try {
-        // no agent (it died): nothing to tell, the next one starts in this mode
-        await agent?.setPermissionMode(next);
-        // a switch meanwhile: this was the old session's. The CLI's own status frame may have set it already
-        if (g === gen && mode !== next) {
-          mode = next;
-          setModePref(dir, next);
-        }
+        await slot.agent?.setPermissionMode(next); // no agent (it died): nothing to tell, the next one starts in this mode
+        if (g === slot.gen) modes.set(next, dir); // a switch meanwhile: this was the old session's
       } catch (e) {
-        if (g === gen) reportError(hub, 'mode', e);
+        if (g === slot.gen) report('mode', e);
       }
-      answer();
+      modes.ack(id);
     },
-    info: () => ({ id: sessionId, root, title, model }),
-    busy: () => switching || waiting.size > 0 || pending.size > 0,
-    switching: () => switching,
+    info: () => { const i = who.info(); return { id: i.id, root: i.root, title: titles.title, model: i.model }; },
+    busy,
+    switching: () => phase.switching,
     switch: ({ id, dir }) => switchTo(id, dir, false),
-    restart: () => switchTo(sessionId, root, true),
+    restart: () => switchTo(who.id, who.root, true),
     activity: () => idle.touch(),
     idleCompact: idleState,
     setIdleCompact(on) {
-      try {
-        setIdleCompactPref(root, on);
-      } catch (e) {
-        reportError(hub, 'prefs', e);
-      }
+      try { setIdleCompactPref(who.root, on); } catch (e) { report('prefs', e); }
       hub.emit({ kind: 'idle-compact', state: idleState() }, { store: false });
     },
-    onSwitch(cb) {
-      switchListeners.push(cb);
-    },
-    fileSuggestions: (query) => (!backend.capabilities.fileSuggestions ? Promise.resolve([]) : agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
+    onSwitch: (cb) => void switchListeners.push(cb),
+    fileSuggestions: (query) => (!backend.capabilities.fileSuggestions ? Promise.resolve([]) : slot.agent ? slot.agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
     stats: () => stats.current(),
     clientAttached: () => stats.onAttach(),
     close() {
-      closed = true;
-      gen++;
+      phase.close();
       stats.stop();
       idle.stop();
-      if (titleTimer) clearTimeout(titleTimer);
-      titleTimer = null;
-      const a = agent;
-      agent = null; // the pump then ends quietly instead of reporting a dead agent
-      loop = null;
-      for (const finish of [...pending.values()]) finish(false);
-      try { a?.close(); } catch (e) { reportError(hub, 'agent-close', e); }
+      titles.stop();
+      slot.close(() => permissions.denyAll());
     },
-    onSessionId(cb) {
-      idListeners.push(cb);
-    },
+    onSessionId: (cb) => who.onId(cb),
   };
 }
