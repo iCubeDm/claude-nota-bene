@@ -2,7 +2,10 @@ import type { AgentEvent } from '@nota-bene/shared';
 
 export type SendState = 'queued' | 'running' | 'answered' | 'cancelled' | 'failed';
 type TurnEnd = Extract<AgentEvent, { t: 'turn-end' }>;
-type Entry = { state: SendState; /** a /compact or /clear whose first result has not come yet */ commandDue: boolean };
+type Entry = {
+  state: SendState; /** a /compact or /clear whose first result has not come yet */ commandDue: boolean;
+  /** a /compact or /clear, not the user's prompt */ command: boolean;
+};
 
 const waits = (s: SendState) => s === 'queued' || s === 'running';
 
@@ -32,7 +35,7 @@ export class TurnLedger {
   /** a new send: queued; throws when the id is known */
   sent(id: string, o: { command?: 'compact' | 'clear' } = {}): void {
     this.assertNew(id);
-    this.sends.set(id, { state: 'queued', commandDue: !!o.command });
+    this.sends.set(id, { state: 'queued', commandDue: !!o.command, command: !!o.command });
     if (o.command) {
       this.clearSent = o.command === 'clear';
       this.clearResultDue = false;
@@ -55,6 +58,12 @@ export class TurnLedger {
 
   state(id: string): SendState | undefined {
     return this.sends.get(id)?.state;
+  }
+
+  /** a user's send (not a command) still waiting for its result: a compaction's cut keeps its event (R-M7-12) */
+  inFlight(id: string): boolean {
+    const s = this.sends.get(id);
+    return !!s && !s.command && waits(s.state);
   }
 
   /** applies a result frame: `store` false for a /clear's own result, `arm` whether idle compaction should arm */

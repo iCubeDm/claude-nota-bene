@@ -16,6 +16,7 @@ import { MODES, type Mode } from '@nota-bene/shared';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { readPrefs, setDefaultModePref } from './prefs.ts';
+import { defaultProjectsDir } from './sessions.ts';
 import { stateDir } from './state.ts';
 import { pidAlive, readWindows } from './windows.ts';
 
@@ -148,9 +149,49 @@ export function cleanCandidates(now = Date.now()): { files: string[]; bytes: num
  * when it is read again). A file gone meanwhile is skipped; any other failure is reported, not swallowed.
  */
 export function cleanAttachments(now = Date.now()): { moved: number; bytes: number; trash: string; errors: string[] } {
-  const { files } = cleanCandidates(now);
-  const src = path.join(stateDir(), 'attachments');
-  const trash = path.join(stateDir(), 'trash', 'attachments', new Date(now).toISOString().replace(/[:.]/g, '-'));
+  return moveToTrash('attachments', cleanCandidates(now).files, now);
+}
+
+const ARCHIVE_RE = /^([0-9a-zA-Z-]{1,100})\.jsonl$/;
+
+/**
+ * Archives (`<stateDir>/history/<id>.jsonl`, R-M7-1) whose session transcript is gone from every project: nothing
+ * can resume that session, so nothing can page its archive in. A projects dir that cannot be read proves nothing
+ * (another CLAUDE_CONFIG_DIR, a disk not mounted): then no archive is stale.
+ */
+export function staleArchives(projectsDir = defaultProjectsDir()): { files: string[]; bytes: number } {
+  const dir = path.join(stateDir(), 'history');
+  const files: string[] = [];
+  let bytes = 0;
+  let projects: string[];
+  let names: string[];
+  try {
+    projects = fs.readdirSync(projectsDir).map((p) => path.join(projectsDir, p));
+    names = fs.readdirSync(dir);
+  } catch {
+    return { files, bytes };
+  }
+  for (const n of names) {
+    const m = ARCHIVE_RE.exec(n);
+    if (!m || projects.some((p) => fs.existsSync(path.join(p, `${m[1]!}.jsonl`)))) continue;
+    try {
+      const st = fs.lstatSync(path.join(dir, n));
+      if (!st.isFile()) continue;
+      files.push(n);
+      bytes += st.size;
+    } catch { /* vanished */ }
+  }
+  return { files, bytes };
+}
+
+/** Moves the stale archives to `<stateDir>/trash/history/<stamp>/` (never deletes), as cleanAttachments does. */
+export function cleanStaleArchives(projectsDir = defaultProjectsDir(), now = Date.now()): { moved: number; bytes: number; trash: string; errors: string[] } {
+  return moveToTrash('history', staleArchives(projectsDir).files, now);
+}
+
+function moveToTrash(kind: 'attachments' | 'history', files: string[], now: number): { moved: number; bytes: number; trash: string; errors: string[] } {
+  const src = path.join(stateDir(), kind);
+  const trash = path.join(stateDir(), 'trash', kind, new Date(now).toISOString().replace(/[:.]/g, '-'));
   let moved = 0;
   let bytes = 0;
   const errors: string[] = [];
@@ -163,7 +204,7 @@ export function cleanAttachments(now = Date.now()): { moved: number; bytes: numb
       bytes += size;
     } catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT') errors.push(`${n}: ${code ?? String(e)}`); // e.g. EXDEV: attachments/ on another volume
+      if (code !== 'ENOENT') errors.push(`${n}: ${code ?? String(e)}`); // e.g. EXDEV: the dir on another volume
     }
   }
   return { moved, bytes, trash, errors };
@@ -294,12 +335,15 @@ export function systemRoutes(o: {
       try {
         const sd = stateDir();
         const c = cleanCandidates();
+        const h = staleArchives();
         json(res, 200, {
           attachments: dirSize(path.join(sd, 'attachments')),
           comments: dirSize(path.join(sd, 'comments')),
+          history: dirSize(path.join(sd, 'history')),
           trash: dirSize(path.join(sd, 'trash')),
           marks: { ...dirSize(path.join(o.root(), '.nota-bene', 'marks')), root: o.root() },
-          unreferenced: { files: c.files.length, bytes: c.bytes },
+          // what "clean" moves: unreferenced pasted images and the archives of deleted sessions
+          unreferenced: { files: c.files.length + h.files.length, bytes: c.bytes + h.bytes },
         });
       } catch (e) {
         fail(res, '/system/storage', e);
@@ -309,7 +353,10 @@ export function systemRoutes(o: {
     '/system/storage/clean': (req, res) => {
       if (!only('POST', req, res)) return;
       try {
-        json(res, 200, cleanAttachments());
+        const a = cleanAttachments();
+        const h = cleanStaleArchives();
+        const trash = a.moved && h.moved ? path.join(stateDir(), 'trash') : h.moved ? h.trash : a.trash;
+        json(res, 200, { moved: a.moved + h.moved, bytes: a.bytes + h.bytes, trash, errors: [...a.errors, ...h.errors] });
       } catch (e) {
         fail(res, '/system/storage/clean', e);
       }

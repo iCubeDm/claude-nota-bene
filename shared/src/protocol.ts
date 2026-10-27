@@ -110,7 +110,8 @@ export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; away
 export type ServerEvent =
   /** right after the replay on every connection (servers before it send none: protocol 0) */
   | { kind: 'hello'; protocol: number; capabilities?: Capabilities }
-  | { kind: 'replay'; events: ServerEvent[] }
+  /** `earlier`: how many segments of this conversation, from before its compactions, `/history` holds (R-M7-4); absent for none */
+  | { kind: 'replay'; events: ServerEvent[]; earlier?: number }
   /** what the agent said (R-M7-14); `init` and `rate-limit` are server-internal and never sent */
   | { kind: 'agent'; e: WireAgentEvent; ts: number }
   /** `idle`: a `/compact` the server sent itself after the session sat idle */

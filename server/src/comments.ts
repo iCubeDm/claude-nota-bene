@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Comment } from '@nota-bene/shared';
 
-const SAFE_ID = /^[0-9a-zA-Z-]{1,100}$/;
+/** a session id that is safe as a file name (the fake backend's ids are no UUIDs) */
+export const SAFE_SESSION_ID = /^[0-9a-zA-Z-]{1,100}$/;
 
 function fileFor(dir: string, sessionId: string): string {
-  if (!SAFE_ID.test(sessionId)) throw new Error(`invalid session id: ${JSON.stringify(sessionId)}`);
+  if (!SAFE_SESSION_ID.test(sessionId)) throw new Error(`invalid session id: ${JSON.stringify(sessionId)}`);
   return path.join(dir, `${sessionId}.json`);
 }
 

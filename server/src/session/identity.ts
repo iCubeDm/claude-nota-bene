@@ -19,6 +19,7 @@ export class SessionIdentity {
   private dir: string;
   private mdl: string | null = null;
   private forkPending: boolean;
+  private cleared = false; // a /clear named no new id: `sid` is the old conversation's until an init names the new one
   private saved: string | null = null; // last id written to the registry
   private heard: string | null; // the id the id listeners last heard of
   private last = ''; // the last `session` event sent, as JSON
@@ -35,6 +36,9 @@ export class SessionIdentity {
 
   get id(): string | null { return this.sid; }
   get root(): string { return this.dir; }
+  /** the id this conversation's own records go under; null before the first id, and while a fork's or a cleared
+   * conversation's id is not known */
+  get ownId(): string | null { return this.forkPending || this.cleared ? null : this.sid; }
 
   info(): { id: string | null; root: string; model: string | null } {
     return { id: this.sid, root: this.dir, model: this.mdl };
@@ -48,7 +52,7 @@ export class SessionIdentity {
   /** The CLI's init (it comes at the start of every turn): a new id is adopted and saved once, then announced and heard. */
   init(e: { sessionId?: string; model?: string }): void {
     if (e.sessionId) {
-      this.forkPending = false;
+      this.forkPending = this.cleared = false;
       this.sid = e.sessionId;
       // not caught: a registry that cannot be written fails the agent, as before M7-11
       if (this.saved !== e.sessionId) { this.saved = e.sessionId; saveSession(this.dir, e.sessionId); }
@@ -63,6 +67,7 @@ export class SessionIdentity {
     this.last = '';
     // the mapper passes any non-empty string; only a session id is adopted
     const next = newId && SESSION_ID.test(newId) ? newId : null;
+    this.cleared = !next;
     if (next) {
       this.forkPending = false;
       this.sid = next;
@@ -79,6 +84,7 @@ export class SessionIdentity {
     // a restart before the fork's first init keeps forking; any other target ends the pending fork
     if (!(this.forkPending && id === this.sid)) this.forkPending = false;
     this.sid = id;
+    this.cleared = false;
     this.saved = this.forkPending ? null : id;
     this.heard = id; // the server sends this id's comments in onSwitch, not through the id listeners
     this.mdl = null;

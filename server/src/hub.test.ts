@@ -104,6 +104,68 @@ describe('EventHub', () => {
   });
 });
 
+describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
+  type Stored = Exclude<ServerEvent, { kind: 'replay' }>;
+  const agent = (e: Extract<ServerEvent, { kind: 'agent' }>['e']): Stored => ({ kind: 'agent', e, ts: 1 });
+  const boundary = agent({ t: 'compacted', preTokens: 100 });
+  const session: Stored = { kind: 'session', id: 's1', root: '/r', title: null, model: null };
+  const replayOf = (hub: EventHub) => { const s = sock(); hub.attach(s); return JSON.parse(s.frames[0]!) as { events: ServerEvent[]; earlier?: number }; };
+
+  it('cut keeps the boundary and later frames', () => {
+    const hub = new EventHub();
+    for (const ev of [user('a'), agent({ t: 'message', id: 'm1', text: 'x' }), user('/compact'), boundary, agent({ t: 'message', id: 'm2', text: 'y' })]) hub.emit(ev);
+    const archived: ServerEvent[][] = [];
+    const cut = hub.cut({ archive: (evs) => { archived.push(evs); return 1; } });
+    expect(cut).toEqual([user('a'), agent({ t: 'message', id: 'm1', text: 'x' }), user('/compact')]); // the /compact goes too
+    expect(archived).toEqual([cut]);
+    const r = replayOf(hub);
+    expect(r.events).toEqual([boundary, agent({ t: 'message', id: 'm2', text: 'y' })]);
+    expect(r.earlier).toBe(1);
+  });
+
+  it('cut keeps what a replay still needs: the last session event, an open ask, and what `keep` says', () => {
+    const hub = new EventHub();
+    const ask = (id: string): Stored => ({ kind: 'permission', id, toolName: 'Bash', input: {}, ts: 1 });
+    const done = (id: string): Stored => ({ kind: 'permission-done', id, allow: true, ts: 1 });
+    for (const ev of [{ ...session, title: 'old' }, user('a'), ask('p1'), done('p1'), ask('p2'), session, user('b'), boundary]) hub.emit(ev);
+    const cut = hub.cut({ keep: (ev) => ev.kind === 'user' && ev.id === 'b', archive: () => 1 });
+    expect(cut).toEqual([{ ...session, title: 'old' }, user('a'), ask('p1'), done('p1')]);
+    expect(replayOf(hub).events).toEqual([ask('p2'), session, user('b'), boundary]);
+  });
+
+  it('a failing archive leaves the history as it was', () => {
+    const hub = new EventHub();
+    hub.emit(user('a'));
+    hub.emit(boundary);
+    expect(() => hub.cut({ archive: () => { throw new Error('ENOSPC'); } })).toThrow('ENOSPC');
+    expect(replayOf(hub)).toEqual({ kind: 'replay', events: [user('a'), boundary] });
+  });
+
+  it('no boundary, or nothing before it: nothing is cut or archived', () => {
+    const hub = new EventHub();
+    let calls = 0;
+    hub.emit(user('a'));
+    expect(hub.cut({ archive: () => ++calls })).toEqual([]);
+    hub.reset([boundary]);
+    expect(hub.cut({ archive: () => ++calls })).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  it('reset carries `earlier` into every replay while it is > 0; a plain reset drops it', () => {
+    const hub = new EventHub();
+    const live = sock();
+    hub.attach(live);
+    hub.reset([boundary], { earlier: 2 });
+    expect(JSON.parse(live.frames[1]!)).toEqual({ kind: 'replay', events: [boundary], earlier: 2 });
+    expect(replayOf(hub).earlier).toBe(2);
+    hub.reset([], { earlier: 0 });
+    expect(replayOf(hub)).toEqual({ kind: 'replay', events: [] });
+    hub.reset([boundary], { earlier: 3 });
+    hub.reset();
+    expect(replayOf(hub)).toEqual({ kind: 'replay', events: [] });
+  });
+});
+
 describe('guard', () => {
   it('guard reports instead of throwing', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});

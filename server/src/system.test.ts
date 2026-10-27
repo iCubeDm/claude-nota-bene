@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import { fakeBackend } from './agent/fake.ts';
 import { readPrefs } from './prefs.ts';
 import { startServer } from './server.ts';
-import { CLEAN_MIN_AGE_MS, CONTROL_HEADER, cleanAttachments, cleanCandidates, controlToken, dirSize } from './system.ts';
+import { CLEAN_MIN_AGE_MS, CONTROL_HEADER, cleanAttachments, cleanCandidates, cleanStaleArchives, controlToken, dirSize, staleArchives } from './system.ts';
 import { registerWindow } from './windows.ts';
 
 let home: string;
@@ -120,6 +120,28 @@ describe('storage', () => {
     expect(fs.readdirSync(path.join(home, 'attachments')).sort()).toEqual([`${id('a')}.png`, `${id('c')}.jpg`, 'notes.txt']);
   });
 
+  it('archives whose transcript is gone are stale; clean moves them to the trash; no projects dir: none is', () => {
+    const projects = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-projects-'));
+    try {
+      fs.mkdirSync(path.join(projects, '-p-proj'));
+      fs.writeFileSync(path.join(projects, '-p-proj', 'live-1.jsonl'), '{}');
+      fs.mkdirSync(path.join(home, 'history'));
+      fs.writeFileSync(path.join(home, 'history', 'live-1.jsonl'), 'aaaa'); // its transcript exists: kept
+      fs.writeFileSync(path.join(home, 'history', 'gone-1.jsonl'), 'bbbbbb'); // its transcript is gone: stale
+      fs.writeFileSync(path.join(home, 'history', 'notes.txt'), 'c'); // not an archive name: never touched
+      expect(staleArchives(projects)).toEqual({ files: ['gone-1.jsonl'], bytes: 6 });
+      // an unreadable or missing projects dir proves nothing: every archive is kept
+      expect(staleArchives(path.join(projects, 'missing'))).toEqual({ files: [], bytes: 0 });
+      const r = cleanStaleArchives(projects);
+      expect(r).toMatchObject({ moved: 1, bytes: 6, errors: [] });
+      expect(r.trash.startsWith(path.join(home, 'trash', 'history'))).toBe(true);
+      expect(fs.existsSync(path.join(r.trash, 'gone-1.jsonl'))).toBe(true);
+      expect(fs.readdirSync(path.join(home, 'history')).sort()).toEqual(['live-1.jsonl', 'notes.txt']);
+    } finally {
+      fs.rmSync(projects, { recursive: true, force: true });
+    }
+  });
+
   it('GET /system/storage reports sizes, the project marks and the clean count; POST clean moves', async () => {
     attachment(`${id('b')}.png`, 20, CLEAN_MIN_AGE_MS + 60_000);
     fs.mkdirSync(path.join(proj, '.nota-bene', 'marks', 'm1'), { recursive: true });
@@ -129,6 +151,7 @@ describe('storage', () => {
     expect(st.attachments).toEqual({ bytes: 20, files: 1 });
     expect(st.marks).toMatchObject({ bytes: 3, files: 1 });
     expect(st.unreferenced).toEqual({ bytes: 20, files: 1 });
+    expect(st.history).toEqual({ bytes: 0, files: 0 });
     expect((await post(`${s.url}/system/storage/clean`, {})).status).toBe(403); // no Origin
     const r = await post(`${s.url}/system/storage/clean`, {}, { origin: s.origin });
     expect(await r.json()).toMatchObject({ moved: 1, bytes: 20 });

@@ -31,7 +31,7 @@ beforeEach(() => {
       return actionReply();
     }
     if (url === '/system/windows') return Response.json(WINDOWS);
-    if (url === '/system/storage') return Response.json({ attachments: { bytes: 5e6, files: 9 }, comments: { bytes: 2e4, files: 3 }, trash: { bytes: 0, files: 0 }, marks: { bytes: 1e6, files: 4, root: '/Users/me/a' }, ...storage });
+    if (url === '/system/storage') return Response.json({ attachments: { bytes: 5e6, files: 9 }, comments: { bytes: 2e4, files: 3 }, history: { bytes: 4096, files: 2 }, trash: { bytes: 0, files: 0 }, marks: { bytes: 1e6, files: 4, root: '/Users/me/a' }, ...storage });
     if (url === '/system/about') return Response.json({ version: 'v0.9-12-gabc', stateDir: '/Users/me/.nota-bene', logs: [], node: 'v23.6.0', pid: 42 });
     if (url === '/system/prefs') return Response.json({ defaultMode: 'auto' });
     return new Response('[]');
@@ -104,11 +104,12 @@ it('Windows: a changed window and a window too old for the control route say so'
 it('Storage: sizes, and the clean asks first, then reports where the files went', async () => {
   setup();
   expect(await screen.findByText('Media marks of this project')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /Clean unreferenced images · 3/ }));
+  expect(screen.getByText('Chat history before compaction')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Clean unreferenced files · 3/ }));
   const dialog = await screen.findByRole('dialog');
-  expect(dialog).toHaveTextContent('Move 3 images (3.0 MB)');
+  expect(dialog).toHaveTextContent('Move 3 files (3.0 MB) to the trash');
   expect(posts).toEqual([]);
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Clean unreferenced images' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Clean unreferenced files' }));
   expect(await screen.findByText('Moved 3 (3.0 MB) to ~/.nota-bene/trash/attachments/x')).toHaveAttribute('role', 'status');
 });
 

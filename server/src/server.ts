@@ -6,6 +6,7 @@ import { parseClientMessage, PROTOCOL } from '@nota-bene/shared';
 import type { Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
+import { HistoryArchive, historyRoutes } from './archive.ts';
 import { AttachmentStore, attachmentRoutes } from './attachments.ts';
 import { MarkFiles, markRoutes } from './marks.ts';
 import { CommentStore } from './comments.ts';
@@ -55,9 +56,11 @@ export async function startServer(o: {
   hubs.add(hub);
   try {
     const attachments = new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
+    const archive = new HistoryArchive({ dir: path.join(stateDir(), 'history'), report: (e) => reportError(hub, 'archive', e) });
     const manager = await createSessionManager({
       hub,
       attachments,
+      archive,
       backend: o.backend,
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
@@ -123,6 +126,8 @@ export async function startServer(o: {
       extra: {
         ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
         ...attachmentRoutes(attachments, hub),
+        // only the current conversation's archive: a page of another one (before a switch or a /clear) gets 409
+        ...historyRoutes(archive, () => manager.info().id, hub),
         ...markRoutes(marks, hub, {
           isSent: (id) => store.get(manager.info().id).some((c) => c.id === id && c.status === 'sent'),
         }),

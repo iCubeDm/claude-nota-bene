@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { AgentEvent } from '@nota-bene/shared';
+import { HistoryArchive } from './archive.ts';
 import { AttachmentStore } from './attachments.ts';
 import type { AgentBackend, AgentSession } from './agent/types.ts';
 import { reportError } from './errors.ts';
@@ -8,6 +9,7 @@ import type { EventHub } from './hub.ts';
 import { setIdleCompactPref } from './prefs.ts';
 import { titleOf } from './sessions.ts';
 import { AgentSlot } from './session/agentSlot.ts';
+import { archiveCut } from './session/archiveCut.ts';
 import { readHistory } from './session/history.ts';
 import { SessionIdentity } from './session/identity.ts';
 import { idleCompaction } from './session/idleWiring.ts';
@@ -56,6 +58,10 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
 
   const phase = new Phase();
   const turns = new TurnLedger();
+  const archive = archiveCut({
+    hub, archive: o.archive ?? new HistoryArchive({ dir: path.join(stateDir(), 'history'), report: (e) => report('archive', e) }),
+    id: () => who.ownId, inFlight: (id) => turns.inFlight(id), report,
+  });
   const permissions = new PermissionBroker({ emit: (ev) => hub.emit(ev) });
   const slot: AgentSlot = new AgentSlot({
     start: (g) => backend.start({ ...who.startOptions(), permissionMode: modes.mode, ask: permissions.ask(() => slot.gen, g) }),
@@ -129,6 +135,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
         break;
     }
     hub.emit({ kind: 'agent', e });
+    if (e.t === 'compacted') archive.cut(); // after the emit: the boundary stays, first, in the history (R-M7-2)
     stats.onAgent(e);
     // the CLI can change the mode itself (plan approval, its own keys): follow it, but only on a real change
     if (e.t === 'mode') modes.adopt(e.mode, who.root);
@@ -170,7 +177,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     who.forget(); // the history that held the last one is gone: always announce
     if (id) {
       const read = () => backend.history(id, who.root, attachments, (e) => report('attach', e));
-      hub.reset(await readHistory({ read, timeoutMs: o.historyTimeoutMs ?? HISTORY_TIMEOUT_MS, report }));
+      hub.reset(await readHistory({ read, timeoutMs: o.historyTimeoutMs ?? HISTORY_TIMEOUT_MS, report }), { earlier: archive.earlier() });
       hub.emit({ kind: 'resumed', id });
       await titles.load(id, who.root);
     }

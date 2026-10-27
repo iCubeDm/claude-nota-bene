@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { CLAUDE_CAPABILITIES, PROTOCOL, type Capabilities, type ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
+import { HistoryArchive } from './archive.ts';
 import { startServer } from './server.ts';
 
 let home: string;
@@ -171,6 +172,47 @@ describe('server', () => {
       (e: NodeJS.ErrnoException) => e,
     );
     expect(err).toMatchObject({ code: 'EADDRINUSE', syscall: 'listen' });
+  });
+
+  describe('GET /history (R-M7-4)', () => {
+    const user = (id: string): ServerEvent => ({ kind: 'user', id, text: id, ts: 1 });
+    async function bootWithArchive() {
+      const a = new HistoryArchive({ dir: path.join(home, 'history') });
+      a.append('fake-session', [user('a')]);
+      a.append('fake-session', [user('b')]);
+      a.append('other-session', [user('x')]);
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, resume: 'fake-session' });
+      closers.push(s.close);
+      return s;
+    }
+    const get = (s: { url: string }, q: string) => fetch(`${s.url}/history?${q}`);
+
+    it('a new socket\'s replay carries earlier, and each page goes one segment back', async () => {
+      const s = await bootWithArchive();
+      const c = await connect(s.url);
+      await until(() => c.events.some((e) => e.kind === 'hello'));
+      expect(c.events[0]).toMatchObject({ kind: 'replay', earlier: 2 });
+      const r = await get(s, 'session=fake-session&before=3');
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ events: [user('b')], segment: 2, more: true });
+      expect(await (await get(s, 'session=fake-session&before=2')).json()).toEqual({ events: [user('a')], segment: 1, more: false });
+      expect((await get(s, 'session=fake-session&before=1')).status).toBe(404);
+    });
+
+    it('history 409 for another session', async () => {
+      const s = await bootWithArchive();
+      const r = await get(s, 'session=other-session&before=2');
+      expect(r.status).toBe(409);
+      expect(await r.text()).not.toContain('x');
+    });
+
+    it('400 for a bad id or a bad before; 405 for a POST', async () => {
+      const s = await bootWithArchive();
+      for (const q of ['session=..%2Fx&before=2', 'before=2', 'session=fake-session', 'session=fake-session&before=0', 'session=fake-session&before=1.5', 'session=fake-session&before=abc']) {
+        expect((await get(s, q)).status, q).toBe(400);
+      }
+      expect((await fetch(`${s.url}/history?session=fake-session&before=2`, { method: 'POST', headers: { origin: s.url } })).status).toBe(405);
+    });
   });
 
   describe('POST /restart-server', () => {

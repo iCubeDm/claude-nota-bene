@@ -6,7 +6,8 @@ import { kb } from '@/controls/SessionPicker.tsx';
 import { getLang, setLang, t as tNow, useT } from '@/i18n/index.ts';
 
 type Size = { bytes: number; files: number };
-type Storage = { attachments: Size; comments: Size; trash: Size; marks: Size & { root: string }; unreferenced: Size };
+/** `history`: the archive before compactions (R-M7-1); absent from a server older than M7-12 */
+type Storage = { attachments: Size; comments: Size; history?: Size; trash: Size; marks: Size & { root: string }; unreferenced: Size };
 type WindowRow = {
   port: number; root: string; pid: number; startedAt: number; current: boolean;
   state: 'live' | 'restarting' | 'silent' | 'stale';
@@ -167,6 +168,7 @@ export function SettingsView({ active }: { active: boolean }) {
           <>
             <Row label={t('stAttachments')}>{kb(storage.data.attachments.bytes)} · {t('stFiles', storage.data.attachments.files)}</Row>
             <Row label={t('stComments')}>{kb(storage.data.comments.bytes)} · {t('stFiles', storage.data.comments.files)}</Row>
+            {storage.data.history && <Row label={t('stHistory')}>{kb(storage.data.history.bytes)} · {t('stFiles', storage.data.history.files)}</Row>}
             <Row label={t('stMarks')}>{kb(storage.data.marks.bytes)} · {t('stFiles', storage.data.marks.files)}</Row>
             <Row label={t('stTrash')}>{kb(storage.data.trash.bytes)} · {t('stFiles', storage.data.trash.files)}</Row>
             <div className="mt-3">
