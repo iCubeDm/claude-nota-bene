@@ -64,6 +64,8 @@ function loadMermaid(): Promise<MermaidApi> {
     });
     return m.default as MermaidApi;
   });
+  // a failed chunk load must not stick for the page's lifetime: the next diagram tries again
+  mermaidP.catch(() => { mermaidP = undefined; });
   return mermaidP;
 }
 
@@ -78,13 +80,14 @@ function postProcess(root: HTMLElement, final: boolean) {
       out.className = 'mermaid-out';
       pre.replaceWith(out);
       loadMermaid()
-        .then((m) => m.render(`m${++seq}`, c.textContent ?? ''))
-        .then(({ svg }) => {
-          out.innerHTML = svg;
-        })
-        .catch((e: unknown) => {
-          out.textContent = t('mermaidError', e instanceof Error ? e.message : String(e));
-        });
+        .then(
+          (m) => m.render(`m${++seq}`, c.textContent ?? '').then(
+            ({ svg }) => { out.innerHTML = svg; },
+            (e: unknown) => { out.textContent = t('mermaidError', e instanceof Error ? e.message : String(e)); },
+          ),
+          // the page is older than the build on disk (its chunk names are gone): a reload fixes it
+          () => { out.textContent = t('mermaidStale'); },
+        );
     } else if (final && lang === 'svg') {
       const out = document.createElement('div');
       out.className = 'svg-out';

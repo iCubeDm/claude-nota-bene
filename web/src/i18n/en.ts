@@ -42,6 +42,7 @@ export const en: Dict = {
   keepPlanning: 'Keep planning',
   allowed: '✓ allowed',
   denied: '✕ denied',
+  mermaidStale: 'The diagram did not load: the app was updated, reload the page',
   mermaidError: (msg) => `mermaid error: ${msg}`,
   srcMine: 'my message',
   commentBtn: '💬 Comment',

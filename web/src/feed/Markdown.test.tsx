@@ -96,4 +96,15 @@ describe('Markdown', () => {
     const { container } = render(<Markdown text={MERMAID} final />);
     await waitFor(() => expect(container.querySelector('.mermaid-out')).toHaveTextContent('ошибка mermaid: bad graph'));
   });
+
+  it('a failed mermaid load says to reload and is retried by the next diagram (a page older than the build)', async () => {
+    setLang('ru');
+    vi.resetModules();
+    const { Markdown: Fresh } = await import('./Markdown');
+    vi.mocked(mermaid.initialize).mockImplementationOnce(() => { throw new Error('Failed to fetch dynamically imported module'); });
+    const first = render(<Fresh text={MERMAID} final />);
+    await waitFor(() => expect(first.container.querySelector('.mermaid-out')).toHaveTextContent('интерфейс обновился, перезагрузите страницу'));
+    const second = render(<Fresh text={MERMAID} final />);
+    await waitFor(() => expect(second.container.querySelector('.mermaid-out svg[data-test="m"]')).not.toBeNull());
+  });
 });

@@ -39,6 +39,7 @@ export const ru = {
   keepPlanning: 'Доработать план',
   allowed: '✓ разрешено',
   denied: '✕ запрещено',
+  mermaidStale: 'Диаграмма не загрузилась: интерфейс обновился, перезагрузите страницу',
   mermaidError: (msg: string) => `ошибка mermaid: ${msg}`, // new in M0 (the prototype had it in English only)
   srcMine: 'моё сообщение',
   commentBtn: '💬 Комментировать',
