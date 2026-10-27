@@ -2,6 +2,7 @@
 // the prototype's <kbd> tags are dropped and <br> became "\n"; consumers render them as text (whitespace-pre-line).
 export const ru = {
   langTip: 'Язык интерфейса: English',
+  toLatest: 'В конец разговора',
   emptyChat: 'Напиши агенту, чтобы начать',
   connecting: 'подключение…', // new in M0 (the prototype set the label from markup)
   offline: 'нет связи с сервером…',
@@ -46,6 +47,8 @@ export const ru = {
   commentPh: 'Комментарий…',
   popHint: '⌘/Ctrl+Enter — добавить · Esc — отмена',
   add: 'Добавить',
+  nActions: (n: number) => `${n} ${{ one: 'действие', few: 'действия' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'действий'}`,
+  nErrors: (n: number) => `${n} ${{ one: 'ошибка', few: 'ошибки' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'ошибок'}`,
   nComments: (n: number) => `${n} ${{ one: 'комментарий', few: 'комментария' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'комментариев'}`,
   commentsLc: 'комментарии',
   srcChat: 'чат',

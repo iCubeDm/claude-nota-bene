@@ -167,16 +167,27 @@ export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false
     };
   }, [onClose, hidden]);
 
+  // autosize: the textarea grows with the comment up to its CSS max-height (40vh, as the composer), then scrolls
+  useLayoutEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
+
+  // the side (below or above the selection) is chosen once per selection: a growing comment never makes the popup
+  // jump across it; below, it moves up only as far as the viewport needs; above, it grows upwards
+  const side = useRef<{ for: PendingComment; below: boolean } | null>(null);
   useLayoutEffect(() => {
     if (!root.current) return;
     const { offsetWidth: w, offsetHeight: h } = root.current;
     const { rect } = pending;
-    const below = rect.bottom + 6 + h <= window.innerHeight;
+    if (side.current?.for !== pending) side.current = { for: pending, below: rect.bottom + 6 + h <= window.innerHeight };
     setPos({
       left: Math.max(8, Math.min(rect.left, window.innerWidth - w - 8)),
-      top: Math.max(8, below ? rect.bottom + 6 : rect.top - h - 6),
+      top: Math.max(8, side.current.below ? Math.min(rect.bottom + 6, window.innerHeight - h - 8) : rect.top - h - 6),
     });
-  }, [pending]);
+  }, [pending, text]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.nativeEvent.isComposing) return;
@@ -218,7 +229,7 @@ export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false
         readOnly={busy}
         placeholder={t('commentPh')}
         aria-label={t('commentPh')}
-        className="min-h-16 w-full resize-y rounded-md border border-border-soft bg-background px-2 py-1.5 text-[13px] leading-[1.45] text-foreground focus:border-primary focus:outline-none"
+        className="max-h-[40vh] min-h-16 w-full resize-none overflow-y-auto rounded-md border border-border-soft bg-background px-2 py-1.5 text-[13px] leading-[1.45] text-foreground focus:border-primary focus:outline-none"
       />
       <Attachments
         data-testid="popup-thumbs"

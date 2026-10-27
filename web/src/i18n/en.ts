@@ -5,6 +5,7 @@ type Dict = { [K in keyof typeof ru]: (typeof ru)[K] };
 
 export const en: Dict = {
   langTip: 'Interface language: русский',
+  toLatest: 'Jump to the latest',
   emptyChat: 'Write to the agent to get started',
   connecting: 'connecting…',
   offline: 'no connection to the server…',
@@ -49,6 +50,8 @@ export const en: Dict = {
   commentPh: 'Comment…',
   popHint: '⌘/Ctrl+Enter — add · Esc — cancel',
   add: 'Add',
+  nActions: (n) => `${n} action${n === 1 ? '' : 's'}`,
+  nErrors: (n) => `${n} error${n === 1 ? '' : 's'}`,
   nComments: (n) => `${n} comment${n === 1 ? '' : 's'}`,
   commentsLc: 'comments',
   srcChat: 'chat',
