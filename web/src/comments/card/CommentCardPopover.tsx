@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { CommentCard } from '../CommentCard.tsx';
+import { CommentCard } from './CommentCard.tsx';
 import { closeCommentCard, selectComments, selectPending, selectSentFor } from '../slice.ts';
 
-/** Where the popover sits: next to the click, kept in the viewport, re-placed when the items change or the card grows. */
+/** Where the popover sits: next to the click, kept in the viewport, re-placed when the items change or the card grows.
+ * `items` is only a re-placement trigger, never read. */
 function usePopoverPlacement(root: RefObject<HTMLDivElement | null>, card: { x: number; y: number } | null | undefined, shown: boolean, items: unknown) {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const place = useCallback(() => {
