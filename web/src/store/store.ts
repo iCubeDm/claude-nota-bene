@@ -17,6 +17,7 @@ import { statsSlice } from '../stats/slice.ts';
 import { tasksSlice } from '../tasks/slice.ts';
 import { toast } from '../shell/toast.ts';
 import { recordCompactMs } from '../feed/compactTiming.ts';
+import { feedUiSlice, TOOL_SRC } from '../feed/uiSlice.ts';
 import { persistListeners, type PersistState } from './persist.ts';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
@@ -113,7 +114,7 @@ export function makeStore(o: { url: string; connect?: typeof realConnect; pip?: 
   const persist = createListenerMiddleware<PersistState>();
   persistListeners(persist);
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer, feedUi: feedUiSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send } } }).prepend(controlsListener.middleware, persist.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
@@ -165,12 +166,21 @@ export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _
   send({ type: 'permission', id, allow });
 };
 
+const ARG_CUT = 60;
+
 /**
  * Where a comment's source sits, for the batch text: "reply #n" for a FINAL assistant item (n = 1-based among final
- * assistant items in feed order), "my message" for a user item, null otherwise. The feed keeps no time per assistant
+ * assistant items in feed order), "my message" for a user item, "<name> command (arg)" for an action, null otherwise. The feed keeps no time per assistant
  * item, so the " · time" part of `reply` is dropped rather than invented.
  */
 export const selectReplyLabel = (s: RootState, messageId: string): string | null => {
+  if (messageId.startsWith(TOOL_SRC)) {
+    // an agent action's command or output (R-M7-20): "Bash command (npm test)", the arg cut to 60 characters
+    const id = messageId.slice(TOOL_SRC.length);
+    const it = s.feed.items.find((x) => x.kind === 'tool' && x.id === id);
+    if (it?.kind !== 'tool') return null;
+    return t('srcTool', it.name, it.arg.length > ARG_CUT ? `${it.arg.slice(0, ARG_CUT)}…` : it.arg);
+  }
   if (messageId.startsWith('plan:')) return s.feed.items.some((it) => it.kind === 'permission' && `plan:${it.id}` === messageId) ? t('mode_plan') : null;
   let n = 0;
   for (const it of s.feed.items) {

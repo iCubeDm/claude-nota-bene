@@ -122,6 +122,8 @@ export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
   const comments = useMemo(() => (file === null ? [] : all.filter((c) => inPane(c.anchor.source, file))), [all, file]);
   // what moves this pane's text: the feed for the chat; a settled (re)load for a file tab
   const content = useAppSelector((s) => (paneId === 'chat' ? s.feed : path === undefined ? undefined : s.files.load[fileKey(path, ref)]));
+  // the chat's action panels open and close without a feed change (their roots come and go)
+  const folds = useAppSelector((s) => (paneId === 'chat' ? s.feedUi : undefined));
   const state = useRef({ comments, active, file });
   state.current = { comments, active, file };
 
@@ -197,7 +199,7 @@ export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
   }, [dispatch]);
 
   // comments, content or visibility changed: React has committed the DOM (and unhidden the pane), repaint on the next frame
-  useEffect(() => paint.current(), [comments, content, active]);
+  useEffect(() => paint.current(), [comments, content, folds, active]);
 
   return (
     <div ref={layer} aria-hidden="true" data-anchor-skip data-hl-layer={paneId} className="pointer-events-none absolute inset-0">

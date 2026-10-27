@@ -92,11 +92,14 @@ it('clicking the line shows the full command and the output', () => {
   fireEvent.click(btn);
   expect(btn).toHaveAttribute('aria-expanded', 'true');
   const panel = screen.getByTestId('tool-panel');
-  expect(panel).toHaveAttribute('data-anchor-skip');
+  // M7-17 (R-M7-18): the panel is a commentable root, the toggle line stays out of anchors
+  expect(panel).not.toHaveAttribute('data-anchor-skip');
+  expect(panel).toHaveAttribute('data-item-id', 'tool:t1');
+  expect(btn).toHaveAttribute('data-anchor-skip');
   expect(panel).toHaveTextContent('ls -la');
   expect(panel).toHaveTextContent('echo second-line');
   expect(panel).toHaveTextContent('file-a');
-  expect(view.container.querySelector('[data-anchor-skip] pre')).not.toBeNull();
+  expect(view.container.querySelector('[data-anchor-skip] pre')).toBeNull();
   fireEvent.click(btn);
   expect(screen.queryByTestId('tool-panel')).toBeNull();
 });

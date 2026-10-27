@@ -5,6 +5,7 @@ import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
 import { jumpToFileComment, selectFileLoad, selectFileVersion } from '@/files/slice.ts';
 import { activate } from '@/tabs/slice.ts';
+import { revealToolOf, TOOL_SRC } from '@/feed/uiSlice.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { whereOfFile } from '../send.ts';
 
@@ -21,6 +22,11 @@ function sourceState(s: RootState, src: Comment['anchor']['source'] | undefined)
   if (src.id.startsWith('plan:')) {
     const p = s.feed.items.find((x) => x.kind === 'permission' && `plan:${x.id}` === src.id);
     return p?.kind === 'permission' ? String(p.input.plan ?? '') : null;
+  }
+  if (src.id.startsWith(TOOL_SRC)) {
+    // an action: missing = orphan, like a message; its output arrives once, so "done" is all the card needs to re-check
+    const it = s.feed.items.find((x) => x.kind === 'tool' && `${TOOL_SRC}${x.id}` === src.id);
+    return it?.kind !== 'tool' ? null : it.result ? 'tool-done' : 'streaming';
   }
   const it = s.feed.items.find((x) => (x.kind === 'assistant' || x.kind === 'user') && x.id === src.id);
   if (!it || (it.kind !== 'assistant' && it.kind !== 'user')) return null;
@@ -80,10 +86,15 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
     const src = c.anchor.source;
     // a file: open (or activate) its tab; the view scrolls once its text is loaded (files.jump)
     if (src.kind === 'file') return void dispatch(jumpToFileComment(src.path, c.id, src.ref));
+    // an action's panel exists only while it and its group are open (R-M7-19): open both, and render, before looking
+    if (src.id.startsWith(TOOL_SRC)) flushSync(() => { dispatch(activate('chat')); dispatch(revealToolOf(src.id.slice(TOOL_SRC.length))); });
     const root = itemRoot(src.id);
     if (!root) return;
     flushSync(() => dispatch(activate('chat'))); // a hidden chat pane cannot scroll: show it before measuring
     const range = rangeForAnchor(root, c.anchor);
+    // a panel's command and output scroll inside their own box: bring the fragment into it first
+    const box = range?.startContainer.parentElement?.closest('pre');
+    if (range && box && root.contains(box) && box.scrollHeight > box.clientHeight) scrollRangeIntoView(range, box, 'instant');
     const scroller = root.closest<HTMLElement>('[data-chat-pane]');
     if (range && scroller) scrollRangeIntoView(range, scroller); // the fragment itself, not the whole message
     else root.scrollIntoView({ behavior: 'smooth', block: 'center' }); // orphan: the message

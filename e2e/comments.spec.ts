@@ -231,6 +231,52 @@ test('reload keeps the pending comment and its mark @chat', async ({ page }) => 
   await clearPending(page);
 });
 
+test('a comment on an action’s output: named in its card, back after a reload under the folded line, a jump reopens it @chat', async ({ page }) => {
+  await open(page);
+  await clearPending(page);
+  const text = await turn(page, 'tool comment');
+  const tool = bubble(page, text).locator('xpath=following-sibling::*[@data-kind="tool"]').first();
+  const line = tool.getByRole('button', { name: /Bash · echo tool-cmd-marker/ });
+  await line.click();
+  const out = tool.getByTestId('tool-panel').locator('pre').nth(1);
+  await expect(out).toContainText('tool-out-marker');
+  await out.evaluate((el) => {
+    const range = document.createRange();
+    range.setStart(el.firstChild!, 0);
+    range.setEnd(el.firstChild!, 'tool-out-marker'.length);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await page.getByRole('button', { name: /^💬/ }).click();
+  await commentBox(page).fill('why this output?');
+  await page.getByRole('button', { name: /^(Add|Добавить)$/ }).click();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page).first()).toContainText(/Bash command \(echo tool-cmd-marker\)|команда Bash \(echo tool-cmd-marker\)/);
+  await expect(marks(page, 'pending')).toHaveCount(1);
+
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await settled(page, text);
+  await openPanel(page);
+  // folded again (open state is not persisted): the line names the comment, and the card's quote opens the panel
+  await expect(line).toContainText(/1 comment|1 комментарий/);
+  await expect(tool.getByTestId('tool-panel')).toHaveCount(0);
+  await cards(page).first().getByText('tool-out-marker').click();
+  await expect(out).toBeVisible();
+  const mark = marks(page, 'pending').first();
+  await expect(mark).toBeVisible();
+  const box = await out.evaluate((el) => {
+    const range = document.createRange();
+    range.setStart(el.firstChild!, 0);
+    range.setEnd(el.firstChild!, 4);
+    const r = range.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  });
+  await expect.poll(async () => overlaps((await mark.boundingBox())!, box)).toBe(true);
+  await clearPending(page);
+});
+
 test('two windows see the same comment @chat', async ({ page, browser }, testInfo) => {
   await open(page);
   await clearPending(page);

@@ -1,7 +1,8 @@
 import { useId, useMemo, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
-import { selectBusy, useAppSelector } from '@/store/store.ts';
+import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ARG_KEYS, type FeedItem } from '@/store/feed.ts';
+import { selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
 
 type Tool = Extract<FeedItem, { kind: 'tool' }>;
 
@@ -25,15 +26,16 @@ export function inputText(name: string, input: Record<string, unknown>): string 
     .join('\n\n');
 }
 
-function Clipped({ text, className }: { text: string; className: string }) {
+/** `full`: render it all at once (a commented panel, so an anchor past the cap still resolves, on a jump and for the mark). */
+function Clipped({ text, className, full }: { text: string; className: string; full: boolean }) {
   const t = useT();
   const [all, setAll] = useState(false);
-  const cut = !all && text.length > LAZY_CHARS;
+  const cut = !all && !full && text.length > LAZY_CHARS;
   return (
     <>
       <pre className={className}>{cut ? text.slice(0, LAZY_CHARS) : text}</pre>
       {cut && (
-        <button type="button" className="mt-1 text-[11px] underline" onClick={() => setAll(true)}>
+        <button type="button" data-anchor-skip className="mt-1 text-[11px] underline" onClick={() => setAll(true)}>
           {t('showAll')}
         </button>
       )}
@@ -43,27 +45,27 @@ function Clipped({ text, className }: { text: string; className: string }) {
 
 const BOX = 'max-h-[50vh] overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 font-mono text-[11.5px] leading-snug';
 
-function Panel({ item, id }: { item: Tool; id: string }) {
+function Panel({ item, id, full }: { item: Tool; id: string; full: boolean }) {
   const t = useT();
   const busy = useAppSelector(selectBusy);
   // computed only while the panel is open (it is mounted only then), and once per input
   const input = useMemo(() => inputText(item.name, item.input), [item.name, item.input]);
   const failed = item.result?.isError;
-  const none = <div className="text-[11.5px] italic text-muted-foreground">{t('toolNoOutput')}</div>;
+  const none = <div data-anchor-skip className="text-[11.5px] italic text-muted-foreground">{t('toolNoOutput')}</div>;
   return (
-    // tool output is not commentable in M1 and must not shift the message anchors
-    <div id={id} data-anchor-skip data-testid="tool-panel" className={'mb-2.5 text-foreground' + (item.sub ? ' pl-5' : '')}>
+    // a commentable root (R-M7-18): its anchor text is the command, then the output; labels and hints stay out of it
+    <div id={id} data-item-id={toolSrcId(item.id)} data-kind="tool-panel" data-testid="tool-panel" className={'mb-2.5 text-foreground' + (item.sub ? ' pl-5' : '')}>
       {input && (
         <>
-          <div className="mb-0.5 text-[10.5px] text-muted-foreground">{t('toolInput')}</div>
-          <Clipped text={input} className={BOX} />
+          <div data-anchor-skip className="mb-0.5 text-[10.5px] text-muted-foreground">{t('toolInput')}</div>
+          <Clipped text={input} className={BOX} full={full} />
         </>
       )}
-      <div className="mb-0.5 mt-1.5 text-[10.5px] text-muted-foreground">{t('toolOutput')}</div>
+      <div data-anchor-skip className="mb-0.5 mt-1.5 text-[10.5px] text-muted-foreground">{t('toolOutput')}</div>
       {item.result ? (
-        item.result.text ? <Clipped text={item.result.text} className={BOX + (failed ? ' text-destructive' : '')} /> : none
+        item.result.text ? <Clipped text={item.result.text} className={BOX + (failed ? ' text-destructive' : '')} full={full} /> : none
       ) : busy ? (
-        <div className="text-[11.5px] italic text-muted-foreground">{t('toolRunning')}</div>
+        <div data-anchor-skip className="text-[11.5px] italic text-muted-foreground">{t('toolRunning')}</div>
       ) : (
         none
       )}
@@ -71,8 +73,12 @@ function Panel({ item, id }: { item: Tool; id: string }) {
   );
 }
 
+/** One action: its line, and below it, while open (state in `feedUi`), the panel. A closed line names its comments. */
 export function ToolLine({ item }: { item: Tool }) {
-  const [open, setOpen] = useState(false);
+  const t = useT();
+  const dispatch = useAppDispatch();
+  const open = useAppSelector((s) => selectToolOpen(s, item.id));
+  const comments = useAppSelector((s) => selectToolCommentCounts(s)[item.id] ?? 0);
   const panelId = useId();
   return (
     <div data-kind="tool">
@@ -80,7 +86,8 @@ export function ToolLine({ item }: { item: Tool }) {
         type="button"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => dispatch(toggleTool(item.id))}
+        data-anchor-skip
         className={
           'my-2.5 block w-full cursor-pointer truncate rounded-sm text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring font-mono text-[11.5px] leading-normal ' +
           (item.result?.isError ? 'text-destructive' : 'text-muted-foreground') +
@@ -89,8 +96,9 @@ export function ToolLine({ item }: { item: Tool }) {
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span> {item.name}
         {item.arg ? ` · ${item.arg}` : ''}
+        {!open && comments > 0 && <span className="text-nb-accent"> · {t('nComments', comments)}</span>}
       </button>
-      {open && <Panel item={item} id={panelId} />}
+      {open && <Panel item={item} id={panelId} full={comments > 0} />}
     </div>
   );
 }

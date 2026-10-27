@@ -55,6 +55,7 @@ export const en: Dict = {
   nComments: (n) => `${n} comment${n === 1 ? '' : 's'}`,
   commentsLc: 'comments',
   srcChat: 'chat',
+  srcTool: (name, arg) => (arg ? `${name} command (${arg})` : `${name} command`),
   batchHead: 'Comments on fragments:',
   resumed: (id) => `↻ resumed session ${id}`,
   // quick labels (M1-08)

@@ -28,7 +28,7 @@ const activePane = (): HTMLElement | null =>
 
 /**
  * The commentable root the selection starts in, with its anchor source, only inside the ACTIVE pane: in the chat a
- * chat item (a user message or a FINAL assistant reply); in a file tab its text root, the OUTERMOST `data-file-path`
+ * chat item (a user message, a FINAL assistant reply, a plan or an action's panel); in a file tab its text root, the OUTERMOST `data-file-path`
  * in the pane (FileView sets it on the pane while it shows text; one inside rendered markdown is file content).
  */
 function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | null {
@@ -41,7 +41,8 @@ function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | n
     if (!root || !id || !pane.contains(root)) return null;
     if (id.startsWith('stream:')) return null; // an interrupted reply keeps its per-run id, unstable across restarts: a comment on it would orphan
     const kind = root.dataset.kind;
-    if (!(kind === 'user' || kind === 'plan' || (kind === 'assistant' && root.dataset.final === 'true'))) return null;
+    // an agent action's open panel is a root too (`tool:<id>`, R-M7-18): its command and output
+    if (!(kind === 'user' || kind === 'plan' || kind === 'tool-panel' || (kind === 'assistant' && root.dataset.final === 'true'))) return null;
     return { root, source: { kind: 'message', id } };
   }
   let root: HTMLElement | null = null;

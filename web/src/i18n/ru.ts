@@ -52,6 +52,7 @@ export const ru = {
   nComments: (n: number) => `${n} ${{ one: 'комментарий', few: 'комментария' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'комментариев'}`,
   commentsLc: 'комментарии',
   srcChat: 'чат',
+  srcTool: (name: string, arg: string) => (arg ? `команда ${name} (${arg})` : `команда ${name}`), // a comment on an agent action (M7-17)
   batchHead: 'Комментарии к фрагментам:',
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
   // quick labels (M1-08)
