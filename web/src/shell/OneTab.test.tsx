@@ -3,7 +3,7 @@ import { Provider } from 'react-redux';
 import { afterEach, expect, it } from 'vitest';
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
 import { setLang } from '@/i18n/index.ts';
-import { makeStore } from '@/store/store.ts';
+import { makeStore, takeOver } from '@/store/store.ts';
 import type { SocketState } from '@/net/socket.ts';
 import { FAV, favState } from './Favicon.ts';
 import { OneTab } from './OneTab.tsx';
@@ -115,4 +115,26 @@ it('the page sends its tab id in the url; a resync and a send wait for the attac
   expect(sent.map((m) => m.type)).toEqual(['comments']);
   expect(store.dispatch(sendMessage('after attach', false))).toBe(true);
   expect(sent.map((m) => m.type)).toEqual(['comments', 'send']);
+});
+
+it('a takeover whose send did not go out is kept: the next occupied is answered with takeover', () => {
+  setLang('en');
+  let ev!: (e: ServerEvent) => void;
+  let state!: (s: SocketState) => void;
+  let up = false;
+  const sent: ClientMessage[] = [];
+  const store = makeStore({
+    url: 'ws://x',
+    connect: (_u, onEvent, onState) => {
+      ev = onEvent; state = onState;
+      return { send: (m) => { if (!up) return false; sent.push(m); return true; }, close() {}, reconnect: () => {} };
+    },
+  });
+  act(() => { up = true; state('open'); ev({ kind: 'occupied' }); });
+  up = false; // the socket dropped between the screen and the click
+  act(() => void store.dispatch(takeOver()));
+  expect(sent).toEqual([]);
+  up = true;
+  act(() => ev({ kind: 'occupied' }));
+  expect(sent).toEqual([{ type: 'takeover' }]);
 });

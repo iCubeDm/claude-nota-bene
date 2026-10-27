@@ -1,7 +1,7 @@
 import { setPanelOpen } from '@/comments/slice.ts';
 import { recentModal } from '@/files/recent.ts';
 import type { ru } from '@/i18n/ru.ts';
-import type { AppStore } from '@/store/store.ts';
+import { selectConn, type AppStore } from '@/store/store.ts';
 import { activate, closeTab, reopenClosed } from '@/tabs/slice.ts';
 import { revealFile, setTreeOpen } from '@/tree/slice.ts';
 import { editable } from '@/lib/editable.ts';
@@ -99,6 +99,9 @@ export function installKeymap(store: AppStore): () => void {
   const onKey = (e: KeyboardEvent) => {
     // a held key repeats only the tab stepping
     if (e.defaultPrevented || e.isComposing || (e.repeat && e.code !== 'ArrowLeft' && e.code !== 'ArrowRight')) return;
+    // the overlay of another-tab / taken makes the DOM inert, the document hotkeys must not reach under it either
+    const conn = selectConn(store.getState());
+    if (conn === 'occupied' || conn === 'taken') return;
     const b = BINDINGS.find((x) => matches(x, e));
     if (!b || (!inField(b) && editable(e.target))) return;
     if (b.id !== 'hk_recent' && modalOpen()) return;

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '@/i18n/index.ts';
-import { makeStore, serverEvent } from '@/store/store.ts';
+import { connState, makeStore, serverEvent } from '@/store/store.ts';
 import { App } from '@/App.tsx';
 import { recentModal } from '@/files/recent.ts';
 import { openFile, selectTabs } from '@/tabs/slice.ts';
@@ -199,4 +199,22 @@ it('Esc on empty space focuses the composer and still stops a busy agent', () =>
   key('Escape');
   expect(document.activeElement).toBe(document.getElementById('composer-input'));
   expect(sent).toContainEqual({ type: 'interrupt' });
+});
+
+it('while the window is occupied or taken (the overlay) no hotkey runs; once open again they do', () => {
+  const s = setup();
+  for (const state of ['occupied', 'taken'] as const) {
+    act(() => void s.dispatch(connState(state)));
+    const before = s.getState();
+    key('KeyW', { alt: true });
+    key('ArrowRight', { alt: true });
+    key('Digit1', { alt: true });
+    key('KeyE', { alt: true });
+    key('KeyF', { mod: true, shift: true });
+    expect(s.getState()).toBe(before);
+    expect(recentModal.get()).toBeFalsy();
+  }
+  act(() => void s.dispatch(connState('open')));
+  key('ArrowRight', { alt: true });
+  expect(active(s)).toBe('chat');
 });

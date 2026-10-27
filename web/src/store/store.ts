@@ -122,8 +122,8 @@ export function makeStore(o: {
   const takeOver = () => {
     takeoverWanted = true;
     if (store.getState().conn.state === 'occupied') {
-      send({ type: 'takeover' });
-      takeoverWanted = false;
+      // a send that did not go out (socket not open) keeps the wish: the next `occupied` is answered with takeover
+      takeoverWanted = !send({ type: 'takeover' });
     } else {
       store.dispatch(connState('connecting'));
       conn?.reconnect?.();

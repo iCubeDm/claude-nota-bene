@@ -78,6 +78,41 @@ describe('one tab', () => {
     expect(kinds(b)).toEqual(['occupied', 'hello']);
   });
 
+  it("occupied socket's restart and comments are ignored: no restart, comments unchanged", async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    await until(() => kinds(a).includes('hello'));
+    const b = await connect(s.url);
+    await until(() => kinds(b).includes('hello'));
+    const n = a.events.length;
+    const c = { id: 'c1', anchor: { source: { kind: 'message', id: 'm1' }, start: 0, end: 1, quote: 'h', prefix: '', suffix: '' }, text: 'note', status: 'pending', createdAt: 1 };
+    b.ws.send(JSON.stringify({ type: 'restart' }));
+    b.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c] }));
+    await new Promise((r) => setTimeout(r, 300));
+    // a restart or a merged set would reach the owner as events (a restart resets the feed, a merge broadcasts the set)
+    expect(a.events.slice(n)).toEqual([]);
+    expect(kinds(b)).toEqual(['occupied', 'hello']);
+    // control: the owner's own comments do arrive
+    a.ws.send(JSON.stringify({ type: 'comments', sessionId: null, items: [c] }));
+    await until(() => a.events.slice(n).some((e) => e.kind === 'comments'));
+  });
+
+  it('two newcomers within one grace while the owner closes: one owner, one occupied', async () => {
+    const s = await boot({ grace: 400 });
+    const a = await connect(s.url);
+    await until(() => kinds(a).includes('hello'));
+    const b = await connect(s.url);
+    const c = await connect(s.url);
+    a.ws.close(1000);
+    await until(() => kinds(b).includes('hello') && kinds(c).includes('hello'));
+    const occupied = [b, c].filter((x) => kinds(x).includes('occupied'));
+    const owners = [b, c].filter((x) => !kinds(x).includes('occupied'));
+    expect(occupied).toHaveLength(1);
+    expect(owners).toHaveLength(1);
+    expect(kinds(owners[0]!)).toContain('replay');
+    expect((await info(s.url)).clients).toBe(1);
+  });
+
   it("a socket's messages during the grace are ignored", async () => {
     const s = await boot({ grace: 300 });
     const a = await connect(s.url);
