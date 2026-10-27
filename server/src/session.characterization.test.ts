@@ -118,21 +118,36 @@ function scripted() {
 }
 const result = (uuids: string[]) => ({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, terminal_reason: 'completed', user_message_uuids: uuids });
 
+/** A backend whose transcript read waits on a gate the test controls: `requested` resolves when the switch asks for it. */
+function gated(inner: ReturnType<typeof fakeBackend>) {
+  let open!: () => void;
+  let ask!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const requested = new Promise<void>((r) => { ask = r; });
+  const backend: AgentBackend = {
+    ...inner,
+    history: async (...a) => { ask(); await gate; return inner.history(...a); },
+  };
+  return { backend, requested, release: open };
+}
+
 const longTurn = { text: 'x'.repeat(4000), chunk: 1, delayMs: 5 };
 
 describe('SessionManager characterization', () => {
   // 1. (session.test.ts has 'a send during a switch is refused' but never looks at the agents or at busy)
   it('1. a send during a switch returns "switching": nothing is emitted, no agent is sent to, the switch stays busy', async () => {
     const log: string[] = [];
-    const inner = fakeBackend([{ text: 'x' }], { sessions: [{ id: SID, cwd: dirB }], historyDelayMs: 120 });
+    const g = gated(fakeBackend([{ text: 'x' }], { sessions: [{ id: SID, cwd: dirB }] }));
     const { hub, events } = hubWithSocket();
-    const s = await createSessionManager({ hub, backend: spy(inner, log), cwd: home });
+    const s = await createSessionManager({ hub, backend: spy(g.backend as ReturnType<typeof fakeBackend>, log), cwd: home });
     const p = s.switch({ id: SID, dir: dirB });
+    await g.requested; // the switch is inside its transcript read
     expect(s.switching()).toBe(true);
     const mark = events.length;
     expect(s.send({ id: 'u1', text: 'too early' })).toBe('switching');
     expect(events.length).toBe(mark);
     expect(s.busy()).toBe(true);
+    g.release();
     await p;
     expect(events.some((e) => e.kind === 'user' || e.kind === 'server-error')).toBe(false);
     await tick(30);
@@ -249,7 +264,7 @@ describe('SessionManager characterization', () => {
     expect(s.busy()).toBe(true);
     end();
     await until(() => agentOf(events, 'turn-end').length === 1);
-    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: 0, error: 'agent session ended', answers: 'all', queued: 0 });
+    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: expect.any(Number), error: 'agent session ended', answers: 'all', queued: 0 });
     expect(events.filter((e) => e.kind === 'server-error')).toEqual([{ kind: 'server-error', where: 'agent', message: 'agent session ended' }]);
     expect(s.busy()).toBe(false);
     s.close();
@@ -259,10 +274,12 @@ describe('SessionManager characterization', () => {
 
   // 9.
   it('9. setMode during a switch answers with the current mode and its ack; it is not applied', async () => {
-    const inner = fakeBackend([{ text: 'x' }], { sessions: [{ id: SID, cwd: dirB }], historyDelayMs: 120 });
+    const inner = fakeBackend([{ text: 'x' }], { sessions: [{ id: SID, cwd: dirB }] });
+    const g = gated(inner);
     const { hub, events } = hubWithSocket();
-    const s = await createSessionManager({ hub, backend: inner, cwd: home });
+    const s = await createSessionManager({ hub, backend: g.backend, cwd: home });
     const p = s.switch({ id: SID, dir: dirB });
+    await g.requested;
     expect(s.switching()).toBe(true);
     const mark = events.length;
     await s.setMode('plan', 'ack-1');
@@ -270,6 +287,7 @@ describe('SessionManager characterization', () => {
     expect(s.mode()).toBe('auto');
     expect(inner.setModes).toEqual([]);
     expect(readPrefs().modes[prefsKey(home)]).toBeUndefined();
+    g.release();
     await p;
     expect(s.mode()).toBe('auto');
     expect(inner.setModes).toEqual([]);
@@ -277,15 +295,19 @@ describe('SessionManager characterization', () => {
   });
 
   // 10.
-  it('10. close() during a switch: the switch ends and no agent is started afterwards', async () => {
-    const inner = fakeBackend([{ text: 'x' }], { sessions: [{ id: SID, cwd: dirB }], historyDelayMs: 120 });
+  it('10. close() during a switch: no agent is started afterwards', async () => {
+    const inner = fakeBackend([{ text: 'x' }], { sessions: [{ id: SID, cwd: dirB }] });
+    const g = gated(inner);
     const { hub } = hubWithSocket();
-    const s = await createSessionManager({ hub, backend: inner, cwd: home });
+    const s = await createSessionManager({ hub, backend: g.backend, cwd: home });
     expect(inner.starts).toHaveLength(1);
     const p = s.switch({ id: SID, dir: dirB });
-    await until(() => inner.starts.length === 1 && s.switching());
-    await tick(20); // past the teardown, inside the history read
+    await g.requested; // past the teardown, inside the history read
     s.close();
+    expect(s.busy()).toBe(true); // the switch is still finishing
+    g.release();
+    // The requirement is "no agent starts after close". That the switch promise resolves (rather than rejects) is
+    // today's incidental behaviour, which M7-11 may change on purpose.
     await p;
     await tick(30);
     expect(s.switching()).toBe(false);
