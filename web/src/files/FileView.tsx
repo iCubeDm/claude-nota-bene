@@ -1,85 +1,23 @@
-import hljs from 'highlight.js';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { isMediaAnchor, type MediaAnchor, type MediaShape } from '@nota-bene/shared';
+import { useEffect, useRef, useState } from 'react';
+import { isMediaAnchor } from '@nota-bene/shared';
 import { scrollRangeIntoView } from '@/anchors/scroll.ts';
 import { rangeForAnchor } from '@/anchors/text.ts';
-import { CommentPopup, type PendingComment } from '@/comments/CommentPopup.tsx';
-import { flashRange, HighlightLayer } from '@/comments/HighlightLayer.tsx';
-import { selectComments, selectMediaComments } from '@/comments/slice.ts';
-import { Markdown } from '@/feed/Markdown.tsx';
-import { refClick } from '@/refs/refs.ts';
+import { flashRange } from '@/comments/HighlightLayer.tsx';
+import { selectComments } from '@/comments/slice.ts';
 import { useT } from '@/i18n/index.ts';
-import { toast } from '@/shell/toast.ts';
-import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
-import { MediaMarks } from '@/media/markup/MediaMarks.tsx';
 import { seekAndPause } from '@/media/mediaController.ts';
-import { prepareMediaComment } from '@/media/markup/createMediaComment.ts';
-import { dropShapes, selectDraft } from '@/media/markup/slice.ts';
-import { selectTurnSeq, useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
+import { selectDraft } from '@/media/markup/slice.ts';
+import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf } from './kinds.ts';
 import { isFixed, sourcesKnown, useSources } from './sources.ts';
 import { SourceChip } from './SourcePicker.tsx';
-import { clearJump, dropFileLoad, selectJump, setFileLoad, setFileVersion } from './slice.ts';
-
-const MAX_BYTES = 2 * 1024 * 1024;
-const PROBE = 8192;
-const HIGHLIGHT_MAX = 200_000; // hljs on a 1-2 MB file freezes the tab
-
-type Loaded =
-  | { s: 'text'; text: string }
-  | { s: 'tooLarge' }
-  | { s: 'binary' }
-  | { s: 'gone' }
-  | { s: 'sourceGone' }
-  | { s: 'error'; message: string };
-
-/** HEAD for the size, a Range probe for NUL, only then the whole body. */
-/** `other`: another source; the server answers 400 for a source id it does not know (the branch was deleted). */
-async function load(url: string, signal: AbortSignal, other: boolean): Promise<Loaded> {
-  const head = await fetch(url, { method: 'HEAD', signal });
-  if (head.status === 404) return { s: 'gone' };
-  if (other && head.status === 400) return { s: 'sourceGone' };
-  if (!head.ok) return { s: 'error', message: `${head.status} ${head.statusText}`.trim() };
-  if (Number(head.headers.get('content-length') ?? 0) > MAX_BYTES) return { s: 'tooLarge' };
-  const probe = await fetch(url, { headers: { Range: `bytes=0-${PROBE - 1}` }, signal });
-  if (probe.status === 404) return { s: 'gone' };
-  if (!probe.ok) return { s: 'error', message: `${probe.status} ${probe.statusText}`.trim() };
-  if (new Uint8Array(await probe.arrayBuffer()).slice(0, PROBE).includes(0)) return { s: 'binary' };
-  const res = await fetch(url, { signal });
-  if (res.status === 404) return { s: 'gone' };
-  if (!res.ok) return { s: 'error', message: `${res.status} ${res.statusText}`.trim() };
-  return { s: 'text', text: await res.text() };
-}
-
-/** The media's ETag (its version for media comments); undefined without one (a branch source) or on any failure. */
-const headVersion = (url: string, signal: AbortSignal): Promise<string | undefined> => fetch(url, { method: 'HEAD', signal }).then(
-  (r) => (r.ok ? r.headers.get('etag') ?? undefined : undefined),
-  () => undefined, // no version: the mark simply cannot tell "the file changed"
-);
-
-const extOf = (p: string) => /\.([a-z0-9]+)$/i.exec(p)?.[1]?.toLowerCase();
-
-function CodeText({ text, path }: { text: string; path: string }) {
-  const ref = useRef<HTMLElement>(null);
-  const plain = text.length > HIGHLIGHT_MAX;
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (plain) {
-      el.textContent = text;
-      return;
-    }
-    const ext = extOf(path);
-    el.textContent = text;
-    delete el.dataset.highlighted;
-    el.className = 'hljs';
-    if (ext && hljs.getLanguage(ext)) el.classList.add(`language-${ext}`);
-    hljs.highlightElement(el);
-  }, [text, path, plain]);
-  return <code ref={ref} />;
-}
+import { clearJump, selectJump } from './slice.ts';
+import { HIGHLIGHT_MAX } from './view/CodeText.tsx';
+import { MediaBody } from './view/MediaBody.tsx';
+import { TextBody } from './view/TextBody.tsx';
+import { useFileLoad } from './view/useFileLoad.ts';
+import { useMediaMarkup } from './view/useMediaMarkup.ts';
 
 /**
  * One open file. `src`/`refName`: another source (a worktree or a branch; M3-16), shown read-only with a chip. A branch
@@ -98,151 +36,14 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const fixed = isFixed(src, sources);
   // the tab stays (nothing is dropped or rewritten); its view says the source is gone
   const srcGone = src !== 'here' && sourcesKnown() && !sources.some((x) => x.id === src);
-  const turnSeq = useAppSelector(selectTurnSeq);
-  const [rev, setRev] = useState(0);
-  const [data, setData] = useState<Loaded | null>(null);
   const [natural, setNatural] = useState(false);
-  const [failed, setFailed] = useState(false); // image/media could not load
-  const [bust, setBust] = useState(0);
-  const failedRef = useRef(false);
-  failedRef.current = failed;
-  const mediaUrl = bust ? `${url}&r=${bust}` : url;
-  // the media controller tracks this tab's <video|audio> while it is mounted (pause/PiP rules, the ▶ dot)
-  const mediaCtl = useMedia();
-  const mediaEl = useRef<HTMLMediaElement | null>(null);
-  // the image or video the markup layer draws over (state: the layer mounts once the element exists)
-  const [markable, setMarkable] = useState<HTMLImageElement | HTMLVideoElement | null>(null);
-  const mediaRef = useCallback((el: HTMLMediaElement | null) => {
-    mediaEl.current = el;
-    if (el instanceof HTMLVideoElement) setMarkable(el);
-    if (!el) return;
-    const off = mediaCtl.register(tabId, el);
-    return () => {
-      off();
-      setMarkable(null);
-    };
-  }, [mediaCtl, tabId]);
-  const imgRef = useCallback((el: HTMLImageElement | null) => setMarkable(el), []);
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
-  // markup → comment. The version is the media's ETag, asked for when the mode is entered (absent for a branch
-  // source); prepare awaits that request, so an early Add still gets it. Nothing is written until Add (the popup runs
-  // `prepare` then), and the draft is cleared only once the comment exists.
-  const version = useRef<Promise<string | undefined> | undefined>(undefined);
-  useEffect(() => {
-    version.current = undefined;
-    if (!marking) return;
-    const ac = new AbortController();
-    version.current = headVersion(mediaUrl, ac.signal);
-    return () => ac.abort();
-  }, [marking, mediaUrl]);
-  // the file's current version, for its media comments' "the file has changed since": read when the media (re)loads,
-  // only while the file has a media comment that knows its own version (no request for a file without one)
-  const versioned = useAppSelector((s) => markableKind && selectMediaComments(s, path, ref).some((c) => c.anchor.version !== undefined));
-  useEffect(() => {
-    if (!versioned) return;
-    const ac = new AbortController();
-    void headVersion(mediaUrl, ac.signal).then((v) => ac.signal.aborted || dispatch(setFileVersion({ path, ref, version: v })));
-    return () => ac.abort();
-  }, [versioned, mediaUrl, path, ref, dispatch]);
-  useEffect(() => () => void dispatch(setFileVersion({ path, ref })), [path, ref, dispatch]); // the tab closed: unknown
-  const [markPopup, setMarkPopup] = useState<PendingComment | null>(null);
-  const onMarkAdd = useCallback((shapes: MediaShape[], at: DOMRect) => {
-    const el = markable;
-    if (!el) return;
-    const video = el instanceof HTMLVideoElement;
-    const [width, height] = video ? [el.videoWidth, el.videoHeight] : [el.naturalWidth, el.naturalHeight];
-    // not loaded yet, or no intrinsic size (an SVG without one): nothing to render the drawing on; the draft stays
-    if (!width || !height) return toast(t('markNoSize'), path);
-    const anchor: MediaAnchor = {
-      kind: 'media', source: ref === undefined ? { kind: 'file', path } : { kind: 'file', path, ref }, width, height,
-      // for the popup's quote; prepare pauses the video and re-reads the time at the moment it captures the frame
-      ...(video && { time: Math.round(el.currentTime * 1000) / 1000 }),
-      shapes,
-    };
-    const id = crypto.randomUUID();
-    const v = version.current;
-    setMarkPopup({ anchor, rect: at, id, prepare: () => prepareMediaComment(id, el, anchor, { version: v }) });
-  }, [markable, path, ref, t]);
-  const closeMarkPopup = useCallback(() => setMarkPopup(null), []);
-  // only the shapes that went into the comment leave the draft (a stroke drawn meanwhile is not the comment's)
-  const markAdded = useCallback((shapes: MediaShape[]) => void dispatch(dropShapes(tabId, shapes)), [dispatch, tabId]);
-  // the popup belongs to a visible drawing: hiding the tab or leaving the mode closes it (the draft stays). Not while
-  // its Add is saving: that finishes (the popup waits hidden; a failure is shown there, and as a toast)
-  // state too: while saving, the markup layer takes no drawing, no Comment and no keys
-  const [saving, setSaving] = useState(false);
-  const popupBusy = useRef(false);
-  const onPopupBusy = useCallback((b: boolean) => void ((popupBusy.current = b), setSaving(b)), []);
-  useEffect(() => {
-    if ((!active || !marking) && !popupBusy.current) setMarkPopup(null);
-  }, [active, marking]);
-  // image/media reload: a new cache-busting key; a video/audio resumes where it was (a new src starts at 0)
-  const resumeAt = useRef(0);
-  const reloadMedia = useCallback(() => {
-    const el = mediaEl.current;
-    resumeAt.current = el && !el.ended ? el.currentTime : 0;
-    setFailed(false);
-    setBust((b) => b + 1);
-  }, []);
-
-  // a finished turn marks the view stale; the fetch effect below only runs while active, so an inactive view catches up
-  // on activation. Media: an image always reloads; a video/audio only while paused (a playing one is not cut off)
-  // While marking up, the media is held as it is (the drawing belongs to this frame); leaving catches up.
-  const seenTurn = useRef(turnSeq);
-  const heldReload = useRef(false);
   const markingRef = useRef(marking);
   markingRef.current = marking;
-  useEffect(() => {
-    if (seenTurn.current === turnSeq) return;
-    seenTurn.current = turnSeq;
-    if (fixed) return;
-    if (!media) return setRev((r) => r + 1);
-    if (markingRef.current) return void (heldReload.current = true);
-    const el = mediaEl.current;
-    if (kind === 'image' || failedRef.current || !el || el.paused) reloadMedia();
-  }, [turnSeq, fixed, media, kind, reloadMedia]);
-  useEffect(() => {
-    if (marking || !heldReload.current) return;
-    heldReload.current = false;
-    const el = mediaEl.current;
-    if (kind === 'image' || failedRef.current || !el || el.paused) reloadMedia();
-  }, [marking, kind, reloadMedia]);
-  // the header ↻: like a finished turn, held while marking up (the drawing belongs to the frame on screen)
-  const reloadClick = () => {
-    if (!media) return setRev((r) => r + 1);
-    if (markingRef.current) return void (heldReload.current = true);
-    reloadMedia();
-  };
-  const onMediaMeta = (e: { currentTarget: HTMLMediaElement }) => {
-    if (resumeAt.current > 0) e.currentTarget.currentTime = resumeAt.current;
-    resumeAt.current = 0;
-  };
-
-  const loadedRev = useRef<{ path: string; rev: number } | null>(null);
-  useEffect(() => {
-    if (media || !active) return;
-    if (loadedRev.current?.path === path && loadedRev.current.rev === rev) return;
-    const ac = new AbortController();
-    const done = (r: Loaded) => {
-      if (ac.signal.aborted) return;
-      loadedRev.current = { path, rev }; // an interrupted load stays unmarked and runs again
-      setData(r);
-    };
-    load(url, ac.signal, src !== 'here').then(done, (e: unknown) => done({ s: 'error', message: e instanceof Error ? e.message : String(e) }));
-    return () => ac.abort();
-  }, [media, active, path, rev, url, src]);
-
-  // the load state comments read (orphan or unknown); published after the commit, so the text is in the DOM by then
-  useEffect(() => {
-    if (media) return;
-    dispatch(setFileLoad({ path, ref, s: 'loading' }));
-    return () => void dispatch(dropFileLoad({ path, ref })); // tab closed: its comments go back to "unknown"
-  }, [media, path, ref, dispatch]);
-  useEffect(() => {
-    if (media || !data) return;
-    // transient, or a deleted source (it may come back): neither loaded nor gone
-    if (data.s === 'error' || data.s === 'sourceGone') dispatch(setFileLoad({ path, ref, s: 'loading' }));
-    else dispatch(setFileLoad({ path, ref, s: data.s === 'text' ? 'loaded' : 'gone' }));
-  }, [media, data, path, ref, dispatch]);
+  const load = useFileLoad({ path, src, ref, url, kind, media, markableKind, active, fixed, marking, markingRef });
+  const { data, rev, loadedRev, failed, mediaUrl, resumeAt } = load;
+  const markup = useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, mediaEl: load.mediaEl });
+  const { markable } = markup;
 
   // "jump to source" (CommentCard): once this view shows fresh text and is visible, scroll to the fragment and flash it
   const jump = useAppSelector(selectJump);
@@ -260,7 +61,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     if (!range) return; // orphaned: the tab is open, nothing to point at
     scrollRangeIntoView(range, el);
     flashRange(el, range);
-  }, [jump, active, data, rev, path, src, comments, dispatch]);
+  }, [jump, active, data, rev, path, src, comments, dispatch, loadedRev]);
 
   // "jump to source" on a media tab: the tab is open and active; a video also seeks to the comment's time and pauses
   // (not while marking: the drawing belongs to the frame on screen)
@@ -271,69 +72,9 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     if (!c || !isMediaAnchor(c.anchor) || c.anchor.time === undefined || !(markable instanceof HTMLVideoElement) || markingRef.current) return;
     resumeAt.current = 0; // the jump's time wins over a reload's resume point
     seekAndPause(markable, c.anchor.time);
-  }, [markableKind, jump, active, markable, path, src, comments, dispatch]);
+  }, [markableKind, jump, active, markable, path, src, comments, dispatch, resumeAt]);
 
-  const note = (key: 'tooLarge' | 'binary' | 'fileGone') => (
-    <p className="p-4 text-sm text-muted-foreground">
-      {t(key)}
-      {key !== 'fileGone' && (
-        <> · <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary underline">{t('openRaw')}</a></>
-      )}
-    </p>
-  );
-
-  const gone = <p className="p-4 text-sm text-muted-foreground">{t('fileGone')}</p>;
-  const onError = () => setFailed(true);
   const large = data?.s === 'text' && kind === 'text' && data.text.length > HIGHLIGHT_MAX;
-
-  const goneSrc = <p data-source-gone className="p-4 text-sm text-muted-foreground">{t('sourceGone')}</p>;
-
-  let body;
-  if (media && (failed || srcGone)) {
-    body = <div data-pane={tabId} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">{srcGone ? goneSrc : gone}</div>;
-  } else if (kind === 'image') {
-    body = (
-      // M3-13 relies on data-pane as the pane's scroll container; data-file-path (text/md only) marks the text root
-      <div data-pane={tabId} hidden={!active} className={`grid-pane nb-media-pane relative min-h-0 flex-1 overflow-auto${natural ? ' nb-natural' : ''}`}>
-        <img
-          ref={imgRef}
-          src={mediaUrl}
-          alt={path}
-          onError={onError}
-          onClick={() => marking || setNatural((v) => !v)}
-          className={`nb-fit ${marking ? '' : natural ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
-        />
-      </div>
-    );
-  } else if (kind === 'video' || kind === 'audio') {
-    body = (
-      <div data-pane={tabId} hidden={!active} className={`grid-pane nb-media-pane relative min-h-0 flex-1 overflow-auto`}>
-        {/* while marking up, no native controls: the frame stays still, so the drawing and currentTime agree */}
-        {kind === 'video' ? (
-          <video ref={mediaRef} controls={!marking} preload="metadata" src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="nb-fit" />
-        ) : (
-          <audio ref={mediaRef} controls src={mediaUrl} onError={onError} onLoadedMetadata={onMediaMeta} data-media-tab={tabId} className="w-full max-w-xl p-4" />
-        )}
-      </div>
-    );
-  } else {
-    const inner =
-      data == null ? null
-      : data.s === 'text' ? (
-        kind === 'md' ? <div className="nb-card nb-prose px-10 pt-5 pb-7" onClick={(e) => refClick(e, dispatch, src)}><Markdown text={data.text} final src={src} baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
-        : <pre className="nb-card nb-code overflow-x-auto p-4 font-mono text-xs leading-relaxed whitespace-pre"><CodeText text={data.text} path={path} /></pre>
-      )
-      : data.s === 'error' ? <p className="p-4 text-sm text-destructive">{data.message}</p>
-      : data.s === 'sourceGone' ? goneSrc
-      : note(data.s === 'gone' ? 'fileGone' : data.s);
-    body = (
-      // data-file-path only while the text is shown: a note or an error is not commentable and has no anchors
-      <div ref={pane} data-pane={tabId} data-file-path={data?.s === 'text' ? path : undefined} data-file-ref={ref} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">
-        {inner}
-        <HighlightLayer pane={tabId} />
-      </div>
-    );
-  }
 
   return (
     <div hidden={!active} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
@@ -341,32 +82,18 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <span className="min-w-0 flex-1 truncate" title={ref ? `${path} @ ${ref}` : path}>{path}</span>
         {ref && <SourceChip name={ref} />}
         {large && <span>{t('noHighlight')}</span>}
-        <button type="button" aria-label={t('reload')} title={t('reload')} onClick={reloadClick} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
+        <button type="button" aria-label={t('reload')} title={t('reload')} onClick={load.reloadClick} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
-      {markableKind && !failed && !srcGone ? (
-        // the toolbar sits over the pane but outside its scroll, so it stays in the corner in natural size
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          {body}
-          {markable && <MediaMarks tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} path={path} refName={ref} />}
-          {markable && <MarkupLayer tabId={tabId} media={markable} fit={kind === 'image' && natural ? 'natural' : 'contain'} onAdd={onMarkAdd} held={!!markPopup} saving={saving} />}
-          {/* portalled with its own layer: above the markup toolbar, which it may open next to */}
-          {markPopup && createPortal(
-            <div className="relative z-30" hidden={!active}>
-              {/* keyed: a new drawing's popup is a new popup, never the old one (and its save) re-rendered */}
-              <CommentPopup
-                key={markPopup.id}
-                pending={markPopup}
-                onClose={closeMarkPopup}
-                onAdded={() => markAdded(isMediaAnchor(markPopup.anchor) ? markPopup.anchor.shapes : [])}
-                onBusy={onPopupBusy}
-                hidden={!active}
-              />
-            </div>,
-            document.body,
-          )}
-        </div>
-      ) : body}
+      {media ? (
+        <MediaBody
+          kind={kind} path={path} fileRef={ref} tabId={tabId} active={active} marking={marking} natural={natural}
+          onToggleNatural={() => setNatural((v) => !v)} mediaUrl={mediaUrl} failed={failed} srcGone={srcGone}
+          onError={load.onError} onMediaMeta={load.onMediaMeta} markup={markup}
+        />
+      ) : (
+        <TextBody data={data} kind={kind} path={path} src={src} fileRef={ref} tabId={tabId} active={active} url={url} paneRef={pane} />
+      )}
     </div>
   );
 }
