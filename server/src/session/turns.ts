@@ -60,10 +60,10 @@ export class TurnLedger {
     return this.sends.get(id)?.state;
   }
 
-  /** a user's send (not a command) still waiting for its result: a compaction's cut keeps its event (R-M7-12) */
+  /** a send or a command still waiting for its result: a compaction's cut keeps its event (R-M7-12) */
   inFlight(id: string): boolean {
     const s = this.sends.get(id);
-    return !!s && !s.command && waits(s.state);
+    return !!s && waits(s.state);
   }
 
   /** applies a result frame: `store` false for a /clear's own result, `arm` whether idle compaction should arm */

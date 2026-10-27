@@ -18,7 +18,7 @@ beforeEach(() => setLang('en'));
 afterEach(() => cleanup());
 
 function setup() {
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: () => true, close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: () => true, close() {} })) as never });
   const onClose = vi.fn();
   render(
     <Provider store={store}>

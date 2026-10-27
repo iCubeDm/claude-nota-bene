@@ -25,7 +25,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function setup() {
   const sent: ClientMessage[] = [];
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never });
   render(<Provider store={store}><TooltipProvider><Composer /></TooltipProvider></Provider>);
   const box = screen.getByRole('textbox') as HTMLTextAreaElement;
   box.focus();
@@ -151,7 +151,7 @@ it('in the comment popup: Esc closes only the picker, the popup stays open', asy
     anchor: { source: { kind: 'message', id: 'a1' }, start: 0, end: 1, quote: 'q', prefix: '', suffix: '' },
     rect: { left: 10, right: 50, top: 20, bottom: 40, width: 40, height: 20, x: 10, y: 20, toJSON() {} } as DOMRect,
   };
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: () => true, close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: () => true, close() {} })) as never });
   const onClose = vi.fn();
   render(<Provider store={store}><TooltipProvider><CommentPopup pending={pending} onClose={onClose} /></TooltipProvider></Provider>);
   const box = screen.getByPlaceholderText('Comment…') as HTMLTextAreaElement;

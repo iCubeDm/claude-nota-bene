@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { parseClientMessage, PROTOCOL } from '@nota-bene/shared';
+import { parseClientMessage, PROTOCOL, TAKEN_OVER_CODE } from '@nota-bene/shared';
 import type { ClientMessage, Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
@@ -25,8 +25,6 @@ import { controlToken, systemRoutes } from './system.ts';
 export const TAKEOVER_GRACE_MS = 700;
 /** ping period for the owner socket (R-M7-7) */
 export const HEARTBEAT_MS = 30_000;
-/** close code the owner gets when another tab takes over (R-M7-5/8) */
-export const TAKEN_OVER_CODE = 4001;
 
 // Process-wide handlers are registered once; each running server's hub is in this set.
 const hubs = new Set<EventHub>();
@@ -262,7 +260,7 @@ export async function startServer(o: {
         ownerGone.emit('gone');
       });
     };
-    const detachers = new Map<WebSocket, () => void>();
+    const detachers = new WeakMap<WebSocket, () => void>();
     const ownerGone = new EventEmitter();
 
     // the owner's messages
@@ -356,6 +354,7 @@ export async function startServer(o: {
         try {
           old.ws.send(JSON.stringify({ kind: 'taken-over' }));
         } catch { /* already dying */ }
+        role.set(old.ws, 'occupied'); // a message it already had in flight is not the owner's any more
         old.ws.close(TAKEN_OVER_CODE);
       }
       attachOwner(ws, tab);
@@ -365,7 +364,11 @@ export async function startServer(o: {
 
     wss.on('connection', (ws, req) => {
       // this page instance's id (in memory on the page): the same tab reconnecting after a drop is not a second tab
-      const tab = new URL(req.url ?? '/', 'http://x').searchParams.get('tab') || null;
+      const params = new URL(req.url ?? '/', 'http://x').searchParams;
+      const tab = params.get('tab') || null;
+      // a page that is occupied or taken reconnects passive: with no owner it must not win the window by being first
+      // (a restart drops both tabs); it is told `occupied` and takes over only on the user's click
+      const passive = params.get('passive') === '1';
       ws.on('error', (e) => reportError(hub, 'ws', e));
       ws.on('message', guard(hub, 'ws', (data) => {
         const r = role.get(ws);
@@ -382,14 +385,14 @@ export async function startServer(o: {
         if (msg.type === 'takeover') return; // the owner has nothing to take
         handleOwner(ws, msg);
       }));
-      if (oneTab && owner && tab !== null && owner.tab === tab) {
+      if (oneTab && !passive && owner && tab !== null && owner.tab === tab) {
         // the owner's own reconnect (its old socket is a zombie the server has not noticed yet): out with the old, no grace
         const old = owner;
         owner = null;
         detachers.get(old.ws)?.();
         old.ws.terminate();
       }
-      if (!oneTab || !owner) {
+      if (!oneTab || (!owner && !passive)) {
         role.set(ws, 'owner');
         attachOwner(ws, tab);
         return;
@@ -402,7 +405,7 @@ export async function startServer(o: {
         ownerGone.off('gone', onGone);
         ws.off('close', onClose);
         if (ws.readyState !== ws.OPEN) return;
-        if (!owner) {
+        if (!owner && !passive) {
           role.set(ws, 'owner');
           attachOwner(ws, tab);
           return;

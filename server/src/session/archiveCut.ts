@@ -6,7 +6,7 @@ type Cut = {
   hub: EventHub; archive: HistoryArchive;
   /** the conversation's own id (SessionIdentity.ownId) */
   id: () => string | null;
-  /** a user's send still waiting (TurnLedger.inFlight): its event stays in the replay */
+  /** a send or command still waiting (TurnLedger.inFlight): its event stays in the replay */
   inFlight: (sendId: string) => boolean;
   report: (where: string, e: unknown) => void;
 };

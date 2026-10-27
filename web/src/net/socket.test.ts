@@ -131,4 +131,13 @@ describe('defaultSocketUrl', () => {
     expect(defaultSocketUrl(new URL('https://h.example:8443/x'))).toBe('wss://h.example:8443/ws');
     expect(defaultSocketUrl(new URL('http://127.0.0.1:4777/'))).toBe('ws://127.0.0.1:4777/ws');
   });
+
+  it('a function url is evaluated at each open: a retry can differ from the first connect', () => {
+    let n = 0;
+    connect(() => `ws://x/ws?n=${n++}`, () => {}, () => {}, WS);
+    expect(FakeWS.instances[0].url).toBe('ws://x/ws?n=0');
+    FakeWS.instances[0].drop();
+    vi.advanceTimersByTime(1000);
+    expect(FakeWS.instances[1].url).toBe('ws://x/ws?n=1');
+  });
 });

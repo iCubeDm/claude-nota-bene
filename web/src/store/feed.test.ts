@@ -394,3 +394,21 @@ describe('history before a compaction (R-M7-4)', () => {
     expect(prependHistory(again, page(s, seg, 2, true))).toBe(again);
   });
 });
+
+describe('a page newer than its server (I3)', () => {
+  test('a frame this page has no kind for leaves the state as it was and does not throw', () => {
+    const s = fold([user(), start(), delta('x')]);
+    const old = { kind: 'sdk', message: { type: 'assistant' } } as unknown as ServerEvent; // protocol 4's raw SDK frame
+    expect(() => reduce(s, old)).not.toThrow();
+    expect(reduce(s, old)).toBe(s);
+    // inside a replay too: the events around it still apply
+    const r = reduce(emptyFeed, { kind: 'replay', events: [user(), old, user({ id: 'u2' })] });
+    expect(r.items.filter((i) => i.kind === 'user')).toHaveLength(2);
+  });
+
+  test('an agent event of an unknown type leaves the state as it was', () => {
+    const s = fold([user()]);
+    const future = agent({ t: 'from-the-future' } as unknown as WireAgentEvent);
+    expect(reduce(s, future)).toBe(s);
+  });
+});

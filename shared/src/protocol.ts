@@ -56,9 +56,14 @@ export type Comment = {
  * What this server understands beyond the base protocol, announced in `hello` on connect. Every window serves the one
  * shared `web/dist`, so a reloaded page can be newer than its server (until "Restart the server"): the page sends a newer
  * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label; 4: media anchors and `/marks`;
- * 5: the agent's output as `agent` events (AgentEvent) instead of raw SDK frames.
+ * 5: the agent's output as `agent` events (AgentEvent) instead of raw SDK frames; `replay.earlier`; one tab per window
+ * (`occupied`, `taken-over`, the client's `takeover`, close code 4001, `?tab=` and `?passive=1` on the ws url);
+ * `hello.capabilities`.
  */
 export const PROTOCOL = 5;
+
+/** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
+export const TAKEN_OVER_CODE = 4001;
 
 export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type Mode = (typeof MODES)[number];
@@ -110,11 +115,11 @@ export type ClientMessage =
 export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; awayMinutes: number; minTokens: number };
 
 export type ServerEvent =
-  /** right after the replay on every connection (servers before it send none: protocol 0) */
   /** another tab owns the window (R-M7-5): to a later socket only, followed by `hello`; no replay, no state */
   | { kind: 'occupied' }
   /** to the owner just before it is closed with code 4001: another tab took the window over */
   | { kind: 'taken-over' }
+  /** right after the replay on every connection (servers before it send none: protocol 0) */
   | { kind: 'hello'; protocol: number; capabilities?: Capabilities }
   /** `earlier`: how many segments of this conversation, from before its compactions, `/history` holds (R-M7-4); absent for none */
   | { kind: 'replay'; events: ServerEvent[]; earlier?: number }

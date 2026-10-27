@@ -193,8 +193,10 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
     case 'suggestion': // the controls slice
       return s;
     default: {
-      const never: never = e;
-      return never;
+      // compile-time exhaustive; at run time a page newer than its server may get a kind it has not heard of (I3): keep the state
+      const _never: never = e;
+      void _never;
+      return s;
     }
   }
 }
@@ -246,8 +248,10 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
     default: {
-      const never: never = ev;
-      return never;
+      // as above: a protocol-4 server still sends `{kind:'sdk'}`
+      const _never: never = ev;
+      void _never;
+      return s;
     }
   }
 }

@@ -99,7 +99,7 @@ it('a comment card renders its text as markdown; editing shows the raw source', 
     id: 'c1', anchor: { source: { kind: 'message', id: 'a1' }, start: 6, end: 17, quote: 'brave world', prefix: 'hello ', suffix: '' },
     text: 'a **bold** [link](https://example.com)', status: 'pending', createdAt: 1,
   };
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: () => true, close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, s: (x: 'open') => void) => (s('open'), { send: () => true, close() {} })) as never });
   act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [c] })));
   render(<Provider store={store}><TooltipProvider><CommentCard id="c1" index={0} /></TooltipProvider></Provider>);
   const card = document.querySelector('[data-comment-id="c1"]')!;

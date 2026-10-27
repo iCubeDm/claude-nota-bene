@@ -22,7 +22,7 @@ const comment = (o: Partial<Comment> = {}): Comment => ({
 
 function setup(c: Comment = comment(), dom = true, inFeed = true) {
   const sent: unknown[] = [];
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: (m: unknown) => (sent.push(m), true), close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: (m: unknown) => (sent.push(m), true), close() {} })) as never });
   if (inFeed) act(() => void store.dispatch(serverEvent({ kind: 'user', id: 'a1', text: 'hello brave world', ts: 0, historic: true })));
   act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [c] })));
   const view = render(

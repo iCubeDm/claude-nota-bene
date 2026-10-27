@@ -31,7 +31,7 @@ const cm = (id: string, o: Partial<Comment> = {}): Comment => ({
 
 function setup(items: Comment[] = [], open = true) {
   const sent: ClientMessage[] = [];
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (open && onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => (open && onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never });
   act(() => {
     store.dispatch(serverEvent({ kind: 'user', id: 'u0', text: 'first', ts: 0, historic: true }));
     store.dispatch(serverEvent({ kind: 'comments', items }));

@@ -26,7 +26,7 @@ function setup() {
   const sent: ClientMessage[] = [];
   let ev!: (e: ServerEvent) => void;
   let state!: (s: 'open' | 'closed') => void;
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, e: typeof ev, s: typeof state) => { ev = e; state = s; s('open'); return { send: (m: ClientMessage) => (sent.push(m), true), close() {} }; }) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, e: typeof ev, s: typeof state) => { ev = e; state = s; s('open'); return { send: (m: ClientMessage) => (sent.push(m), true), close() {} }; }) as never });
   render(<Provider store={store}><Header /></Provider>);
   return { sent, store, ev: (e: ServerEvent) => act(() => ev(e)), state: (s: 'open' | 'closed') => act(() => state(s)) };
 }

@@ -175,7 +175,8 @@ describe('archive cut at a compaction', () => {
     await until(() => sends.length === 2);
     push({ t: 'compacting' }, compacted);
     await until(() => replay().earlier === 1);
-    expect(replay().events.filter((e) => e.kind !== 'session')).toMatchObject([{ kind: 'agent', e: compacted }]);
+    // the /compact itself is still running (its result has not come): kept like a running send, so a reload shows busy
+    expect(replay().events.filter((e) => e.kind !== 'session')).toMatchObject([{ kind: 'user', text: '/compact' }, { kind: 'agent', e: compacted }]);
     expect(archiveAt().segment('S1', 1)!.filter((e) => e.kind === 'user').map((e) => (e as { text: string }).text)).toEqual(['hi', '/compact']);
     s.close();
   });

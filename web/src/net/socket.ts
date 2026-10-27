@@ -1,8 +1,6 @@
-import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import { TAKEN_OVER_CODE, type ClientMessage, type ServerEvent } from '@nota-bene/shared';
 
 const RECONNECT_MS = 1000;
-/** the server closes the owner with this when another tab takes the window over (R-M7-5): never reconnect after it */
-export const TAKEN_OVER_CODE = 4001;
 
 export type SocketState = 'open' | 'closed' | 'taken';
 export type Connection = { send(m: ClientMessage): boolean; close(): void; reconnect?(): void };
@@ -11,8 +9,9 @@ export function defaultSocketUrl(loc: Location | URL): string {
   return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/ws`;
 }
 
+/** `url` may be a function: read at every (re)connect, so a retry can carry what changed since (`&passive=1`) */
 export function connect(
-  url: string,
+  url: string | (() => string),
   onEvent: (ev: ServerEvent) => void,
   onState: (s: SocketState) => void,
   WS: typeof WebSocket = WebSocket,
@@ -24,7 +23,7 @@ export function connect(
 
   const open = () => {
     timer = null;
-    const sock = new WS(url);
+    const sock = new WS(typeof url === 'function' ? url() : url);
     ws = sock;
     // not `open` on the WebSocket's open: a socket is attached only when the server's replay arrives. A newcomer in the
     // reload grace, or an occupied one, gets none, and must neither resync nor send (M7-15 fix round 1)
@@ -45,7 +44,7 @@ export function connect(
     };
     sock.onclose = (e) => {
       if (ws === sock) ws = null;
-      if (e.code === TAKEN_OVER_CODE && !stopped) {
+      if (e.code === TAKEN_OVER_CODE && !stopped) { // another tab took the window (R-M7-5): never reconnect by ourselves
         // another tab owns the window now: stay down until the user asks (reconnect())
         stopped = true;
         reportedClosed = true;

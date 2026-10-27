@@ -18,7 +18,7 @@ afterEach(cleanup);
 function setup() {
   const sent: ClientMessage[] = [];
   let ev!: (e: ServerEvent) => void;
-  const connect = vi.fn((_u: string, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
+  const connect = vi.fn((_u: unknown, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
     ev = onEvent;
     onState('open');
     return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };

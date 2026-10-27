@@ -29,7 +29,7 @@ afterEach(cleanup);
 
 function setup() {
   const sent: ClientMessage[] = [];
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never });
   render(<Provider store={store}><TooltipProvider><Feed /><Composer /></TooltipProvider></Provider>);
   return { sent, store, box: screen.getByRole('textbox') as HTMLTextAreaElement };
 }

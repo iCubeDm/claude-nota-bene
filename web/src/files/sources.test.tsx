@@ -64,7 +64,7 @@ function mk() {
   const sent: ClientMessage[] = [];
   const store = makeStore({
     url: 'u',
-    connect: ((_u: string, e: typeof onEvent, onState: (s: 'open') => void) => ((onEvent = e), onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never,
+    connect: ((_u: unknown, e: typeof onEvent, onState: (s: 'open') => void) => ((onEvent = e), onState('open'), { send: (m: ClientMessage) => (sent.push(m), true), close() {} })) as never,
   });
   return { store, sent, session: (root: string) => act(() => onEvent({ kind: 'session', id: null, root, title: null, model: null })) };
 }

@@ -33,6 +33,13 @@ export const commentsSlice = createSlice({
     b.addCase(connState, (s, a) => {
       if (a.payload === 'open') return;
       s.sendingIds = []; // the in-flight send may be lost with the socket
+      if (a.payload === 'occupied' || a.payload === 'taken') {
+        // another tab owns the window and its comments are authoritative: our offline edits are dropped, so the attach
+        // after a takeover resyncs nothing and adopts the server's set
+        s.unsynced = false;
+        s.resent = false;
+        return;
+      }
       // the re-send was never confirmed (its stale initial push did not arrive): it may be lost too, so send it again next open
       if (s.resent) { s.resent = false; s.unsynced = true; }
     }).addCase(serverEvent, (s, a) => {

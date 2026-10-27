@@ -10,7 +10,7 @@ function mk() {
   let onEvent!: (e: ServerEvent) => void;
   const store = makeStore({
     url: 'u',
-    connect: ((_u: string, e: typeof onEvent) => ((onEvent = e), { send: (_m: ClientMessage) => true, close() {} })) as never,
+    connect: ((_u: unknown, e: typeof onEvent) => ((onEvent = e), { send: (_m: ClientMessage) => true, close() {} })) as never,
   });
   return { store, ev: (e: ServerEvent) => onEvent(e), session: (root: string) => onEvent({ kind: 'session', id: null, root, title: null, model: null }) };
 }

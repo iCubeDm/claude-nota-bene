@@ -18,7 +18,7 @@ function setup() {
   let ev!: (e: ServerEvent) => void;
   const store = makeStore({
     url: 'ws://x',
-    connect: ((_u: string, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
+    connect: ((_u: unknown, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
       ev = onEvent; onState('open');
       return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };
     }) as never,

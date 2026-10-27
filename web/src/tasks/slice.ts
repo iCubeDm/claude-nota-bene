@@ -2,8 +2,6 @@ import { createSlice } from '@reduxjs/toolkit';
 import { reduceTasks, type TasksState } from '@nota-bene/shared';
 import { serverEvent, type RootState } from '../store/store.ts';
 
-/** the reducer lives in shared (tasks.ts): the server's compaction cut is tested against it */
-export { reduceTasks };
 export type { Task, TasksState } from '@nota-bene/shared';
 
 export const tasksSlice = createSlice({

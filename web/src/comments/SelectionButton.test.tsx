@@ -195,7 +195,7 @@ it('Esc dismissing the button does not interrupt a busy agent; the next Esc does
   const sent: ClientMessage[] = [];
   const store = makeStore({
     url: 'ws://x',
-    connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => {
+    connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => {
       onState('open');
       return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };
     }) as never,
@@ -319,7 +319,7 @@ it('a mouseup inside a dialog does not re-show the button', async () => {
 });
 
 it('a selection made while switching shows no button', async () => {
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: () => true, close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: () => true, close() {} })) as never });
   store.dispatch(switchSession('x', '/r'));
   const view = render(
     <Provider store={store}>

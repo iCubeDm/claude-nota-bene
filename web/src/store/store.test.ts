@@ -6,7 +6,7 @@ function fake() {
   const sent: ClientMessage[] = [];
   let onEvent!: (e: ServerEvent) => void;
   let onState!: (s: 'open' | 'closed') => void;
-  const connect = vi.fn((_u: string, e: typeof onEvent, s: typeof onState) => {
+  const connect = vi.fn((_u: unknown, e: typeof onEvent, s: typeof onState) => {
     onEvent = e;
     onState = s;
     return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };

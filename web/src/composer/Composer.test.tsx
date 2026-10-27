@@ -14,7 +14,7 @@ afterEach(cleanup);
 function setup(open: boolean) {
   const sent: ClientMessage[] = [];
   let flip!: (s: 'open' | 'closed') => void;
-  const connect = vi.fn((_u: string, _e: unknown, onState: (s: 'open' | 'closed') => void) => {
+  const connect = vi.fn((_u: unknown, _e: unknown, onState: (s: 'open' | 'closed') => void) => {
     flip = onState;
     if (open) onState('open');
     return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };

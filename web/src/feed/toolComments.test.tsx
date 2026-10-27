@@ -33,7 +33,7 @@ const agent = (ts: number, e: Extract<ServerEvent, { kind: 'agent' }>['e']): Ser
 
 /** A feed with the given actions (consecutive ones fold into a group), then a settled turn, plus the comments. */
 function setup(tools: Tool[], comments: Comment[] = [], card?: string) {
-  const store = makeStore({ url: 'ws://x', connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: () => true, close() {} })) as never });
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: () => true, close() {} })) as never });
   act(() => {
     store.dispatch(serverEvent({ kind: 'user', id: 'u1', text: 'go', ts: 0, historic: true }));
     tools.forEach((t, i) => {

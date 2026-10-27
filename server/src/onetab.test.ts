@@ -145,6 +145,53 @@ describe('one tab', () => {
     await until(() => b.events.some((e) => e.kind === 'user' && e.id === 'u2'));
   });
 
+  it('after a restart the non-passive tab owns the window even when the passive (occupied) one reconnects first', async () => {
+    const s = await boot();
+    const a = await connect(`${s.url}?tab=A`);
+    await until(() => kinds(a).includes('hello'));
+    const b = await connect(`${s.url}?tab=B`);
+    await until(() => kinds(b).includes('hello'));
+    expect(kinds(b)).toEqual(['occupied', 'hello']);
+    a.ws.terminate();
+    b.ws.terminate();
+    await new Promise((r) => setTimeout(r, 100)); // the server notices both closes
+    // both reconnect with no owner: B (occupied before, so passive) is first
+    const b2 = await connect(`${s.url}?tab=B&passive=1`);
+    const a2 = await connect(`${s.url}?tab=A`);
+    await until(() => kinds(a2).includes('hello') && kinds(b2).includes('hello'));
+    expect(kinds(a2)).toContain('replay');
+    expect(kinds(b2)).toEqual(['occupied', 'hello']);
+  });
+
+  it('a passive socket alone gets occupied, not the window', async () => {
+    const s = await boot();
+    const p = await connect(`${s.url}?tab=P&passive=1`);
+    await until(() => kinds(p).includes('hello'));
+    expect(kinds(p)).toEqual(['occupied', 'hello']);
+    expect((await info(s.url)).clients).toBe(0);
+    // it can still take the window over explicitly
+    p.ws.send(JSON.stringify({ type: 'takeover' }));
+    await until(() => kinds(p).includes('replay'));
+    expect((await info(s.url)).clients).toBe(1);
+  });
+
+  it('after a takeover the old socket is occupied: a message it already had in flight is ignored', async () => {
+    const s = await boot();
+    const a = await connect(s.url);
+    await until(() => kinds(a).includes('hello'));
+    const b = await connect(s.url);
+    await until(() => kinds(b).includes('hello'));
+    // A sends the moment it hears of the takeover: its close is still in progress on the server side
+    a.ws.on('message', (d) => {
+      if (JSON.parse(String(d)).kind === 'taken-over') a.ws.send(JSON.stringify({ type: 'send', id: 'late', text: 'from the old owner' }));
+    });
+    b.ws.send(JSON.stringify({ type: 'takeover' }));
+    await a.closed;
+    await until(() => kinds(b).includes('replay'));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(b.events.some((e) => e.kind === 'user' && e.id === 'late')).toBe(false);
+  });
+
   it('owner closing within the grace makes the newcomer the owner', async () => {
     const s = await boot({ grace: 400 });
     const a = await connect(s.url);

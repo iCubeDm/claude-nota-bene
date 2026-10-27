@@ -28,7 +28,7 @@ function setup(p: PendingComment = pending, onAdded?: () => void) {
   const sent: ClientMessage[] = [];
   const store = makeStore({
     url: 'ws://x',
-    connect: ((_u: string, _e: unknown, onState: (s: 'open') => void) => {
+    connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => {
       onState('open');
       return { send: (m: ClientMessage) => (sent.push(m), true), close() {} };
     }) as never,

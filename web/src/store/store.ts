@@ -108,13 +108,19 @@ const newTabId = () => crypto.randomUUID();
 
 export function makeStore(o: {
   url: string;
-  connect?: (url: string, onEvent: (ev: ServerEvent) => void, onState: (s: SocketState) => void) => Connection;
+  connect?: (url: string | (() => string), onEvent: (ev: ServerEvent) => void, onState: (s: SocketState) => void) => Connection;
   pip?: PipApi;
 }) {
   const connectFn = o.connect ?? realConnect;
   // the server recognises a reconnect of the owning tab by it: no grace, no occupied (M7-15 fix round 1)
   const tabId = newTabId();
-  const url = `${o.url}${o.url.includes('?') ? '&' : '?'}tab=${tabId}`;
+  const baseUrl = `${o.url}${o.url.includes('?') ? '&' : '?'}tab=${tabId}`;
+  // an occupied or taken page reconnects passive: after a restart both tabs retry, and the one that was parked must not
+  // win the window by being first (the server answers a passive socket `occupied` even with no owner)
+  const url = () => {
+    const st = store.getState().conn.state;
+    return st === 'occupied' || st === 'taken' ? `${baseUrl}&passive=1` : baseUrl;
+  };
   let conn: Connection | null = null;
   const send: Send = (m) => conn?.send(m) ?? false;
   // «Работать здесь» was pressed: the next `occupied` is answered with `takeover` at once (and never shown)
@@ -125,7 +131,7 @@ export function makeStore(o: {
       // a send that did not go out (socket not open) keeps the wish: the next `occupied` is answered with takeover
       takeoverWanted = !send({ type: 'takeover' });
     } else {
-      store.dispatch(connState('connecting'));
+      // from `taken`: the overlay stays up (inert) until the attach, or `occupied` to answer with takeover
       conn?.reconnect?.();
     }
   };
@@ -155,11 +161,7 @@ export function makeStore(o: {
           send({ type: 'takeover' });
         } else store.dispatch(connState('occupied'));
       } else if (ev.kind === 'taken-over') store.dispatch(connState('taken'));
-      else if (ev.kind === 'replay') {
-        // a replay is only ever sent to the owner: the takeover went through (or the other tab had gone)
-        takeoverWanted = false;
-        if (store.getState().conn.state === 'occupied') store.dispatch(connState('open'));
-      }
+      else if (ev.kind === 'replay') takeoverWanted = false; // a replay goes to the owner only: the takeover went through
       store.dispatch(serverEvent(ev));
     },
     (s) => {

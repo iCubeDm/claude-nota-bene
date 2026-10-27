@@ -50,7 +50,7 @@ function setup() {
   const sent: ClientMessage[] = [];
   let ev!: (e: ServerEvent) => void;
   let state!: (s: 'open' | 'closed') => void;
-  const connect = vi.fn((_u: string, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
+  const connect = vi.fn((_u: unknown, onEvent: (e: ServerEvent) => void, onState: (s: 'open' | 'closed') => void) => {
     ev = onEvent;
     state = onState;
     onState('open');
