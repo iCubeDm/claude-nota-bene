@@ -149,6 +149,7 @@ export type AgentEvent =
   | { t: 'turn-end'; stop: StopReason; secs: number; error?: string; answers: string[] | 'all' | 'none'; queued: number }
   | { t: 'cancelled'; sendId: string }
   | { t: 'compacting' } | { t: 'compact-failed'; error?: string } | { t: 'compacted'; preTokens: number; ms?: number }
+  | { t: 'compact-end' }                                     // a compaction ended with no boundary and no failure (hook-blocked, early start, retry)
   | { t: 'reset'; newId?: string }                           // /clear: a new conversation
   | { t: 'init'; sessionId?: string; model?: string; mode?: Mode }    // server-internal: never sent to clients
   | { t: 'mode'; mode: Mode }                                // ACP current_mode_update
@@ -157,7 +158,8 @@ export type AgentEvent =
   | { t: 'rate-limit'; info: unknown };                      // server-internal (stats)
 ```
 
-  The wire event is `{ kind: 'agent'; e: AgentEvent; ts: number }`, replacing `{ kind: 'sdk' }`; `init` and `rate-limit` are never emitted to clients. The web keeps `forcePending`: a `turn-end` with `stop: 'done'` while a forced send is pending still shows as interrupted.
+  The wire event is `{ kind: 'agent'; e: AgentEvent; ts: number }`, replacing `{ kind: 'sdk' }`; `init` and `rate-limit` are never emitted to clients. The web keeps `forcePending`: any `turn-end` while a forced send is pending shows as interrupted, with no error text (as `feed.ts` does today).
+  Amended 2026-10-27 (M7-06 review): `compact-end` added. The CLI sends a bare `status: null` with no boundary after it in three cases (a PreCompact hook blocks it, an early-started auto-compaction ends with no result, the prompt-too-long retry); today it clears the compacting banner. Mapping it to `compact-failed` would show a false failure.
 - **R-M7-15. Capabilities.** `AgentBackend.capabilities` is `{ compact: boolean; clear: boolean; modes: Mode[]; usage: boolean; fileSuggestions: boolean; fork: boolean; idleCompact: boolean }`, sent in `hello`. The UI hides a control whose capability is false. Claude has all of them true; the fake mirrors Claude unless its script says otherwise.
 - **R-M7-16. Other models and agents (not in M7).** Other models on the same agent (DeepSeek's Anthropic-compatible endpoint, likely GLM) need no adapter: they are a per-window `ANTHROPIC_BASE_URL` setting, a later task. Other agents (Codex, Gemini CLI, OpenCode) come later through one ACP adapter. Adapters to bare model APIs are rejected: they would mean writing our own agent loop.
 
