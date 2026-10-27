@@ -127,6 +127,14 @@ test('permission allow @ask', async ({ page }) => {
   await expect(donesAfter(page, text).first()).toHaveText(DONE);
 });
 
+// M7-09: the ask fixture's script declares capabilities {compact: false, modes: ['default']}
+test('an agent without compact and modes: no Compact button, no mode pill, Clear stays @ask', async ({ page }) => {
+  await open(page);
+  await expect(page.getByRole('button', { name: en.clearTip })).toBeVisible(); // the toolbar is up, so absence below is real
+  await expect(page.getByRole('button', { name: en.compactTip })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: en.modeTip })).toHaveCount(0);
+});
+
 test('reload replays the conversation @chat', async ({ page }) => {
   await open(page);
   const text = uniq('replay me');

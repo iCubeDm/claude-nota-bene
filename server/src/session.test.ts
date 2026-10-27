@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentEvent, ServerEvent } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type ServerEvent } from '@nota-bene/shared';
 import { mapFrames } from './agent/claude/map.ts';
 import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
@@ -36,7 +36,7 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
   }
 }
 
-const noSessions = { listSessions: async () => [], sessionInfo: async () => null };
+const noSessions = { capabilities: CLAUDE_CAPABILITIES, listSessions: async () => [], sessionInfo: async () => null };
 
 type Agent = Extract<ServerEvent, { kind: 'agent' }>;
 const agentOf = (events: ServerEvent[], t: Agent['e']['t']) => events.filter((e): e is Agent => e.kind === 'agent' && e.e.t === t);
@@ -154,6 +154,32 @@ describe('session manager', () => {
     await until(() => events.some((e) => e.kind === 'session' && e.id !== null));
     expect(lastSession('/proj')).toBe('fake-session');
     expect(s.info()).toEqual({ id: 'fake-session', root: '/proj', title: null, model: null });
+  });
+
+  it('capabilities: usage:false never asks the agent for usage; fileSuggestions:false answers [] without asking', async () => {
+    const calls: string[] = [];
+    const inner = fakeBackend([{ text: 'a', context: { used: 5, max: 10, pct: 50 } }]);
+    const backend: AgentBackend = {
+      ...inner,
+      capabilities: { ...CLAUDE_CAPABILITIES, usage: false, fileSuggestions: false },
+      start: (o) => {
+        const a = inner.start(o);
+        return {
+          messages: a.messages, send: (m) => a.send(m), interrupt: () => a.interrupt(), setPermissionMode: async () => {},
+          fileSuggestions: async () => { calls.push('files'); return ['x']; },
+          contextUsage: async () => { calls.push('context'); return { used: 1, max: 2, pct: 50 }; },
+          usage: async () => { calls.push('usage'); return { cost: null, limits: null }; }, close: () => a.close(),
+        };
+      },
+    };
+    const { events, make } = setup(backend);
+    const s = await make();
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => agentOf(events, 'turn-end').length === 1);
+    expect(await s.fileSuggestions('x')).toEqual([]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(calls).toEqual([]);
+    expect(events.some((e) => e.kind === 'stats')).toBe(false);
   });
 
   it('crash surfaces an error and recovers', async () => {

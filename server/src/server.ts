@@ -61,7 +61,7 @@ export async function startServer(o: {
       backend: o.backend,
       cwd: o.cwd,
       ...(o.resume ? { resume: o.resume } : {}),
-      ...(o.resume && o.fork ? { fork: true } : {}),
+      ...(o.resume && o.fork && o.backend.capabilities.fork ? { fork: true } : {}),
       ...(o.idle ? { idle: o.idle } : {}),
       ...(o.idleOffInSettings ? { idleOffInSettings: o.idleOffInSettings } : {}),
     });
@@ -176,6 +176,11 @@ export async function startServer(o: {
     // server's emit before the listen promise below could reject. The listen promise reports it
     wss.on('error', () => {});
 
+    // a client message the agent's capabilities forbid: a `server-error` (as the other refusals that are no `send`);
+    // the web hides these controls, so this only fires for a stale page or a hand-made client
+    const caps = o.backend.capabilities;
+    const refuse = (what: string) => reportError(hub, 'capability', new Error(`${what}: the agent does not support it`));
+
     wss.on('connection', (ws) => {
       const detach = hub.attach({ send: (d) => ws.send(d) });
       manager.clientAttached();
@@ -201,7 +206,7 @@ export async function startServer(o: {
       }
       // what this server understands (see PROTOCOL); last, so the state above keeps its order
       try {
-        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL }));
+        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: caps }));
       } catch (e) {
         reportError(hub, 'hello', e);
       }
@@ -257,6 +262,12 @@ export async function startServer(o: {
             }
             break;
           case 'mode':
+            if (!caps.modes.includes(msg.mode)) {
+              refuse(`mode ${msg.mode}`);
+              // the sender still waits for its ack (the pill went optimistic): answer with the mode as it stands
+              hub.emit({ kind: 'mode', mode: manager.mode(), ...(msg.id && { ack: msg.id }) }, { store: false });
+              break;
+            }
             void manager.setMode(msg.mode, msg.id);
             break;
           case 'interrupt':
@@ -268,6 +279,7 @@ export async function startServer(o: {
             manager.answer(msg.id, msg.allow);
             break;
           case 'command':
+            if (!caps[msg.name]) return refuse(`command ${msg.name}`);
             manager.command(msg.name);
             break;
           case 'switch':
@@ -277,6 +289,7 @@ export async function startServer(o: {
             manager.activity();
             break;
           case 'idle-compact':
+            if (!caps.idleCompact) return refuse('idle-compact');
             manager.setIdleCompact(msg.on);
             break;
           case 'restart':

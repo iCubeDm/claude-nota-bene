@@ -62,6 +62,18 @@ export const PROTOCOL = 5;
 
 export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type Mode = (typeof MODES)[number];
+
+/**
+ * What the agent behind the server can do (R-M7-15), announced in `hello`; the UI hides a control whose capability is
+ * false and the server refuses the matching client message. `modes`: the permission modes it offers (empty: no mode pill).
+ */
+export type Capabilities = {
+  compact: boolean; clear: boolean; modes: Mode[]; usage: boolean; fileSuggestions: boolean; fork: boolean; idleCompact: boolean;
+};
+/** Claude Code's set; the web assumes it when `hello` carries none (a server older than protocol 5). */
+export const CLAUDE_CAPABILITIES: Capabilities = {
+  compact: true, clear: true, modes: [...MODES], usage: true, fileSuggestions: true, fork: true, idleCompact: true,
+};
 /** percent 0..100 */
 export type Limit = { utilization: number; resets_at: string | null };
 export type Stats = {
@@ -97,7 +109,7 @@ export type IdleCompact = { on: boolean; blocked: boolean; minutes: number; away
 
 export type ServerEvent =
   /** right after the replay on every connection (servers before it send none: protocol 0) */
-  | { kind: 'hello'; protocol: number }
+  | { kind: 'hello'; protocol: number; capabilities?: Capabilities }
   | { kind: 'replay'; events: ServerEvent[] }
   /** what the agent said (R-M7-14); `init` and `rate-limit` are server-internal and never sent */
   | { kind: 'agent'; e: WireAgentEvent; ts: number }

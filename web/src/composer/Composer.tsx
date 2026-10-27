@@ -6,7 +6,7 @@ import { sendBatch } from '@/comments/send.ts';
 import { selectPending } from '@/comments/slice.ts';
 import { CompactClear } from '@/controls/CompactClear.tsx';
 import { ModePill } from '@/controls/ModePill.tsx';
-import { nextMode, pickMode, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
+import { nextMode, pickMode, selectCapabilities, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
 import { ShortcodePicker } from '@/comments/ShortcodePicker.tsx';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Meters } from '@/stats/Meters.tsx';
@@ -23,6 +23,7 @@ export function Composer() {
   const conn = useAppSelector(selectConn);
   const nPending = useAppSelector(selectPending).length;
   const mode = useAppSelector(selectMode);
+  const caps = useAppSelector(selectCapabilities);
   const text = useAppSelector(selectDraft);
   const images = useAppSelector(selectImages);
   const uploading = useAppSelector(selectUploading) > 0;
@@ -122,9 +123,9 @@ export function Composer() {
       requestAnimationFrame(() => ref.current?.setSelectionRange(suggestion.length, suggestion.length));
       return;
     }
-    if (e.key === 'Tab' && e.shiftKey && !e.nativeEvent.isComposing && mode) {
+    if (e.key === 'Tab' && e.shiftKey && !e.nativeEvent.isComposing && mode && caps.modes.length > 1) {
       e.preventDefault();
-      dispatch(pickMode(nextMode(mode)));
+      dispatch(pickMode(nextMode(mode, caps.modes)));
       return;
     }
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;

@@ -2,6 +2,7 @@ import type { Limit } from '@nota-bene/shared';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { fmtK } from '@/lib/format.ts';
 import { getLang, useT } from '@/i18n/index.ts';
+import { selectCapabilities } from '@/controls/slice.ts';
 import { useAppSelector } from '@/store/store.ts';
 import { selectStats } from './slice.ts';
 
@@ -41,7 +42,8 @@ function Meter({ label, pct, tip }: { label: string; pct: number; tip: string })
 export function Meters() {
   const t = useT(); // re-renders on a language switch, so the reset time below is re-formatted too
   const st = useAppSelector(selectStats);
-  if (!st) return null;
+  const { usage } = useAppSelector(selectCapabilities);
+  if (!st || !usage) return null;
   const resets = (l: Limit): string =>
     l.resets_at ? ` · ${t('resets', new Date(l.resets_at).toLocaleString(getLang(), { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : '';
   const L = st.limits;

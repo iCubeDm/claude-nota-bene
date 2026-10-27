@@ -1,9 +1,9 @@
-import { MODES, type Mode } from '@nota-bene/shared';
+import type { Mode } from '@nota-bene/shared';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { pickMode, selectMode, selectSwitching } from './slice.ts';
+import { pickMode, selectCapabilities, selectMode, selectSwitching } from './slice.ts';
 
 // colours as in the CLI's mode line (prototype #modeBtn.m-*)
 const TONE: Record<Mode, string> = {
@@ -18,7 +18,9 @@ export function ModePill() {
   const dispatch = useAppDispatch();
   const mode = useAppSelector(selectMode);
   const switching = useAppSelector(selectSwitching); // the switch announces the new session's mode
-  if (!mode) return null; // unknown until the server says
+  const { modes } = useAppSelector(selectCapabilities);
+  // unknown until the server says; and with fewer than two modes there is nothing to choose
+  if (!mode || modes.length < 2) return null;
   return (
     <DropdownMenu>
       <Tooltip>
@@ -40,7 +42,7 @@ export function ModePill() {
         <TooltipContent className="whitespace-pre-line">{t('modeTip')}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="start" className="w-[340px]">
-        {MODES.map((m) => (
+        {modes.map((m) => (
           <DropdownMenuItem
             key={m}
             aria-current={m === mode || undefined}

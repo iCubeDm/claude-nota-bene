@@ -1,5 +1,5 @@
 import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
-import { MODES, type IdleCompact, type Mode } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, MODES, type Capabilities, type IdleCompact, type Mode } from '@nota-bene/shared';
 import { t } from '../i18n/index.ts';
 import { toast } from '../shell/toast.ts';
 import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
@@ -22,10 +22,15 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
   idleCompact: IdleCompact | null;
   /** what the connected server announced in `hello` (0: an older server, or none yet); see PROTOCOL */
   protocol: number;
+  /**
+   * what the agent behind the server can do (R-M7-15), from `hello`. A `hello` without it (a server older than protocol 5)
+   * means Claude's full set, so nothing disappears against an old server. Kept over a dropped socket until the next `hello`.
+   */
+  capabilities: Capabilities;
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null, protocol: 0 };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null, protocol: 0, capabilities: CLAUDE_CAPABILITIES };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -59,7 +64,10 @@ export const controlsSlice = createSlice({
     b.addCase(connState, (s, a) => void (a.payload === 'closed' && (s.protocol = 0)));
     b.addCase(serverEvent, (s, a) => {
       const ev = a.payload;
-      if (ev.kind === 'hello') s.protocol = ev.protocol;
+      if (ev.kind === 'hello') {
+        s.protocol = ev.protocol;
+        s.capabilities = ev.capabilities ?? CLAUDE_CAPABILITIES;
+      }
       if (ev.kind === 'mode') {
         // Two quick Shift+Tabs: the echo of the first lands after the second was shown, and applying it would put the
         // pill (and the next Shift+Tab's starting point) one mode back. So while our own changes are in flight, echoes
@@ -106,6 +114,7 @@ const { restoreCleared, switchStarted, switchCleared } = controlsSlice.actions;
 
 export const selectMode = (s: RootState): Mode | null => s.controls.mode;
 export const selectSuggestion = (s: RootState): string => s.controls.suggestion;
+export const selectCapabilities = (s: RootState): Capabilities => s.controls.capabilities;
 export const selectSwitching = (s: RootState): boolean => s.controls.switching !== null;
 export const selectRestarting = (s: RootState): boolean => s.controls.restarting;
 
@@ -142,7 +151,11 @@ export const reportActivity = (now = Date.now()): AppThunk => (_d, getState, { s
 /** tests */
 export const resetActivityThrottle = (): void => void (lastActivity = -Infinity);
 
-export const nextMode = (m: Mode): Mode => MODES[(MODES.indexOf(m) + 1) % MODES.length];
+/** The next of the agent's `modes` (all of them by default); a mode outside the list goes to its first. */
+export const nextMode = (m: Mode, modes: readonly Mode[] = MODES): Mode => {
+  const i = modes.indexOf(m);
+  return modes[(i + 1) % modes.length] ?? m; // i -1 → 0; an empty list keeps the mode
+};
 
 /**
  * Plan restore: approving a plan makes the CLI drop to `default`. On the echo of a non-plan mode with

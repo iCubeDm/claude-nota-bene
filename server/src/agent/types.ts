@@ -1,4 +1,4 @@
-import type { AgentEvent, ImageType, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, Capabilities, ImageType, Mode, ServerEvent, Stats } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
@@ -30,6 +30,8 @@ export type SessionListEntry = {
 export type SessionInfo = { customTitle?: string; summary?: string; firstPrompt?: string; cwd?: string };
 
 export interface AgentBackend {
+  /** what this agent can do; sent in `hello`, enforced by the server (R-M7-15) */
+  readonly capabilities: Capabilities;
   start(o: { cwd: string; resume?: string; /** with resume: branch into a new session id (SDK forkSession) */ fork?: boolean; permissionMode: Mode; ask: PermissionAsk }): AgentSession;
   /** `attachments` receives the images found in the transcript; the events carry ImageRefs only. */
   /** Every project's sessions, newest first (sdk: listSessions({ limit: 300 })). */

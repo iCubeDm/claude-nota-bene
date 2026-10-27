@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { AgentEvent } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, type AgentEvent } from '@nota-bene/shared';
 import type { SDKMessage } from './claude/map.ts';
-import { fakeBackend, type FakeTurn } from './fake.ts';
+import { fakeBackend, fakeFromScript, type FakeTurn } from './fake.ts';
 import type { PermissionAsk } from './types.ts';
 
 const send = { uuid: 'u1', text: 'hi', priority: 'next' } as const;
@@ -203,6 +203,15 @@ describe('fake backend', () => {
     expect(pick(m)).toEqual(pick(realAborted));
     s.close();
   });
+  describe('M7-09 capabilities', () => {
+    it('mirror Claude unless the script says otherwise (object form only; a bare turn array has none)', () => {
+      expect(fakeFromScript([{ text: 'a' }], '/p').capabilities).toEqual(CLAUDE_CAPABILITIES);
+      expect(fakeFromScript({ turns: [{ text: 'a' }] }, '/p').capabilities).toEqual(CLAUDE_CAPABILITIES);
+      expect(fakeFromScript({ turns: [{ text: 'a' }], capabilities: { compact: false, modes: ['default'] } }, '/p').capabilities)
+        .toEqual({ ...CLAUDE_CAPABILITIES, compact: false, modes: ['default'] });
+    });
+  });
+
   describe('M4-16 script fields', () => {
     it('a turn with `match` runs for a prompt containing it and does not use up the sequence', async () => {
       const turns: FakeTurn[] = [{ text: 'first' }, { text: 'boom reply', match: 'boom' }, { text: 'second' }];

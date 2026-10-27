@@ -142,7 +142,7 @@ export async function createSessionManager(o: {
   let titleAt = -Infinity;
   let titleTimer: NodeJS.Timeout | null = null;
   const stats = new StatsService({
-    session: () => agent,
+    session: () => (backend.capabilities.usage ? agent : null), // no usage: no meters, nothing asked of the agent
     emit: (s) => hub.emit({ kind: 'stats', stats: s }, { store: false }),
     hasClients: () => hub.clients() > 0,
     onError: (e) => reportError(hub, 'stats', e),
@@ -158,7 +158,7 @@ export async function createSessionManager(o: {
   });
   const idle = new IdleCompactor({
     config: idleCfg,
-    enabled: () => { const st = idleState(); return st.on && !st.blocked; },
+    enabled: () => { const st = idleState(); const c = backend.capabilities; return c.idleCompact && c.compact && st.on && !st.blocked; },
     // no agent (it died): starting one only to compact, with nobody watching, is not ours to do
     busy: () => switching || closed || agent === null || waiting.size > 0 || pending.size > 0,
     contextUsed: () => stats.current().context?.used ?? null,
@@ -654,7 +654,7 @@ export async function createSessionManager(o: {
     onSwitch(cb) {
       switchListeners.push(cb);
     },
-    fileSuggestions: (query) => (agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
+    fileSuggestions: (query) => (!backend.capabilities.fileSuggestions ? Promise.resolve([]) : agent ? agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
     stats: () => stats.current(),
     clientAttached: () => stats.onAttach(),
     close() {

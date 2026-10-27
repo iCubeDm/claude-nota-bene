@@ -5,7 +5,7 @@ import { useT } from '@/i18n/index.ts';
 import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ConfirmDialog } from './ConfirmDialog.tsx';
 import { fmtK } from '@/lib/format.ts';
-import { runCommand, selectIdleCompact, selectSwitching, toggleIdleCompact } from './slice.ts';
+import { runCommand, selectCapabilities, selectIdleCompact, selectSwitching, toggleIdleCompact } from './slice.ts';
 import { REFUSED, useNote } from './useNote.ts';
 
 const ICON = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
@@ -18,12 +18,13 @@ export function CompactClear() {
   const busy = useAppSelector((s) => selectBusy(s) || selectSwitching(s));
   const [asking, setAsking] = useState(false);
   const [note, showNote] = useNote();
+  const caps = useAppSelector(selectCapabilities);
   const idle = useAppSelector(selectIdleCompact);
   const idleOn = !!idle && idle.on && !idle.blocked;
   const idleTip = !idle ? '' : idle.blocked ? t('idleBlocked') : t('idleTip', idle.on, idle.minutes, idle.awayMinutes, fmtK(idle.minTokens));
   return (
     <>
-      <Tooltip>
+      {caps.compact && <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex">
             <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={t('compactTip')} onClick={() => dispatch(runCommand('compact'))}>
@@ -32,8 +33,8 @@ export function CompactClear() {
           </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-[300px] whitespace-pre-line">{t('compactTip')}</TooltipContent>
-      </Tooltip>
-      {idle && (
+      </Tooltip>}
+      {idle && caps.idleCompact && caps.compact && (
         <Tooltip>
           <TooltipTrigger asChild>
             {/* a span keeps the tooltip on a disabled (blocked) button */}
@@ -57,7 +58,7 @@ export function CompactClear() {
           <TooltipContent className="max-w-[320px] whitespace-pre-line">{idleTip}</TooltipContent>
         </Tooltip>
       )}
-      <Tooltip>
+      {caps.clear && <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex">
             <Button type="button" variant="ghost" size="icon-sm" disabled={busy} aria-label={t('clearTip')} onClick={() => setAsking(true)}>
@@ -66,7 +67,7 @@ export function CompactClear() {
           </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-[300px] whitespace-pre-line">{t('clearTip')}</TooltipContent>
-      </Tooltip>
+      </Tooltip>}
       {note && <span role="status" className="flex-none text-[11px] text-warn">{note}</span>}
       {asking && (
         <ConfirmDialog

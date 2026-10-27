@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import { PROTOCOL, type ServerEvent } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, PROTOCOL, type Capabilities, type ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
 import { startServer } from './server.ts';
 
@@ -102,7 +102,7 @@ describe('server', () => {
     const a = await connect(s.url);
     await until(() => a.events.some((e) => e.kind === 'hello'));
     const kinds = a.events.map((e) => e.kind);
-    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL });
+    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL, capabilities: CLAUDE_CAPABILITIES });
     expect(kinds.indexOf('hello')).toBeGreaterThan(kinds.indexOf('stats'));
   });
 
@@ -209,6 +209,52 @@ describe('server', () => {
       expect(codes).toEqual([]); // the reply came first
       await until(() => codes.length === 1);
       expect(codes).toEqual([75]);
+    });
+  });
+
+  describe('capabilities (R-M7-15)', () => {
+    const bootCaps = async (capabilities: Partial<Capabilities>) => {
+      const backend = fakeBackend([{ text: 'hello' }], { capabilities });
+      const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist });
+      closers.push(s.close);
+      return { s, backend };
+    };
+
+    it('hello carries the backend capabilities; the fake mirrors Claude by default', async () => {
+      const a = await connect((await boot()).url);
+      await until(() => a.events.some((e) => e.kind === 'hello'));
+      expect(a.events.find((e) => e.kind === 'hello')).toMatchObject({ protocol: PROTOCOL, capabilities: CLAUDE_CAPABILITIES });
+      const { s } = await bootCaps({ compact: false, modes: ['default'] });
+      const b = await connect(s.url);
+      await until(() => b.events.some((e) => e.kind === 'hello'));
+      expect(b.events.find((e) => e.kind === 'hello')).toMatchObject({ capabilities: { ...CLAUDE_CAPABILITIES, compact: false, modes: ['default'] } });
+    });
+
+    it('refuses a command the agent cannot do, with a server-error naming the capability', async () => {
+      const { s } = await bootCaps({ compact: false, clear: false });
+      const c = await connect(s.url);
+      c.ws.send(JSON.stringify({ type: 'command', name: 'compact' }));
+      c.ws.send(JSON.stringify({ type: 'command', name: 'clear' }));
+      await until(() => c.events.filter((e) => e.kind === 'server-error' && e.where === 'capability').length === 2);
+      expect(c.events.some((e) => e.kind === 'user')).toBe(false);
+    });
+
+    it('refuses a mode outside `modes`, but still answers it (the sender waits for its ack)', async () => {
+      const { s, backend } = await bootCaps({ modes: ['default'] });
+      const c = await connect(s.url);
+      c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'hi' }));
+      await until(() => c.events.some(isResult));
+      c.ws.send(JSON.stringify({ type: 'mode', mode: 'plan', id: 'm1' }));
+      await until(() => c.events.some((e) => e.kind === 'server-error' && e.where === 'capability'));
+      await until(() => c.events.some((e) => e.kind === 'mode' && e.ack === 'm1'));
+      expect(backend.setModes).toEqual([]);
+    });
+
+    it('refuses idle-compact when the agent has none', async () => {
+      const { s } = await bootCaps({ idleCompact: false });
+      const c = await connect(s.url);
+      c.ws.send(JSON.stringify({ type: 'idle-compact', on: false }));
+      await until(() => c.events.some((e) => e.kind === 'server-error' && e.where === 'capability'));
     });
   });
 });

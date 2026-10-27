@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type Mode, type ServerEvent, type Stats } from '@nota-bene/shared';
 import { isWire, mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
@@ -57,7 +57,7 @@ export type FakeSessionScript = {
 };
 
 /** A --fake script: the turns alone (the M0-M3 format), or the turns and a session list. */
-export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number };
+export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number; /** what the fake agent can do; default: Claude's full set */ capabilities?: Partial<Capabilities> };
 
 /**
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
@@ -321,7 +321,7 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number } = {},
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities> } = {},
 ): Omit<AgentBackend, 'start'> & { start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[] } {
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
@@ -335,6 +335,7 @@ export function fakeBackend(
     ...(x.firstPrompt !== undefined ? { firstPrompt: x.firstPrompt } : {}),
   });
   return {
+    capabilities: { ...CLAUDE_CAPABILITIES, ...o.capabilities },
     startModes,
     setModes,
     starts,
@@ -366,5 +367,5 @@ export function fakeBackend(
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
   return Array.isArray(script)
     ? fakeBackend(script, { base })
-    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}) });
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}) });
 }
