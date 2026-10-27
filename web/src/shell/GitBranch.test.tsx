@@ -23,7 +23,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); setLang('ru'); });
 
 const session = (root: string): ServerEvent => ({ kind: 'session', id: null, root, title: null, model: null });
-const result: ServerEvent = { kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', is_error: false, duration_ms: 5, user_message_uuids: ['u1'] } } as unknown as ServerEvent;
+const result: ServerEvent = { kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: ['u1'], queued: 0 } };
 
 async function setup() {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });

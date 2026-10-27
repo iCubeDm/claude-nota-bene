@@ -82,10 +82,9 @@ export const controlsSlice = createSlice({
         if (s.seen && (s.seen.id !== ev.id || s.seen.root !== ev.root)) s.suggestion = '';
         s.seen = { id: ev.id, root: ev.root };
       }
-      else if (ev.kind === 'sdk') {
-        const m = ev.m as unknown as { type?: string; suggestion?: unknown };
-        if (m.type === 'conversation_reset') s.suggestion = '';
-        else if (m.type === 'prompt_suggestion' && typeof m.suggestion === 'string') s.suggestion = m.suggestion.trim();
+      else if (ev.kind === 'agent') {
+        if (ev.e.t === 'reset') s.suggestion = '';
+        else if (ev.e.t === 'suggestion') s.suggestion = ev.e.text;
       }
       if (!s.switching) return;
       // Only these end a switch. A `session` before the reset is the old session's (a title refresh); a `busy` error

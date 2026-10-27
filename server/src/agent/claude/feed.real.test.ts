@@ -1,14 +1,31 @@
+import fs from 'node:fs';
+import { beforeAll, expect, test } from 'vitest';
 import type { ServerEvent } from '@nota-bene/shared';
-import { expect, test } from 'vitest';
-import raw from '../../../server/test/fixtures/real-frames.json?raw';
-import { emptyFeed, reduce, type FeedState } from './feed.ts';
+import { isWire, mapSdk, type SDKMessage } from './map.ts';
 
-// Golden test over frames shaped like the real CLI (see the fixture's _comment), not like the fake.
-const events = (JSON.parse(raw) as { events: ServerEvent[] }).events;
-const isResult = (e: ServerEvent) => e.kind === 'sdk' && (e.m as { type: string }).type === 'result';
-const resultAt = events.flatMap((e, i) => (isResult(e) ? [i] : []));
+// Golden test over frames shaped like the real CLI (see the fixture's _comment), not like the fake: each frame goes
+// through the Claude mapper as the server sends it, then through the web reducer that decides what the user sees.
+type Entry = { kind: string; m?: unknown; ts?: number };
+type FeedItem = { kind: string; text?: string; final?: boolean; duringWork?: boolean; status?: string; error?: string };
+type FeedState = { items: FeedItem[]; busy: boolean; session: unknown };
+const entries = (JSON.parse(fs.readFileSync(new URL('../../../test/fixtures/real-frames.json', import.meta.url), 'utf8')) as { events: Entry[] }).events;
+/** one fixture entry as the server puts it on the wire: an `sdk` frame becomes its wire AgentEvents */
+const wire = (x: Entry): ServerEvent[] => x.kind !== 'sdk' ? [x as ServerEvent]
+  : mapSdk(x.m as SDKMessage).filter(isWire).map((e) => ({ kind: 'agent', e, ts: x.ts ?? 0 }));
+const isResult = (x: Entry) => x.kind === 'sdk' && (x.m as { type: string }).type === 'result';
+const resultAt = entries.flatMap((e, i) => (isResult(e) ? [i] : []));
+
+// the web reducer, loaded by variable path so the server project does not compile web sources (as in session.test.ts)
+let reduce!: (s: FeedState, e: ServerEvent) => FeedState;
+let emptyFeed!: FeedState;
+beforeAll(async () => {
+  const href = new URL('../../../../web/src/store/feed.ts', import.meta.url).href;
+  ({ reduce, emptyFeed } = (await import(/* @vite-ignore */ href)) as never);
+});
+/** the feed after the first n fixture entries */
+const upTo = (n: number): FeedState => entries.slice(0, n).flatMap(wire).reduce(reduce, emptyFeed);
 /** the feed right after the n-th result (0-based) */
-const after = (n: number): FeedState => events.slice(0, resultAt[n]! + 1).reduce(reduce, emptyFeed);
+const after = (n: number): FeedState => upTo(resultAt[n]! + 1);
 const lastDone = (s: FeedState) => s.items.filter((i) => i.kind === 'done').at(-1);
 
 test('the fixture has six turns', () => {
@@ -23,7 +40,7 @@ test('busy at key points: queued turn keeps it, everything else clears it', () =
   expect(after(4).busy).toBe(false);
   expect(after(5).busy).toBe(false);
   // between the two queued turns the agent is working: still busy at the second turn's init
-  expect(events.slice(0, resultAt[2]! + 2).reduce(reduce, emptyFeed).busy).toBe(true);
+  expect(upTo(resultAt[2]! + 2).busy).toBe(true);
 });
 
 test('done lines: interrupt is interrupted, errors carry their text', () => {
@@ -36,7 +53,7 @@ test('done lines: interrupt is interrupted, errors carry their text', () => {
 });
 
 test('final feed', () => {
-  const s = events.reduce(reduce, emptyFeed);
+  const s = upTo(entries.length);
   const view = s.items.map((i) => {
     switch (i.kind) {
       case 'user': return `user ${i.text}${i.duringWork ? ' (during work)' : ''}`;

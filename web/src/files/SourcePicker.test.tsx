@@ -46,7 +46,7 @@ function setup() {
 }
 const picker = () => screen.findByRole('combobox', { name: 'Source' });
 const row = (name: string) => screen.findByRole('button', { name: new RegExp(`^${name.replace(/[+.]/g, '\\$&')}`) });
-const result = (): ServerEvent => ({ kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as unknown as ServerEvent);
+const result = (): ServerEvent => ({ kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: 'none', queued: 0 } });
 
 it('lists this folder, the worktree and the branch; picking one loads its tree and opens files from it', async () => {
   const store = setup();

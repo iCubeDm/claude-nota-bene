@@ -55,7 +55,7 @@ it('Esc closes only the picker: the draft stays and a busy agent is not interrup
 
 it('Tab picks the emoji instead of taking the prompt suggestion', async () => {
   const { box, emit } = setup();
-  emit({ kind: 'sdk', ts: 1, m: { type: 'prompt_suggestion', suggestion: 'run the tests' } } as unknown as ServerEvent);
+  emit({ kind: 'agent', ts: 1, e: { t: 'suggestion', text: 'run the tests' } });
   await userEvent.keyboard(':smi');
   await screen.findByRole('listbox');
   await userEvent.keyboard('{Tab}');

@@ -22,7 +22,7 @@ it('inbound frames reach the feed', () => {
   expect(f.connect).toHaveBeenCalledTimes(1);
   f.ev({ kind: 'user', id: 'u1', text: 'hi', ts: 1 });
   expect(selectBusy(store.getState())).toBe(true);
-  f.ev({ kind: 'sdk', ts: 2, m: { type: 'result', subtype: 'success', duration_ms: 5, is_error: false, result: 'ok', user_message_uuid: 'u1' } as never });
+  f.ev({ kind: 'agent', ts: 2, e: { t: 'turn-end', stop: 'done', secs: 0, answers: ['u1'], queued: 0 } });
   expect(selectBusy(store.getState())).toBe(false);
   expect(selectFeed(store.getState()).items).toHaveLength(2);
 });
@@ -59,7 +59,7 @@ it('selectReplyLabel numbers final assistant items and names user messages', asy
   const f = fake();
   const store = makeStore({ url: 'ws://x/ws', connect: f.connect });
   f.ev({ kind: 'user', id: 'u1', text: 'hi', ts: 1 });
-  const a = (uuid: string, text: string) => f.ev({ kind: 'sdk', ts: 2, m: { type: 'assistant', uuid, message: { content: [{ type: 'text', text }] } } as never });
+  const a = (uuid: string, text: string) => f.ev({ kind: 'agent', ts: 2, e: { t: 'message', id: `${uuid}:0`, text } });
   a('a1', 'one');
   a('a2', 'two');
   const st = store.getState();
@@ -73,10 +73,10 @@ it('a live compaction records its duration for the next estimate; a replayed one
   localStorage.clear();
   const f = fake();
   makeStore({ url: 'ws://x/ws', connect: f.connect });
-  const cb = { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 1, duration_ms: 42000 } } as never;
-  f.ev({ kind: 'replay', events: [{ kind: 'sdk', ts: 1, m: cb }] });
+  const cb = { t: 'compacted', preTokens: 1, ms: 42000 } as const;
+  f.ev({ kind: 'replay', events: [{ kind: 'agent', ts: 1, e: cb }] });
   expect(localStorage.getItem('nb.compactMs')).toBeNull();
-  f.ev({ kind: 'sdk', ts: 2, m: cb });
+  f.ev({ kind: 'agent', ts: 2, e: cb });
   expect(JSON.parse(localStorage.getItem('nb.compactMs')!)).toEqual([42000]);
   localStorage.clear();
 });

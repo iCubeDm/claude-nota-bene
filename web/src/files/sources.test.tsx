@@ -188,7 +188,7 @@ it('a branch view: chip in the toolbar, src in the url, data-file-ref on the pan
   expect(screen.getByText('old', { selector: '[data-src-chip]' }).title).toBe('read-only');
   expect(calls).toContain('GET /file?path=a.md&src=ref%3Aold');
   const n = calls.length;
-  act(() => void store.dispatch(serverEvent({ kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as never)));
+  act(() => void store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: 'none', queued: 0 } })));
   await tick();
   expect(calls.length).toBe(n);
 });

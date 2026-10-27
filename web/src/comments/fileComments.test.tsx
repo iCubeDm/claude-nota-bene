@@ -77,7 +77,7 @@ const card = (id: string) => document.querySelector(`#comments [data-comment-id=
 const quoteOf = (id: string) => card(id).querySelector<HTMLElement>('.cursor-pointer')!;
 /** Where scrollRangeIntoView puts a fragment in jsdom (pane rect, scrollTop and clientHeight all 0): its rect's middle. */
 const target = (startOffset: number) => 300 + startOffset * 10 + 8;
-const result = () => serverEvent({ kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as never);
+const result = () => serverEvent({ kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: 'none', queued: 0 } });
 
 it('a file comment paints in its file pane and not in the chat; a chat comment only in the chat', async () => {
   setup([fileComment(), chatComment], ['docs/n.md']);

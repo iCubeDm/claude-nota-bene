@@ -101,11 +101,6 @@ export type ServerEvent =
   | { kind: 'replay'; events: ServerEvent[] }
   /** what the agent said (R-M7-14); `init` and `rate-limit` are server-internal and never sent */
   | { kind: 'agent'; e: WireAgentEvent; ts: number }
-  /**
-   * @deprecated Protocol 4 and older: a raw SDK frame. No server sends it any more; it stays only until the web reads
-   * `agent` events (M7-08), so that the web reducers still compile.
-   */
-  | { kind: 'sdk'; m: unknown; ts: number }
   /** `idle`: a `/compact` the server sent itself after the session sat idle */
   | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; historic?: boolean; images?: ImageRef[]; idle?: boolean }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; ts: number }

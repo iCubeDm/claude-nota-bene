@@ -26,14 +26,9 @@ it('renders one element per feed item in order', () => {
   const { store, view } = setup();
   act(() => {
     store.dispatch(serverEvent({ kind: 'user', id: 'u1', text: 'hello', ts: 0, historic: true }));
-    store.dispatch(
-      serverEvent({
-        kind: 'sdk',
-        ts: 1,
-        m: { type: 'assistant', uuid: 'a', message: { content: [{ type: 'text', text: 'hi **there**' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } } as never,
-      }),
-    );
-    store.dispatch(serverEvent({ kind: 'sdk', ts: 2, m: { type: 'result', subtype: 'success', duration_ms: 3000 } as never }));
+    store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'message', id: 'a:0', text: 'hi **there**' } }));
+    store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'tool-call', id: 't1', name: 'Bash', input: { command: 'ls' }, sub: false } }));
+    store.dispatch(serverEvent({ kind: 'agent', ts: 2, e: { t: 'turn-end', stop: 'done', secs: 3, answers: 'none', queued: 0 } }));
   });
   const els = [...view.container.querySelectorAll('[data-kind]')];
   expect(els.map((e) => e.getAttribute('data-kind'))).toEqual(['user', 'assistant', 'tool', 'done']);
@@ -78,12 +73,12 @@ it('an empty chat shows a prompt to start, gone after the first message', () => 
   expect(view.container.querySelector('[data-kind="empty"]')).toBeNull();
 });
 
-function toolFeed(command: string, output: unknown, isError = false) {
+function toolFeed(command: string, output: string | undefined, isError = false) {
   const h = setup();
   act(() => {
-    h.store.dispatch(serverEvent({ kind: 'sdk', ts: 1, m: { type: 'assistant', uuid: 'a', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command, description: 'd' } }] } } as never }));
+    h.store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'tool-call', id: 't1', name: 'Bash', input: { command, description: 'd' }, sub: false } }));
     if (output !== undefined) {
-      h.store.dispatch(serverEvent({ kind: 'sdk', ts: 2, m: { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: output, ...(isError ? { is_error: true } : {}) }] } } as never }));
+      h.store.dispatch(serverEvent({ kind: 'agent', ts: 2, e: { t: 'tool-update', id: 't1', text: output, isError } }));
     }
   });
   return h;

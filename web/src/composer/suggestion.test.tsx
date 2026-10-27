@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import type { ClientMessage, ServerEvent, WireAgentEvent } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
@@ -22,10 +22,10 @@ function setup() {
   const store = makeStore({ url: 'ws://x', connect: connect as never });
   render(<Provider store={store}><TooltipProvider><Composer /></TooltipProvider></Provider>);
   const emit = (e: ServerEvent) => act(() => ev(e));
-  const sdk = (m: object) => emit({ kind: 'sdk', ts: 1, m } as unknown as ServerEvent);
-  const suggest = (s: string) => sdk({ type: 'prompt_suggestion', suggestion: s });
+  const agent = (e: WireAgentEvent) => emit({ kind: 'agent', ts: 1, e });
+  const suggest = (s: string) => agent({ t: 'suggestion', text: s });
   const box = screen.getByRole('textbox') as HTMLTextAreaElement;
-  return { store, emit, sdk, suggest, box };
+  return { store, emit, agent, suggest, box };
 }
 const user = (historic = false): ServerEvent => ({ kind: 'user', id: 'u1', text: 'hi', ts: 1, ...(historic ? { historic: true } : {}) }) as ServerEvent;
 
@@ -95,10 +95,10 @@ it.each([
   expect(store.getState().controls.suggestion).toBe('');
 });
 
-it('conversation_reset clears it', () => {
-  const { suggest, sdk, store } = setup();
+it('a reset (/clear) clears it', () => {
+  const { suggest, agent, store } = setup();
   suggest('run the tests');
-  sdk({ type: 'conversation_reset' });
+  agent({ t: 'reset' });
   expect(store.getState().controls.suggestion).toBe('');
 });
 

@@ -1,23 +1,24 @@
-import type { ServerEvent } from '@nota-bene/shared';
+import type { ServerEvent, WireAgentEvent } from '@nota-bene/shared';
 import { expect, test } from 'vitest';
 import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
-const sdk = (m: Record<string, unknown>, ts = 1): ServerEvent => ({ kind: 'sdk', m: m as never, ts });
-const start = (parent: string | null = null) =>
-  sdk({ type: 'stream_event', parent_tool_use_id: parent, event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
-const delta = (text: string, parent: string | null = null) =>
-  sdk({ type: 'stream_event', parent_tool_use_id: parent, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
-const assistant = (content: unknown[], uuid = 'a1', parent: string | null = null) =>
-  sdk({ type: 'assistant', uuid, parent_tool_use_id: parent, message: { content } });
-const result = (extra: Record<string, unknown> = {}) =>
-  sdk({ type: 'result', subtype: 'success', duration_ms: 2400, is_error: false, result: 'ok', ...extra }, 99);
+type Turn = Extract<WireAgentEvent, { t: 'turn-end' }>;
+const agent = (e: WireAgentEvent, ts = 1): ServerEvent => ({ kind: 'agent', e, ts });
+const start = () => agent({ t: 'message-start' });
+const delta = (text: string) => agent({ t: 'message-chunk', text });
+const message = (id: string, text: string) => agent({ t: 'message', id, text });
+const result = (extra: Partial<Turn> = {}) =>
+  agent({ t: 'turn-end', stop: 'done', secs: 2, answers: 'none', queued: 0, ...extra }, 99);
+const toolUse = (id = 't1', input: Record<string, unknown> = { command: 'ls -la\necho done' }, sub = false) =>
+  agent({ t: 'tool-call', id, name: 'Bash', input, sub });
+const toolResult = (id: string, text: string, isError = false) => agent({ t: 'tool-update', id, text, isError });
 const user = (extra: Partial<Extract<ServerEvent, { kind: 'user' }>> = {}): ServerEvent => ({ kind: 'user', id: 'u1', text: 'hi', ts: 5, ...extra });
 const fold = (evs: ServerEvent[], from: FeedState = emptyFeed) => evs.reduce(reduce, from);
 
 test('deltas build one streaming item, assistant finalises it in place', () => {
   const mid = fold([start(), delta('hello '), delta('world')]);
   expect(mid.items).toEqual([{ kind: 'assistant', id: 'stream:0', text: 'hello world', final: false }]);
-  const s = reduce(mid, assistant([{ type: 'text', text: 'hello world' }]));
+  const s = reduce(mid, message('a1:0', 'hello world'));
   expect(s.items).toEqual([{ kind: 'assistant', id: 'a1:0', text: 'hello world', final: true }]);
 });
 
@@ -35,57 +36,52 @@ test('user while busy is marked duringWork', () => {
 });
 
 test('force keeps busy across the interrupted result; the next result clears it', () => {
-  const s1 = fold([user(), user({ id: 'u2', force: true }), result({ result: '', terminal_reason: 'aborted_streaming', user_message_uuids: ['u1'] })]);
+  const s1 = fold([user(), user({ id: 'u2', force: true }), result({ stop: 'interrupted', answers: ['u1'] })]);
   expect(s1.busy).toBe(true);
   expect(s1.forcePending).toBe(false);
   expect(s1.items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
-  const s2 = reduce(s1, result({ user_message_uuids: ['u2'] }));
+  const s2 = reduce(s1, result({ answers: ['u2'] }));
   expect(s2.busy).toBe(false);
   expect(s2.items.at(-1)).toMatchObject({ status: 'done' });
   // nothing left waiting: only forcePending can keep busy here
-  const forced = result({ result: '', terminal_reason: 'aborted_streaming', user_message_uuids: ['u1', 'u2'] });
+  const forced = result({ stop: 'interrupted', answers: ['u1', 'u2'] });
   const s3 = fold([user(), user({ id: 'u2', force: true }), forced]);
   expect(s3.waiting).toEqual([]);
   expect(s3.busy).toBe(true);
 });
 
+test('while a forced send is pending, any turn-end shows as interrupted, with no error text (R-M7-14)', () => {
+  const forced = fold([user(), user({ id: 'u2', force: true })]);
+  expect(reduce(forced, result({ stop: 'done', answers: ['u1'] })).items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+  expect(reduce(forced, result({ stop: 'failed', error: 'boom', answers: ['u1'] })).items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+});
+
 test('tool_result is_error marks the tool red', () => {
-  const s = fold([
-    assistant([{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls\nmore' } }]),
-    sdk({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true }] } }),
-  ]);
+  const s = fold([toolUse('t1', { command: 'ls\nmore' }), toolResult('t1', '', true)]);
   expect(s.items).toEqual([{
     kind: 'tool', id: 't1', name: 'Bash', arg: 'ls', sub: false,
     input: { command: 'ls\nmore' }, result: { text: '', isError: true },
   }]);
 });
 
-const toolUse = (id = 't1', input: Record<string, unknown> = { command: 'ls -la\necho done' }) =>
-  assistant([{ type: 'tool_use', id, name: 'Bash', input }]);
-const toolResult = (blocks: unknown[]) => sdk({ type: 'user', message: { content: blocks } });
-
 test('tool item keeps the full input and gets its result by tool_use_id', () => {
   const input = { command: 'ls -la\necho done', description: 'list' };
   const s = fold([
     toolUse('t1', input), toolUse('t2', { command: 'pwd' }),
-    toolResult([{ type: 'tool_result', tool_use_id: 't2', content: '/tmp' }]),
-    toolResult([{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'a' }, { type: 'image', source: {} }, { type: 'text', text: 'b' }, { type: 'document' }] }]),
+    toolResult('t2', '/tmp'),
+    toolResult('t1', 'a\n[image]\nb\n[document]'), // the joining of result blocks is the mapper's (map.test.ts)
   ]);
   expect(s.items[0]).toMatchObject({ arg: 'ls -la', input, result: { text: 'a\n[image]\nb\n[document]', isError: false } });
   expect(s.items[1]).toMatchObject({ result: { text: '/tmp', isError: false } });
 });
 
 test('an error result marks the item and keeps the text', () => {
-  const s = fold([toolUse(), toolResult([{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'boom' }])]);
+  const s = fold([toolUse(), toolResult('t1', 'boom', true)]);
   expect(s.items[0]).toMatchObject({ result: { text: 'boom', isError: true } });
 });
 
-test('a tool_result user message never makes a bubble; an orphan result is ignored', () => {
-  const s = fold([
-    toolResult([{ type: 'tool_result', tool_use_id: 'ghost', content: 'early' }]),
-    toolUse(),
-    toolResult([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }, { type: 'text', text: 'stray text' }]),
-  ]);
+test('a tool result never makes a bubble; a result for an unknown tool id is ignored', () => {
+  const s = fold([toolResult('ghost', 'early'), toolUse(), toolResult('t1', 'ok')]);
   expect(s.items.map((i) => i.kind)).toEqual(['tool']);
   expect(s.items[0]).toMatchObject({ result: { text: 'ok' } });
   expect(s.busy).toBe(false);
@@ -99,11 +95,9 @@ test('permission-done records the answer', () => {
   expect(s.items).toEqual([{ kind: 'permission', id: 'p1', toolName: 'Bash', input: { command: 'x' }, answer: false }]);
 });
 
-test('subagent tool lines are sub; subagent text is not added', () => {
-  const s = fold([
-    start('p'), delta('x', 'p'),
-    assistant([{ type: 'text', text: 'sub text' }, { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/a' } }], 'a2', 'p'),
-  ]);
+// that a sub-agent's text never becomes an event is the mapper's (map.test.ts)
+test('subagent tool lines are sub', () => {
+  const s = fold([agent({ t: 'tool-call', id: 't2', name: 'Read', input: { file_path: '/a' }, sub: true })]);
   expect(s.items).toEqual([{ kind: 'tool', id: 't2', name: 'Read', arg: '/a', sub: true, input: { file_path: '/a' } }]);
 });
 
@@ -122,22 +116,22 @@ test('session only sets the session; the resumed marker alone adds the notice; s
   expect(() => reduce(withItem, result())).not.toThrow();
 });
 
-test('a conversation with init every turn shows no notice; replayed history plus marker shows exactly one', () => {
-  const init = (id: string) => sdk({ type: 'system', subtype: 'init', session_id: id });
+// the CLI's init every turn is server-internal (never sent); the server re-announces `session` instead
+test('a conversation with session every turn shows no notice; replayed history plus marker shows exactly one', () => {
   const session = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r', title: null, model: null });
-  const live = fold([session('s1'), user(), init('s1'), result(), user({ id: 'u2' }), init('s1'), session('s1'), result()]);
+  const live = fold([session('s1'), user(), session('s1'), result(), user({ id: 'u2' }), session('s1'), result()]);
   expect(live.items.some((i) => i.kind === 'notice')).toBe(false);
   const resumed = reduce(emptyFeed, { kind: 'replay', events: [user({ historic: true }), { kind: 'resumed', id: 's1' }, session('s1')] });
-  const after = fold([user({ id: 'u3' }), init('s1'), result()], resumed);
+  const after = fold([user({ id: 'u3' }), session('s1'), result()], resumed);
   expect(after.items.filter((i) => i.kind === 'notice')).toHaveLength(1);
 });
 
 test('interrupted stream is closed at result; a later assistant without a start stays separate', () => {
   const s = fold([
     user(), start(), delta('part'),
-    result({ result: '', terminal_reason: 'aborted_streaming' }),
+    result({ stop: 'interrupted' }),
     user({ id: 'u2' }),
-    assistant([{ type: 'text', text: 'fresh' }], 'a9'),
+    message('a9:0', 'fresh'),
   ]);
   const asst = s.items.filter((i) => i.kind === 'assistant');
   expect(asst).toEqual([
@@ -152,7 +146,7 @@ test('interrupted stream is closed at result; a later assistant without a start 
 test('two streamed text blocks are finalised in content order', () => {
   const s = fold([
     start(), delta('one'), start(), delta('two'),
-    assistant([{ type: 'text', text: 'one' }, { type: 'text', text: 'two' }], 'a3'),
+    message('a3:0', 'one'), message('a3:1', 'two'),
   ]);
   expect(s.items).toEqual([
     { kind: 'assistant', id: 'a3:0', text: 'one', final: true },
@@ -162,80 +156,79 @@ test('two streamed text blocks are finalised in content order', () => {
 
 test('replay keeps the folded busy: mid-turn history is busy, finished is not', () => {
   expect(reduce(emptyFeed, { kind: 'replay', events: [user()] }).busy).toBe(true);
-  expect(reduce(emptyFeed, { kind: 'replay', events: [user(), result({ user_message_uuids: ['u1'] })] }).busy).toBe(false);
+  expect(reduce(emptyFeed, { kind: 'replay', events: [user(), result({ answers: ['u1'] })] }).busy).toBe(false);
 });
 
 const lastDone = (s: FeedState) => s.items.filter((i) => i.kind === 'done').at(-1);
 
-test('interrupt results: the CLI ends the turn with subtype success and an aborted terminal_reason', () => {
-  expect(lastDone(fold([user(), result({ result: '', terminal_reason: 'aborted_streaming' })]))).toMatchObject({ status: 'interrupted' });
-  expect(lastDone(fold([user(), result({ result: '', terminal_reason: 'aborted_tools' })]))).toMatchObject({ status: 'interrupted' });
-  expect(lastDone(fold([user(), result({ subtype: 'error_during_execution', is_error: false, errors: [] })]))).toMatchObject({ status: 'interrupted' });
-  expect(lastDone(fold([user(), result({ terminal_reason: 'completed' })]))).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'done' });
+// which CLI results are interruptions (aborted terminal_reason, error_during_execution without is_error) is the mapper's (map.test.ts)
+test('the turn-end stop becomes the done line status', () => {
+  expect(lastDone(fold([user(), result({ stop: 'interrupted' })]))).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+  expect(lastDone(fold([user(), result()]))).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'done' });
 });
 
-test('error results show their text; a crash is an error, not an interruption', () => {
-  const crash = lastDone(fold([user(), result({ subtype: 'error_during_execution', is_error: true, result: undefined, errors: ['agent session ended'] })]));
+// where the error text comes from (result, errors[] joined) is the mapper's (map.test.ts)
+test('failed turns show their error text; one without text has no error key', () => {
+  const crash = lastDone(fold([user(), result({ stop: 'failed', error: 'agent session ended', answers: 'all' })]));
   expect(crash).toMatchObject({ status: 'failed', error: 'agent session ended' });
-  const two = lastDone(fold([user(), result({ subtype: 'error_max_turns', is_error: true, result: undefined, errors: ['a', 'b'] })]));
+  const two = lastDone(fold([user(), result({ stop: 'failed', error: 'a\nb' })]));
   expect(two).toMatchObject({ status: 'failed', error: 'a\nb' });
-  const api = lastDone(fold([user(), result({ is_error: true, result: 'API Error: 500', terminal_reason: 'api_error' })]));
-  expect(api).toMatchObject({ status: 'failed', error: 'API Error: 500' });
-  const bare = lastDone(fold([user(), result({ subtype: 'error_max_budget_usd', is_error: true, result: undefined, errors: [] })]));
+  const bare = lastDone(fold([user(), result({ stop: 'failed' })]));
   expect(bare).toMatchObject({ status: 'failed' });
   expect(bare).not.toHaveProperty('error');
 });
 
-test('a result with queued_turn_count > 0 keeps busy until the queued turn ends', () => {
-  const s1 = fold([user(), user({ id: 'u2' }), result({ queued_turn_count: 1, user_message_uuids: ['u1', 'u2'] })]);
+test('a turn-end with queued > 0 keeps busy until the queued turn ends', () => {
+  const s1 = fold([user(), user({ id: 'u2' }), result({ queued: 1, answers: ['u1', 'u2'] })]);
   expect(s1.busy).toBe(true);
   expect(lastDone(s1)).toMatchObject({ status: 'done' });
-  expect(reduce(s1, result({ queued_turn_count: 0 })).busy).toBe(false);
-  expect(fold([user(), result({ user_message_uuids: ['u1'] })]).busy).toBe(false); // absent counts as 0
+  expect(reduce(s1, result({ queued: 0 })).busy).toBe(false);
+  expect(fold([user(), result({ answers: ['u1'] })]).busy).toBe(false);
 });
 
-test('busy follows unanswered sends: a result answers the sends named in user_message_uuids', () => {
+test('busy follows unanswered sends: a turn-end answers the sends it names', () => {
   // the real CLI reports queued_turn_count 0 even with a send queued, so busy cannot rely on it
-  const s1 = fold([user(), user({ id: 'u2' }), result({ queued_turn_count: 0, user_message_uuids: ['u1'] })]);
+  const s1 = fold([user(), user({ id: 'u2' }), result({ queued: 0, answers: ['u1'] })]);
   expect(s1.busy).toBe(true);
-  expect(reduce(s1, result({ user_message_uuids: ['u2'] })).busy).toBe(false);
+  expect(reduce(s1, result({ answers: ['u2'] })).busy).toBe(false);
   // one turn may consume several sends
-  expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuids: ['u1', 'u2'] })]).busy).toBe(false);
-  // fallback without the list: user_message_uuid; an error result naming nothing (crash) answers every waiting send; a success naming nothing answers none
-  expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuid: 'u2' })]).busy).toBe(true);
-  expect(fold([user(), user({ id: 'u2' }), result({ user_message_uuid: 'u2' }), result({ user_message_uuid: 'u1' })]).busy).toBe(false);
+  expect(fold([user(), user({ id: 'u2' }), result({ answers: ['u1', 'u2'] })]).busy).toBe(false);
+  // answered out of order (the single user_message_uuid fallback is the mapper's, map.test.ts)
+  expect(fold([user(), user({ id: 'u2' }), result({ answers: ['u2'] })]).busy).toBe(true);
+  expect(fold([user(), user({ id: 'u2' }), result({ answers: ['u2'] }), result({ answers: ['u1'] })]).busy).toBe(false);
   // historic (transcript) sends are never waited for
-  expect(fold([user({ historic: true }), user({ id: 'u2' }), result({ user_message_uuids: ['u2'] })]).busy).toBe(false);
+  expect(fold([user({ historic: true }), user({ id: 'u2' }), result({ answers: ['u2'] })]).busy).toBe(false);
 });
 
-test('a uuid-less result (crash) clears every waiting send, not just the oldest', () => {
-  const s = fold([user(), user({ id: 'u2' }), sdk({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: ['boom'] })]);
+test('a turn-end answering all (a crash) clears every waiting send, not just the oldest', () => {
+  const s = fold([user(), user({ id: 'u2' }), result({ stop: 'failed', secs: 0, error: 'boom', answers: 'all' })]);
   expect(s.waiting).toEqual([]);
   expect(s.busy).toBe(false);
 });
 
-test('a uuid-less SUCCESS result (task-notification turn) answers no send; a uuid-less error result answers all', () => {
+test('a turn-end answering none (task-notification turn) keeps every send waiting; one answering all clears them', () => {
   const s = fold([user(), result()]);
   expect(s.busy).toBe(true);
   expect(s.waiting).toEqual(['u1']);
-  const e = reduce(s, sdk({ type: 'result', subtype: 'error_during_execution', is_error: true, duration_ms: 0, errors: ['x'] }));
+  const e = reduce(s, result({ stop: 'failed', secs: 0, error: 'x', answers: 'all' }));
   expect(e.waiting).toEqual([]);
   expect(e.busy).toBe(false);
 });
 
-test('command_lifecycle cancelled removes that send from waiting', () => {
+// that only command_lifecycle `cancelled` becomes an event is the mapper's (map.test.ts)
+test('cancelled removes that send from waiting', () => {
   const s1 = fold([user()]);
   expect(s1.busy).toBe(true);
-  const s2 = reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'u1', state: 'cancelled' }));
+  const s2 = reduce(s1, agent({ t: 'cancelled', sendId: 'u1' }));
   expect(s2.waiting).toEqual([]);
   expect(s2.busy).toBe(false);
-  // other states and other ids change nothing
-  expect(reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'u1', state: 'started' }))).toBe(s1);
-  expect(reduce(s1, sdk({ type: 'command_lifecycle', command_uuid: 'zz', state: 'cancelled' })).waiting).toEqual(['u1']);
+  // other ids change nothing
+  expect(reduce(s1, agent({ t: 'cancelled', sendId: 'zz' }))).toBe(s1);
+  expect(reduce(s1, agent({ t: 'cancelled', sendId: 'zz' })).waiting).toEqual(['u1']);
 });
 
 test('turnSeq counts live results only; a replay keeps the live counter', () => {
-  const res = { kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as unknown as ServerEvent;
+  const res = result();
   let s = reduce(emptyFeed, res);
   expect(s.turnSeq).toBe(1);
   s = reduce(s, { kind: 'replay', events: [res, res] });
@@ -246,7 +239,7 @@ test('turnSeq counts live results only; a replay keeps the live counter', () => 
 test('a live reset frame empties the feed and adds the cleared line, keeping the session', () => {
   const s0 = fold([{ kind: 'session', id: 'old', root: '/r', title: null, model: null }, user(), result()]);
   expect(s0.items.length).toBe(2);
-  const s = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7)], s0);
+  const s = fold([agent({ t: 'reset', newId: 'new' }, 7)], s0);
   expect(s.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
   expect(s.busy).toBe(false);
   expect(s.session).toEqual({ id: 'old', root: '/r', title: null, model: null }); // the session event that follows updates it
@@ -256,47 +249,50 @@ test('a replay of the new session carries no cleared line', () => {
   expect(reduce(emptyFeed, { kind: 'replay', events: [] }).items).toEqual([]);
 });
 
-test('compact_boundary adds a compacted line, live or replayed', () => {
-  const cb = sdk({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual', pre_tokens: 12345 } }, 9);
+test('compacted adds a compacted line, live or replayed', () => {
+  const cb = agent({ t: 'compacted', preTokens: 12345 }, 9);
   const want = [{ kind: 'marker', what: 'compacted', pre: 12345, ts: 9 }];
   expect(fold([cb]).items).toEqual(want);
   expect(reduce(emptyFeed, { kind: 'replay', events: [cb] }).items).toEqual(want);
 });
 
-const status = (status: string | null, extra: Record<string, unknown> = {}, ts = 1) => sdk({ type: 'system', subtype: 'status', status, ...extra }, ts);
+const compacting = (ts = 1) => agent({ t: 'compacting' }, ts);
 
-test('a compaction shows while it runs: status compacting to status null, then the boundary with its duration', () => {
-  const running = fold([status('compacting', {}, 20)]);
+test('a compaction shows while it runs: compacting to compact-end, then compacted with its duration', () => {
+  const running = fold([compacting(20)]);
   expect(running.compacting).toBe(20);
   expect(running.items).toEqual([]);
   const ended = fold([
-    status(null, { compact_result: 'success' }, 80),
-    sdk({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 900000, duration_ms: 61000 } }, 80),
+    agent({ t: 'compact-end' }, 80),
+    agent({ t: 'compacted', preTokens: 900000, ms: 61000 }, 80),
   ], running);
   expect(ended.compacting).toBeNull();
   expect(ended.items).toEqual([{ kind: 'marker', what: 'compacted', pre: 900000, ms: 61000, ts: 80 }]);
 });
 
 test('a reload mid-compaction keeps its start time; a failed one leaves its error line', () => {
-  const replayed = reduce(emptyFeed, { kind: 'replay', events: [user(), status('compacting', {}, 20)] });
+  const replayed = reduce(emptyFeed, { kind: 'replay', events: [user(), compacting(20)] });
   expect(replayed.compacting).toBe(20);
-  const failed = reduce(replayed, status(null, { compact_result: 'failed', compact_error: 'prompt too long' }, 30));
+  const failed = reduce(replayed, agent({ t: 'compact-failed', error: 'prompt too long' }, 30));
   expect(failed.compacting).toBeNull();
   expect(failed.items.at(-1)).toEqual({ kind: 'marker', what: 'compactFailed', error: 'prompt too long', ts: 30 });
 });
 
-test('other status frames leave the compaction alone; a result or a clear ends a stuck one', () => {
-  const running = fold([status('compacting', {}, 20)]);
-  expect(reduce(running, status('requesting')).compacting).toBe(20);
-  expect(reduce(running, status(null, { permissionMode: 'plan' })).compacting).toBeNull();
-  expect(reduce(emptyFeed, status(null, { compact_result: 'failed' })).items).toEqual([]); // no compaction was shown
+// other status values map to nothing (map.test.ts); a mode-only status maps to `mode` alone, so it no longer ends a compaction
+test('other events leave the compaction alone; a failure without one adds nothing; a turn-end or a clear ends a stuck one', () => {
+  const running = fold([compacting(20)]);
+  expect(reduce(running, agent({ t: 'mode', mode: 'plan' })).compacting).toBe(20);
+  expect(reduce(running, agent({ t: 'suggestion', text: 'x' })).compacting).toBe(20);
+  expect(reduce(emptyFeed, agent({ t: 'compact-failed' })).items).toEqual([]); // no compaction was shown
+  expect(reduce(emptyFeed, agent({ t: 'compact-end' }))).toBe(emptyFeed);
+  expect(reduce(running, agent({ t: 'compact-end' })).compacting).toBeNull();
   expect(reduce(running, result()).compacting).toBeNull();
-  expect(reduce(running, sdk({ type: 'conversation_reset', new_conversation_id: 'n' })).compacting).toBeNull();
+  expect(reduce(running, agent({ t: 'reset', newId: 'n' })).compacting).toBeNull();
 });
 
 test('the live result that follows a clear adds no done line; one after a new message does', () => {
   const s0 = fold([user(), result()]);
-  const cleared = fold([sdk({ type: 'conversation_reset', new_conversation_id: 'new' }, 7), result({ duration_ms: 0 })], s0);
+  const cleared = fold([agent({ t: 'reset', newId: 'new' }, 7), result({ secs: 0 })], s0);
   expect(cleared.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
   expect(cleared.busy).toBe(false);
   const next = fold([user({ id: 'u2' }), result()], cleared);

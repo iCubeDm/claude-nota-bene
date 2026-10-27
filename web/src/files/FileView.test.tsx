@@ -42,7 +42,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-const result = (): ServerEvent => ({ kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as unknown as ServerEvent);
+const result = (): ServerEvent => ({ kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: 'none', queued: 0 } });
 function setup(path: string, active = true) {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   const ui = (a: boolean) => <Provider store={store}><TooltipProvider><FileView path={path} active={a} /></TooltipProvider></Provider>;

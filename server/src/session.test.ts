@@ -370,22 +370,11 @@ describe('session manager', () => {
   });
 });
 
-// The sends a client still waits for, read from the events as the protocol defines it (R-M7-14): a live `user` waits,
-// a `turn-end` answers its `answers` ('all': every one), a `cancelled` drops its send. It stands in for the web
-// reducer until that reads `agent` events (M7-08 may point these tests back at web/src/store/feed.ts).
-function waitingOf(events: ServerEvent[]): string[] {
-  let waiting: string[] = [];
-  for (const ev of events) {
-    if (ev.kind === 'user' && !ev.historic) waiting.push(ev.id);
-    else if (ev.kind === 'agent' && ev.e.t === 'turn-end') {
-      const { answers } = ev.e;
-      waiting = answers === 'all' ? [] : answers === 'none' ? waiting : waiting.filter((id) => !answers.includes(id));
-    } else if (ev.kind === 'agent' && ev.e.t === 'cancelled') {
-      const { sendId } = ev.e;
-      waiting = waiting.filter((id) => id !== sendId);
-    }
-  }
-  return waiting;
+// the web reducer decides what the user sees; loaded by variable path so the server project does not compile web sources
+async function feedOf(events: ServerEvent[]): Promise<{ busy: boolean; waiting: string[] }> {
+  const href = new URL('../../web/src/store/feed.ts', import.meta.url).href;
+  const { reduce, emptyFeed } = (await import(/* @vite-ignore */ href)) as { reduce: (s: unknown, e: ServerEvent) => never; emptyFeed: unknown };
+  return events.reduce(reduce as never, emptyFeed as never) as never;
 }
 
 describe('busy cannot get stuck', () => {
@@ -408,7 +397,9 @@ describe('busy cannot get stuck', () => {
     expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: 0, error: 'stdin closed', answers: ['u1'], queued: 0 });
     const attached: ServerEvent[] = [];
     hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
-    expect(waitingOf(attached)).toEqual([]);
+    const f = await feedOf(attached);
+    expect(f.waiting).toEqual([]);
+    expect(f.busy).toBe(false);
     expect(s.busy()).toBe(false);
   });
 
@@ -440,7 +431,9 @@ describe('busy cannot get stuck', () => {
     const attached: ServerEvent[] = [];
     hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
     expect(agentOf(events, 'turn-end')[0]!.e).toMatchObject({ stop: 'failed', error: 'dead', answers: 'all' });
-    expect(waitingOf(attached)).toEqual([]);
+    const f = await feedOf(attached);
+    expect(f.waiting).toEqual([]);
+    expect(f.busy).toBe(false);
     expect(s.busy()).toBe(false);
   });
 

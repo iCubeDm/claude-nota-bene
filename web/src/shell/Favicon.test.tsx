@@ -16,10 +16,10 @@ beforeEach(() => {
 });
 afterEach(() => { stop(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-const sdk = (m: Record<string, unknown>): ServerEvent => ({ kind: 'sdk', ts: 1, m } as unknown as ServerEvent);
+const turnEnd = (id: string): ServerEvent => ({ kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: [id], queued: 0 } });
 const user: ServerEvent = { kind: 'user', id: 'u1', text: 'hi', ts: 1 } as ServerEvent;
 const perm = (id: string): ServerEvent => ({ kind: 'permission', id, toolName: 'Bash', input: {}, ts: 2 } as unknown as ServerEvent);
-const result: ServerEvent = sdk({ type: 'result', subtype: 'success', is_error: false, duration_ms: 5, user_message_uuids: ['u1'] });
+const result: ServerEvent = turnEnd('u1');
 
 function setup() {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
@@ -71,14 +71,14 @@ it('done only when a live result lands while hidden or unfocused; focus clears i
   expect(fill()).toBe(FAV.idle); // focused: nothing to announce
   focused = false;
   ev({ kind: 'user', id: 'u2', text: 'again', ts: 2 } as ServerEvent);
-  ev(sdk({ type: 'result', subtype: 'success', is_error: false, duration_ms: 5, user_message_uuids: ['u2'] }));
+  ev(turnEnd('u2'));
   expect(fill()).toBe(FAV.done);
   focused = true;
   act(() => void window.dispatchEvent(new Event('focus')));
   expect(fill()).toBe(FAV.idle);
   hidden = true;
   ev({ kind: 'user', id: 'u3', text: 'x', ts: 3 } as ServerEvent);
-  ev(sdk({ type: 'result', subtype: 'success', is_error: false, duration_ms: 5, user_message_uuids: ['u3'] }));
+  ev(turnEnd('u3'));
   expect(fill()).toBe(FAV.done);
   hidden = false;
   act(() => void document.dispatchEvent(new Event('visibilitychange')));

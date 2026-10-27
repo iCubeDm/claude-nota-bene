@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-const sdkResult = (historic = false): ServerEvent => ({ kind: 'sdk', ts: 1, m: { type: 'result', subtype: 'success', duration_ms: 1 } } as unknown as ServerEvent);
+const turnEnd = (historic = false): ServerEvent => ({ kind: 'agent', ts: 1, e: { t: 'turn-end', stop: 'done', secs: 0, answers: 'none', queued: 0 } });
 
 function setup() {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
@@ -70,10 +70,10 @@ it('refresh keeps open folders, drops vanished ones, and a live result triggers 
   calls.length = 0;
   fs.src = [{ name: 'lib', dir: true }, { name: 'main.ts', dir: false }, { name: 'new.ts', dir: false }];
   // replay with a result inside: no refresh
-  live(store, { kind: 'replay', events: [sdkResult(true)] });
+  live(store, { kind: 'replay', events: [turnEnd(true)] });
   await new Promise((r) => setTimeout(r, 20));
   expect(calls).toEqual([]);
-  live(store, sdkResult());
+  live(store, turnEnd());
   await row('new.ts'); // src is still open and reloaded
   expect(calls).toContain('/tree?path=');
   // folder vanishes on the next refresh: silently dropped
@@ -226,7 +226,7 @@ it('Expand all works after an earlier load error, and a turn ending during the r
   vi.mocked(fetch).mockImplementation(async (u) => { if (String(u).includes('path=src')) await gate; return real(u as string); });
   fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
   calls.length = 0;
-  live(store, sdkResult());
+  live(store, turnEnd());
   await new Promise((r) => setTimeout(r, 20));
   expect(calls.filter((u) => u === '/tree?path=')).toEqual([]); // no refresh across the run
   release();

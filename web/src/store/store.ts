@@ -22,9 +22,9 @@ import { emptyFeed, reduce, type FeedState } from './feed.ts';
 
 /** A live compaction's duration feeds the estimate of the next one (a replay is history: it would count twice). */
 const compactTimingMiddleware: Middleware = () => (next) => (action) => {
-  if (serverEvent.match(action) && action.payload.kind === 'sdk') {
-    const m = action.payload.m as { type?: string; subtype?: string; compact_metadata?: { duration_ms?: number } };
-    if (m.type === 'system' && m.subtype === 'compact_boundary' && m.compact_metadata?.duration_ms) recordCompactMs(m.compact_metadata.duration_ms);
+  if (serverEvent.match(action) && action.payload.kind === 'agent') {
+    const e = action.payload.e;
+    if (e.t === 'compacted' && e.ms) recordCompactMs(e.ms);
   }
   return next(action);
 };

@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import type { ClientMessage, ServerEvent, WireAgentEvent } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { Composer } from '@/composer/Composer.tsx';
 import { Feed } from '@/feed/Feed.tsx';
@@ -36,7 +36,7 @@ function setup() {
   const commands = () => sent.filter((m) => m.type === 'command');
   return { sent, store, emit, commands };
 }
-const sdk = (m: Record<string, unknown>): ServerEvent => ({ kind: 'sdk', m: m as never, ts: Date.now() });
+const agent = (e: WireAgentEvent): ServerEvent => ({ kind: 'agent', e, ts: Date.now() });
 const sess = (id: string): ServerEvent => ({ kind: 'session', id, root: '/r', title: null, model: null });
 
 it('Clear asks first and sends nothing until confirmed; Enter confirms', async () => {
@@ -81,10 +81,10 @@ it('a reset empties the feed and shows the cleared line; a boundary shows the co
   const { emit } = setup();
   emit({ kind: 'user', id: 'u1', text: 'old message', ts: 1 });
   expect(screen.getByText(/old message/)).toBeInTheDocument();
-  emit({ kind: 'replay', events: [] }, sdk({ type: 'conversation_reset' }));
+  emit({ kind: 'replay', events: [] }, agent({ t: 'reset' }));
   expect(screen.queryByText(/old message/)).toBeNull();
   expect(screen.getByText(/new conversation · context cleared/)).toBeInTheDocument();
-  emit(sdk({ type: 'system', subtype: 'compact_boundary', compact_metadata: { pre_tokens: 12000 } }));
+  emit(agent({ t: 'compacted', preTokens: 12000 }));
   expect(screen.getByText(/context compacted · was 12k tokens/)).toBeInTheDocument();
 });
 
@@ -95,7 +95,7 @@ it('clearing with a pending chat comment ends with an empty panel, no re-push an
   emit({ kind: 'comments', items: [c] });
   expect(store.getState().comments.items).toHaveLength(1);
   // what the server does on /clear: a replay [], the live frame, the new session, then that session's (empty) set
-  emit({ kind: 'replay', events: [] }, sdk({ type: 'conversation_reset' }), sess('new'), { kind: 'comments', items: [] });
+  emit({ kind: 'replay', events: [] }, agent({ t: 'reset' }), sess('new'), { kind: 'comments', items: [] });
   expect(store.getState().comments.items).toEqual([]);
   expect(sent.filter((m) => m.type === 'comments')).toEqual([]);
   expect(store.getState().feed.items.some((i) => i.kind === 'notice')).toBe(false);
@@ -170,6 +170,6 @@ it("the server's idle /compact is a muted line, not the user's bubble", () => {
   emit(idleState(true), { kind: 'user', id: 'i1', text: '/compact', ts: Date.now(), idle: true });
   expect(document.querySelector('[data-kind="user"]')).toBeNull();
   expect(document.querySelector('[data-kind="idle-compact"]')).toHaveTextContent(/⇣ idle compaction · 50 min after the turn/);
-  emit(sdk({ type: 'system', subtype: 'status', status: 'compacting' }));
+  emit(agent({ t: 'compacting' }));
   expect(document.querySelector('[data-kind="compacting"]')).not.toBeNull();
 });

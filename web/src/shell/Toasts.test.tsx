@@ -114,7 +114,6 @@ it('restart sends once, shows restarting… until the next session, and is disab
 
 it('restart stays enabled while the agent is busy', () => {
   const { ev, sent } = setup();
-  ev({ kind: 'sdk', m: { type: 'system', subtype: 'init' } } as never);
   ev({ kind: 'user', id: 'u', text: 'hi', ts: 1 } as never);
   fireEvent.click(screen.getByRole('button', { name: /Agent/ }));
   expect(sent.some((m) => m.type === 'restart')).toBe(true);
