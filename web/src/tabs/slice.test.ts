@@ -79,7 +79,7 @@ it('persists paths and active (never the chat) under tabs:<root>', () => {
   store.dispatch(openFile('a.md'));
   store.dispatch(openFile('b.md'));
   store.dispatch(activate(fileTabId('a.md')));
-  expect(JSON.parse(localStorage.getItem('tabs:/r1')!)).toEqual({ files: [{ path: 'a.md' }, { path: 'b.md' }], active: 'file:a.md' });
+  expect(JSON.parse(localStorage.getItem('tabs:/r1')!)).toEqual({ tabs: [{ file: { path: 'a.md' } }, { file: { path: 'b.md' } }], active: 'file:a.md' });
 });
 
 it('restores per root, once; another root does not restore', () => {
@@ -105,7 +105,7 @@ it('ignores corrupt stored data', () => {
 });
 
 it('a restore leaves the saved tabs in storage (the subscriber must not write the pre-restore state back)', () => {
-  const saved = JSON.stringify({ files: [{ path: 'a.md' }, { path: 'b.md' }], active: 'file:b.md' });
+  const saved = JSON.stringify({ tabs: [{ file: { path: 'a.md' } }, { file: { path: 'b.md' } }], active: 'file:b.md' });
   localStorage.setItem('tabs:/r1', saved);
   const m = mk();
   m.session('/r1');
@@ -122,7 +122,7 @@ it('another root replaces the tabs with its saved ones (no merge); switching bac
   m.session('/r2');
   expect(ids(m.store)).toEqual(['chat', 'file:x.md']);
   expect(selectTabs(m.store.getState()).active).toBe('file:x.md');
-  expect(JSON.parse(localStorage.getItem('tabs:/r1')!).files).toEqual([{ path: 'a.md' }, { path: 'b.md' }]);
+  expect(JSON.parse(localStorage.getItem('tabs:/r1')!).tabs).toEqual([{ file: { path: 'a.md' } }, { file: { path: 'b.md' } }]);
   m.store.dispatch(openFile('y.md'));
   m.session('/r1');
   expect(ids(m.store)).toEqual(['chat', 'file:a.md', 'file:b.md']);
@@ -177,7 +177,7 @@ it('a re-root resets the tree to the new root\'s saved folders in this folder\'s
 });
 
 it('a re-root in the real order (replay [], then session) leaves tabs:/r2 and tree:/r2 exactly as saved', () => {
-  const tabs2 = JSON.stringify({ files: [{ path: 'x.md' }, { path: 'y.md', src: 'ref:f', ref: 'f' }], active: 'file:x.md' });
+  const tabs2 = JSON.stringify({ tabs: [{ file: { path: 'x.md' } }, { file: { path: 'y.md', src: 'ref:f', ref: 'f' } }], active: 'file:x.md' });
   const tree2 = JSON.stringify(['docs', 'docs/a']);
   localStorage.setItem('tabs:/r2', tabs2);
   localStorage.setItem('tree:/r2', tree2);
@@ -267,7 +267,7 @@ it('diagram tabs are saved with the file tabs, source included, and restored aft
   a.store.dispatch(openFile('a.md'));
   a.store.dispatch(openDiagram({ source: SRC, lang: 'mermaid' }));
   const id = diagramIds(a.store)[0];
-  expect(JSON.parse(localStorage.getItem('tabs:/p')!).diagrams).toEqual([{ source: SRC, lang: 'mermaid' }]);
+  expect(JSON.parse(localStorage.getItem('tabs:/p')!).tabs).toEqual([{ file: { path: 'a.md' } }, { diagram: { source: SRC, lang: 'mermaid' } }]);
   const b = mk(); // a reload
   b.session('/p');
   expect(ids(b.store)).toEqual(['chat', 'file:a.md', id]);
@@ -281,4 +281,31 @@ it('a closed diagram tab is not offered by reopen (only files are remembered)', 
   store.dispatch(closeTab(diagramIds(store)[0]));
   store.dispatch(reopenClosed());
   expect(diagramIds(store)).toEqual([]);
+});
+
+it('the order of mixed tabs and the active one survive a reload', () => {
+  const a = mk();
+  a.session('/p');
+  a.store.dispatch(openDiagram({ source: SRC, lang: 'mermaid' }));
+  a.store.dispatch(openFile('a.md'));
+  a.store.dispatch(openDiagram({ source: 'graph LR; C-->D', lang: 'mermaid' }));
+  a.store.dispatch(activate(diagramIds(a.store)[0]));
+  const before = ids(a.store);
+  expect(before).toHaveLength(4);
+  expect(before[2]).toBe('file:a.md');
+  const b = mk();
+  b.session('/p');
+  expect(ids(b.store)).toEqual(before);
+  expect(selectTabs(b.store.getState()).active).toBe(diagramIds(a.store)[0]);
+});
+
+it('tabs saved in the older formats ({files}, {paths}) are still read', () => {
+  localStorage.setItem('tabs:/o1', JSON.stringify({ files: [{ path: 'a.md' }], active: 'file:a.md' }));
+  localStorage.setItem('tabs:/o2', JSON.stringify({ paths: ['b.md'], active: 'file:b.md' }));
+  const a = mk();
+  a.session('/o1');
+  expect(ids(a.store)).toEqual(['chat', 'file:a.md']);
+  const b = mk();
+  b.session('/o2');
+  expect(ids(b.store)).toEqual(['chat', 'file:b.md']);
 });

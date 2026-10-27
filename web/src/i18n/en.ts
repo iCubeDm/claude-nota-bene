@@ -124,10 +124,10 @@ export const en: Dict = {
   hk_reveal: 'reveal the current file in the tree',
   hk_composer: 'focus the message box (outside text fields)',
   hkTitle: 'Hotkeys',
-  // Settings tab (M6-15)
   // Diagram tab (M7-01)
   openDiagram: 'Open diagram',
   diagramTab: 'Diagram',
+  // Settings tab (M6-15)
   settings: 'Settings',
   settingsTip: 'Settings: windows, storage, defaults',
   setWindows: 'Windows',

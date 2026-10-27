@@ -139,9 +139,8 @@ function remember(s: TabsState, tabs: Tab[]): void {
 
 function restore(s: TabsState, saved: SavedTabs, merge: boolean): void {
   const have = new Set(merge ? s.open.map((t) => t.id) : ['chat']);
-  const restored = saved.files.map(fileTab).filter((t) => !have.has(t.id) && have.add(t.id));
-  const diagrams = (saved.diagrams ?? []).map(diagramTab).filter((t) => !have.has(t.id) && have.add(t.id));
-  s.open = [CHAT, ...restored, ...diagrams, ...(merge ? s.open.slice(1) : [])];
+  const restored = saved.tabs.map((t) => ('file' in t ? fileTab(t.file) : diagramTab(t.diagram))).filter((t) => !have.has(t.id) && have.add(t.id));
+  s.open = [CHAT, ...restored, ...(merge ? s.open.slice(1) : [])];
   if (idx(s, saved.active) >= 0) s.active = saved.active as Tab['id'];
 }
 
@@ -154,39 +153,38 @@ export const selectActiveTab = (s: RootState): Tab => s.tabs.open.find((t) => t.
 export type SavedFile = { path: string; src?: string; ref?: string };
 /** A saved diagram tab: its source and language (the id and title are made from them). */
 export type SavedDiagram = { source: string; lang: DiagramLang };
-export type SavedTabs = { files: SavedFile[]; diagrams?: SavedDiagram[]; active: string };
+/** One saved tab, in strip order. */
+export type SavedTab = { file: SavedFile } | { diagram: SavedDiagram };
+export type SavedTabs = { tabs: SavedTab[]; active: string };
 
 /**
- * What is stored under `tabs:<root>`: the file tabs (with their source when not 'here'), the diagram tabs (`diagrams`,
- * only when there are some; they come back after the files) and the active id, never the chat tab.
+ * What is stored under `tabs:<root>`: the file tabs (with their source when not 'here') and the diagram tabs (with
+ * their source text), in strip order, and the active id; never the chat tab.
  */
 export const tabsKey = (root: string) => `tabs:${root}`;
-export const serializeTabs = (s: TabsState): SavedTabs => {
-  const diagrams = s.open.flatMap((t) => (t.kind === 'diagram' ? [{ source: t.source, lang: t.lang }] : []));
-  return {
-    files: s.open.flatMap((t) => (t.kind !== 'file' ? [] : t.src === 'here' ? [{ path: t.path }] : [{ path: t.path, src: t.src, ref: t.ref }])),
-    ...(diagrams.length && { diagrams }),
-    active: s.active,
-  };
+export const serializeTabs = (s: TabsState): SavedTabs => ({
+  tabs: s.open.flatMap((t): SavedTab[] =>
+    t.kind === 'file' ? [{ file: t.src === 'here' ? { path: t.path } : { path: t.path, src: t.src, ref: t.ref } }]
+    : t.kind === 'diagram' ? [{ diagram: { source: t.source, lang: t.lang } }]
+    : []),
+  active: s.active,
+});
+const isSavedFile = (f: unknown): f is SavedFile => {
+  const o = f as SavedFile;
+  return !!o && typeof o.path === 'string' && (o.src === undefined || typeof o.src === 'string') && (o.ref === undefined || typeof o.ref === 'string');
 };
 const isSavedDiagram = (d: unknown): d is SavedDiagram => {
   const o = d as SavedDiagram;
   return !!o && typeof o.source === 'string' && (o.lang === 'mermaid' || o.lang === 'svg');
 };
-const isSavedFile = (f: unknown): f is SavedFile => {
-  const o = f as SavedFile;
-  return !!o && typeof o.path === 'string' && (o.src === undefined || typeof o.src === 'string') && (o.ref === undefined || typeof o.ref === 'string');
-};
-/** Reads `{ files, active }`, or the older `{ paths, active }` (this folder only). */
+/** Reads `{ tabs, active }`, or the older `{ files, active }`, or the older `{ paths, active }` (this folder only). */
 export function readSavedTabs(root: string): SavedTabs | null {
   try {
     const v = JSON.parse(localStorage.getItem(tabsKey(root)) ?? 'null');
     const active = typeof v?.active === 'string' ? v.active : 'chat';
-    if (Array.isArray(v?.files) && v.files.every(isSavedFile)) {
-      const diagrams = Array.isArray(v.diagrams) ? v.diagrams.filter(isSavedDiagram) : [];
-      return { files: v.files, ...(diagrams.length && { diagrams }), active };
-    }
-    if (Array.isArray(v?.paths) && v.paths.every((p: unknown) => typeof p === 'string')) return { files: v.paths.map((path: string) => ({ path })), active };
+    if (Array.isArray(v?.tabs) && v.tabs.every((t: SavedTab) => ('file' in t && isSavedFile(t.file)) || ('diagram' in t && isSavedDiagram(t.diagram)))) return { tabs: v.tabs, active };
+    if (Array.isArray(v?.files) && v.files.every(isSavedFile)) return { tabs: v.files.map((file: SavedFile) => ({ file })), active };
+    if (Array.isArray(v?.paths) && v.paths.every((p: unknown) => typeof p === 'string')) return { tabs: v.paths.map((path: string) => ({ file: { path } })), active };
     return null;
   } catch {
     return null;
