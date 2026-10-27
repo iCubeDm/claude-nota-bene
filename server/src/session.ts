@@ -123,7 +123,14 @@ export async function createSessionManager(o: {
   // a fork start: the agent branches off `resume`; until its init names the new id, sessionId is still the SOURCE,
   // which must never be written to the registry
   let forkPending = !!(o.fork && o.resume);
-  let mode: Mode = modeFor(root);
+  // the mode we START an agent in is clamped to the modes it offers (the pref stays as the user set it); a mode the
+  // agent itself reports (init/status) is adopted as it is: the pill shows the truth
+  const startMode = (dir: string): Mode => {
+    const m = modeFor(dir);
+    const { modes } = backend.capabilities;
+    return modes.includes(m) ? m : (modes[0] ?? m);
+  };
+  let mode: Mode = startMode(root);
   let agent: AgentSession | null = null;
   let loop: Promise<void> | null = null; // the running agent's message loop
   // Bumped when a session is torn down (switch, close). Everything an agent can trigger later (its messages, its
@@ -513,7 +520,7 @@ export async function createSessionManager(o: {
       heard = id; // the server sends this id's comments in onSwitch, not through the id listeners
       title = null;
       model = null;
-      mode = modeFor(root);
+      mode = startMode(root);
       stats.reset();
       if (id && !forkPending) {
         try { saveSession(root, id); } catch (e) { reportError(hub, 'session', e); }

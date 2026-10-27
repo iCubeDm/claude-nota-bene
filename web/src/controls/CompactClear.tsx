@@ -5,7 +5,7 @@ import { useT } from '@/i18n/index.ts';
 import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ConfirmDialog } from './ConfirmDialog.tsx';
 import { fmtK } from '@/lib/format.ts';
-import { runCommand, selectCapabilities, selectIdleCompact, selectSwitching, toggleIdleCompact } from './slice.ts';
+import { runCommand, selectCapabilities, selectCapabilitiesKnown, selectIdleCompact, selectSwitching, toggleIdleCompact } from './slice.ts';
 import { REFUSED, useNote } from './useNote.ts';
 
 const ICON = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true } as const;
@@ -18,7 +18,8 @@ export function CompactClear() {
   const busy = useAppSelector((s) => selectBusy(s) || selectSwitching(s));
   const [asking, setAsking] = useState(false);
   const [note, showNote] = useNote();
-  const caps = useAppSelector(selectCapabilities);
+  const caps = useAppSelector(selectCapabilities); // Compact and Clear show from the start (Claude's set until hello)
+  const known = useAppSelector(selectCapabilitiesKnown);
   const idle = useAppSelector(selectIdleCompact);
   const idleOn = !!idle && idle.on && !idle.blocked;
   const idleTip = !idle ? '' : idle.blocked ? t('idleBlocked') : t('idleTip', idle.on, idle.minutes, idle.awayMinutes, fmtK(idle.minTokens));
@@ -34,7 +35,7 @@ export function CompactClear() {
         </TooltipTrigger>
         <TooltipContent className="max-w-[300px] whitespace-pre-line">{t('compactTip')}</TooltipContent>
       </Tooltip>}
-      {idle && caps.idleCompact && caps.compact && (
+      {idle && known?.idleCompact && known.compact && (
         <Tooltip>
           <TooltipTrigger asChild>
             {/* a span keeps the tooltip on a disabled (blocked) button */}

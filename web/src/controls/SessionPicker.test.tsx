@@ -67,6 +67,7 @@ function setup() {
     </Provider>,
   );
   const emit = (...es: ServerEvent[]) => act(() => es.forEach(ev));
+  emit({ kind: 'hello', protocol: 5 }); // capability-gated controls wait for hello (M7-09)
   emit({ kind: 'session', id: A, root: '/Users/me/proj', title: null, model: null });
   const switches = () => sent.filter((m) => m.type === 'switch');
   return { sent, store, emit, switches, offline: () => act(() => state('closed')) };

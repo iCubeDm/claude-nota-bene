@@ -250,6 +250,15 @@ describe('server', () => {
       expect(backend.setModes).toEqual([]);
     });
 
+    it('--fork is dropped when the agent cannot fork, kept when it can', async () => {
+      for (const [fork, want] of [[false, undefined], [true, true]] as const) {
+        const backend = fakeBackend([{ text: 'x' }], { capabilities: { fork } });
+        const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist, resume: 'abc', fork: true });
+        closers.push(s.close);
+        expect(backend.starts[0]?.fork).toBe(want);
+      }
+    });
+
     it('refuses idle-compact when the agent has none', async () => {
       const { s } = await bootCaps({ idleCompact: false });
       const c = await connect(s.url);

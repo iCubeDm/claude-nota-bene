@@ -289,7 +289,7 @@ export async function startServer(o: {
             manager.activity();
             break;
           case 'idle-compact':
-            if (!caps.idleCompact) return refuse('idle-compact');
+            if (!(caps.idleCompact && caps.compact)) return refuse('idle-compact');
             manager.setIdleCompact(msg.on);
             break;
           case 'restart':

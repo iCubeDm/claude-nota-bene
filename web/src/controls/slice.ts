@@ -24,13 +24,14 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
   protocol: number;
   /**
    * what the agent behind the server can do (R-M7-15), from `hello`. A `hello` without it (a server older than protocol 5)
-   * means Claude's full set, so nothing disappears against an old server. Kept over a dropped socket until the next `hello`.
+   * means Claude's full set, so nothing disappears against an old server. null until the first `hello`: the gated controls
+   * (mode pill, meters, idle toggle) wait for it, so they do not flash and vanish. Kept over a dropped socket until the next `hello`.
    */
-  capabilities: Capabilities;
+  capabilities: Capabilities | null;
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null, protocol: 0, capabilities: CLAUDE_CAPABILITIES };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, idleCompact: null, protocol: 0, capabilities: null };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -114,7 +115,9 @@ const { restoreCleared, switchStarted, switchCleared } = controlsSlice.actions;
 
 export const selectMode = (s: RootState): Mode | null => s.controls.mode;
 export const selectSuggestion = (s: RootState): string => s.controls.suggestion;
-export const selectCapabilities = (s: RootState): Capabilities => s.controls.capabilities;
+/** null until `hello`: the controls that would flash and vanish wait; the others default to Claude's set */
+export const selectCapabilitiesKnown = (s: RootState): Capabilities | null => s.controls.capabilities;
+export const selectCapabilities = (s: RootState): Capabilities => s.controls.capabilities ?? CLAUDE_CAPABILITIES;
 export const selectSwitching = (s: RootState): boolean => s.controls.switching !== null;
 export const selectRestarting = (s: RootState): boolean => s.controls.restarting;
 

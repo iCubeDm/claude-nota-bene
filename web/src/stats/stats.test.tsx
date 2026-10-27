@@ -20,6 +20,7 @@ function setup() {
       <TooltipProvider><Meters /></TooltipProvider>
     </Provider>,
   );
+  act(() => { store.dispatch(serverEvent({ kind: 'hello', protocol: 5 } as ServerEvent)); }); // gated on hello (M7-09)
   const stats = (s: Stats) => act(() => { store.dispatch(serverEvent({ kind: 'stats', stats: s } as ServerEvent)); });
   return { stats, container };
 }
@@ -88,6 +89,7 @@ it('the meters sit in the composer tools row, left of the compact and clear butt
   const { Composer } = await import('@/composer/Composer.tsx');
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   render(<Provider store={store}><TooltipProvider><Composer /></TooltipProvider></Provider>);
+  act(() => { store.dispatch(serverEvent({ kind: 'hello', protocol: 5 } as ServerEvent)); }); // gated on hello (M7-09)
   act(() => { store.dispatch(serverEvent({ kind: 'stats', stats: { context: ctx(40), limits: null, cost: null } } as ServerEvent)); });
   const meter = screen.getByRole('meter');
   const compact = screen.getByRole('button', { name: /Compact context/ });

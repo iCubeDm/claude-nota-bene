@@ -33,6 +33,7 @@ function setup() {
     </Provider>,
   );
   const emit = (...es: ServerEvent[]) => act(() => es.forEach(ev));
+  act(() => ev({ kind: 'hello', protocol: 5 })); // capability-gated controls wait for hello (M7-09)
   const commands = () => sent.filter((m) => m.type === 'command');
   return { sent, store, emit, commands };
 }

@@ -593,9 +593,34 @@ describe('compact-end and idle compaction', () => {
     expect(events.find((e) => e.kind === 'user' && e.idle)).toMatchObject({ text: '/compact' });
     s.close();
   });
+
+  it('capabilities: compact:false means idle compaction never fires', async () => {
+    const { backend, sends, push } = pushed();
+    const nb: AgentBackend = { ...backend, capabilities: { ...CLAUDE_CAPABILITIES, compact: false } };
+    const { hub } = setup(nb);
+    const s = await createSessionManager({ hub, backend: nb, cwd: '/proj', idle, idleOffInSettings: () => false });
+    s.send({ id: 'u1', text: 'hi' });
+    await until(() => sends.length === 1);
+    push(result(['u1']));
+    await new Promise((r) => setTimeout(r, idle.afterMs * 4));
+    expect(idleSends(sends)).toHaveLength(0);
+    s.close();
+  });
 });
 
 describe('permission mode', () => {
+  it('capabilities: the agent starts in a mode it offers (a persisted \'auto\' becomes the first of `modes`); the pref stays', async () => {
+    setModePref('/proj', 'auto');
+    const inner = fakeBackend([{ text: 'a' }], { capabilities: { modes: ['default'] } });
+    const { hub, events } = setup(inner);
+    const s = await createSessionManager({ hub, backend: inner, cwd: '/proj' });
+    expect(inner.startModes).toEqual(['default']);
+    expect(s.mode()).toBe('default');
+    expect(readPrefs().modes[prefsKey('/proj')]).toBe('auto');
+    void events;
+    s.close();
+  });
+
   const modeEvents = (events: ServerEvent[]) => events.filter((e) => e.kind === 'mode').map((e) => (e as { mode: string }).mode);
 
   it('starts in the mode saved for the project, auto otherwise', async () => {

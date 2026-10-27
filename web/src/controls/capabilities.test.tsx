@@ -32,6 +32,16 @@ function setup() {
   return { sent, store, emit, hello, idle, stats };
 }
 
+it('before hello the gated controls (pill, meters, idle toggle) are hidden: they do not flash', () => {
+  const { emit, idle, stats, hello } = setup();
+  emit({ kind: 'mode', mode: 'default' }, idle, stats);
+  expect(screen.queryByRole('button', { name: /Agent mode/ })).toBeNull();
+  expect(screen.queryByRole('meter')).toBeNull();
+  expect(screen.queryByTestId('idle-compact')).toBeNull();
+  hello();
+  expect(screen.getByRole('button', { name: /Agent mode/ })).toBeInTheDocument();
+});
+
 it('a hello without capabilities (an older server) leaves every control: the web assumes Claude\'s set', () => {
   const { emit, hello, idle, stats, store } = setup();
   emit({ kind: 'mode', mode: 'default' }, idle, stats);

@@ -3,7 +3,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { pickMode, selectCapabilities, selectMode, selectSwitching } from './slice.ts';
+import { pickMode, selectCapabilitiesKnown, selectMode, selectSwitching } from './slice.ts';
 
 // colours as in the CLI's mode line (prototype #modeBtn.m-*)
 const TONE: Record<Mode, string> = {
@@ -18,7 +18,8 @@ export function ModePill() {
   const dispatch = useAppDispatch();
   const mode = useAppSelector(selectMode);
   const switching = useAppSelector(selectSwitching); // the switch announces the new session's mode
-  const { modes } = useAppSelector(selectCapabilities);
+  const caps = useAppSelector(selectCapabilitiesKnown);
+  const modes = caps?.modes ?? [];
   // unknown until the server says; and with fewer than two modes there is nothing to choose
   if (!mode || modes.length < 2) return null;
   return (
