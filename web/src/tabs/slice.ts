@@ -177,12 +177,18 @@ const isSavedDiagram = (d: unknown): d is SavedDiagram => {
   const o = d as SavedDiagram;
   return !!o && typeof o.source === 'string' && (o.lang === 'mermaid' || o.lang === 'svg');
 };
+const isSavedTab = (t: unknown): t is SavedTab => {
+  if (!t || typeof t !== 'object') return false;
+  const o = t as Record<string, unknown>;
+  return ('file' in o && isSavedFile(o.file)) || ('diagram' in o && isSavedDiagram(o.diagram));
+};
 /** Reads `{ tabs, active }`, or the older `{ files, active }`, or the older `{ paths, active }` (this folder only). */
 export function readSavedTabs(root: string): SavedTabs | null {
   try {
     const v = JSON.parse(localStorage.getItem(tabsKey(root)) ?? 'null');
     const active = typeof v?.active === 'string' ? v.active : 'chat';
-    if (Array.isArray(v?.tabs) && v.tabs.every((t: SavedTab) => ('file' in t && isSavedFile(t.file)) || ('diagram' in t && isSavedDiagram(t.diagram)))) return { tabs: v.tabs, active };
+    // per entry: one bad tab is dropped, the others keep their place (an active id that was dropped falls back in restore)
+    if (Array.isArray(v?.tabs)) return { tabs: v.tabs.filter((t: unknown) => isSavedTab(t)), active };
     if (Array.isArray(v?.files) && v.files.every(isSavedFile)) return { tabs: v.files.map((file: SavedFile) => ({ file })), active };
     if (Array.isArray(v?.paths) && v.paths.every((p: unknown) => typeof p === 'string')) return { tabs: v.paths.map((path: string) => ({ file: { path } })), active };
     return null;

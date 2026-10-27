@@ -4,7 +4,7 @@ import { makeStore } from '../store/store.ts';
 import { MediaController } from '../media/mediaController.ts';
 import { filesSlice, setFileLoad } from '../files/slice.ts';
 import { setSource, toggleDir } from '../tree/slice.ts';
-import { activate, CLOSED_MAX, closeAll, closeOthers, closeRight, closeTab, fileTabId, openDiagram, openFile, reopenClosed, selectActiveTab, selectTabs } from './slice.ts';
+import { activate, CLOSED_MAX, closeAll, closeOthers, closeRight, closeTab, diagramTabId, fileTabId, openDiagram, openFile, reopenClosed, selectActiveTab, selectTabs } from './slice.ts';
 
 function mk() {
   let onEvent!: (e: ServerEvent) => void;
@@ -305,7 +305,35 @@ it('tabs saved in the older formats ({files}, {paths}) are still read', () => {
   const a = mk();
   a.session('/o1');
   expect(ids(a.store)).toEqual(['chat', 'file:a.md']);
+  expect(selectTabs(a.store.getState()).active).toBe('file:a.md');
   const b = mk();
   b.session('/o2');
   expect(ids(b.store)).toEqual(['chat', 'file:b.md']);
+  expect(selectTabs(b.store.getState()).active).toBe('file:b.md');
+});
+
+it('one bad saved entry is dropped and the others keep their order and the active tab', () => {
+  localStorage.setItem('tabs:/bad', JSON.stringify({
+    tabs: [{ file: { path: 'a.md' } }, null, { diagram: { source: SRC, lang: 'nope' } }, 7, { file: { path: 'b.md' } }, { diagram: { source: SRC, lang: 'mermaid' } }],
+    active: 'file:b.md',
+  }));
+  const m = mk();
+  m.session('/bad');
+  expect(ids(m.store)).toEqual(['chat', 'file:a.md', 'file:b.md', diagramTabId(SRC)]);
+  expect(selectTabs(m.store.getState()).active).toBe('file:b.md');
+});
+
+it('a saved active id that was dropped falls back to the chat', () => {
+  localStorage.setItem('tabs:/bad2', JSON.stringify({ tabs: [null, { file: { path: 'a.md' } }], active: 'file:gone.md' }));
+  const m = mk();
+  m.session('/bad2');
+  expect(ids(m.store)).toEqual(['chat', 'file:a.md']);
+  expect(selectTabs(m.store.getState()).active).toBe('chat');
+});
+
+it('a duplicate id in the saved list restores once', () => {
+  localStorage.setItem('tabs:/dup', JSON.stringify({ tabs: [{ file: { path: 'a.md' } }, { diagram: { source: SRC, lang: 'mermaid' } }, { file: { path: 'a.md' } }, { diagram: { source: SRC, lang: 'mermaid' } }], active: 'chat' }));
+  const m = mk();
+  m.session('/dup');
+  expect(ids(m.store)).toEqual(['chat', 'file:a.md', diagramTabId(SRC)]);
 });
