@@ -80,7 +80,7 @@ it('Ctrl+Shift+F and Ctrl+Shift+C toggle the panels; Alt+E toggles recent files;
   key('KeyE', { mod: true }); // Ctrl/⌘+E is not ours (Claude in Chrome takes ⌘E)
   expect(recentModal.get()).toBe(false);
   key('KeyE', { alt: true });
-  expect(await screen.findByRole('listbox', { name: 'Recent files' })).toBeInTheDocument();
+  expect(await screen.findByRole('listbox', { name: /^Recent files/ })).toBeInTheDocument();
   expect(recentModal.get()).toBe(true);
   act(() => recentModal.close());
   key('F1', { alt: true });
@@ -181,7 +181,7 @@ it('AltGr (Ctrl+Alt off a Mac) is never ours; a key someone handled is skipped; 
 it('behind a modal dialog only Alt+E runs: the tabs behind the overlay stay', async () => {
   const s = setup();
   key('KeyE', { alt: true });
-  const box = await screen.findByRole('combobox', { name: /Search recent files/ });
+  const box = await screen.findByRole('combobox', { name: /searches the whole project/ });
   key('KeyW', { alt: true }, box);
   key('Digit1', { alt: true }, box);
   expect(ids(s)).toHaveLength(4);

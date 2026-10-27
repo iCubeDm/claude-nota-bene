@@ -27,6 +27,8 @@ export function RecentFiles() {
   const [q, setQ] = useState('');
   const [recent, setRecent] = useState<SavedFile[]>([]);
   const [found, setFound] = useState<string[]>([]);
+  // the query the project hits in `found` answer: until they arrive, an empty list says "searching", not "nothing"
+  const [answered, setAnswered] = useState('');
   const [at, setAt] = useState(0);
   const input = useRef<HTMLInputElement>(null);
 
@@ -45,12 +47,15 @@ export function RecentFiles() {
 
   const needle = q.trim().toLowerCase();
   useEffect(() => {
-    if (!open || !needle) return void setFound([]);
+    if (!open || !needle) { setFound([]); setAnswered(''); return; }
     const ctl = new AbortController();
     const timer = setTimeout(() => {
       fetch(`/complete?q=${encodeURIComponent(needle)}`, { signal: ctl.signal })
         .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
-        .then((hits) => setFound(hits.filter((p) => !p.endsWith('/'))), () => { /* aborted or offline: the recent matches stay */ });
+        .then((hits) => { setFound(hits.filter((p) => !p.endsWith('/'))); setAnswered(needle); }, (e: unknown) => {
+          // offline or a server error: say so as "nothing" rather than searching forever (an abort is a newer query)
+          if (!(e instanceof DOMException && e.name === 'AbortError')) setAnswered(needle);
+        });
     }, DEBOUNCE_MS);
     return () => { clearTimeout(timer); ctl.abort(); };
   }, [open, needle]);
@@ -100,7 +105,11 @@ export function RecentFiles() {
             className="mx-1 mb-1 flex-none rounded-md border border-border-soft bg-transparent px-2.5 py-1.5 text-[13px] text-foreground outline-none focus:border-primary"
           />
           <div id="nb-recent-list" role="listbox" aria-label={t('recentTitle')} className="min-h-0 overflow-auto">
-            {!items.length && <div className="px-2 py-4 text-center text-xs text-muted-foreground">{needle ? t('recentNone') : t('recentEmpty')}</div>}
+            {!items.length && (
+              <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                {!needle ? t('recentEmpty') : answered === needle ? t('recentNone') : t('recentSearching')}
+              </div>
+            )}
             {items.map((f, i) => (
               <button
                 key={key(f)}

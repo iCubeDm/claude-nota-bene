@@ -91,7 +91,7 @@ test('Alt+E: the recent files with the previous one selected; Enter flips back; 
   await open(page, ['big.log']);
   await page.waitForTimeout(400);
   await page.keyboard.press('Alt+KeyE');
-  const list = page.getByRole('listbox', { name: /^(Recent files|Недавние файлы)$/ });
+  const list = page.getByRole('listbox', { name: /^(Recent files|Недавние файлы)/ });
   await expect(list.getByRole('option').first()).toHaveAttribute('data-recent', 'big.log');
   await expect(list.getByRole('option', { selected: true })).toHaveAttribute('data-recent', 'src/a.ts');
   await page.keyboard.press('Enter');

@@ -56,7 +56,7 @@ it('opening shows the list with the previous file selected; Enter flips back; Es
   act(() => void store.dispatch(openFile('docs/b.md')));
   await dwell();
   ctrlE();
-  await screen.findByRole('listbox', { name: 'Recent files' });
+  await screen.findByRole('listbox', { name: /^Recent files/ });
   expect(items()).toEqual(['docs/b.md', 'src/a.ts']);
   expect(screen.getByRole('option', { selected: true })).toHaveAttribute('data-recent', 'src/a.ts');
   fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
@@ -76,7 +76,7 @@ it('a query filters the recent files and adds project hits from /complete (files
   await dwell();
   complete = ['src/app.ts', 'src/', 'src/apple.ts', 'web/app.css'];
   act(() => recentModal.open());
-  const box = await screen.findByRole('combobox', { name: /Search recent files/ });
+  const box = await screen.findByRole('combobox', { name: /searches the whole project/ });
   fireEvent.change(box, { target: { value: 'app' } });
   expect(items()).toEqual(['src/app.ts']); // the recent match at once
   await waitFor(() => expect(items()).toEqual(['src/app.ts', 'src/apple.ts', 'web/app.css']));
@@ -112,4 +112,19 @@ it('after a switch to another folder the list is that folder\'s; the first folde
   act(() => recentModal.open());
   await screen.findByRole('listbox');
   expect(items()).toEqual(['q.ts']);
+});
+
+it('with no recent files a query still finds any project file; it says "searching" until the answer, not "nothing" (review)', async () => {
+  setup();
+  let answer!: (r: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((r) => (answer = r)));
+  act(() => recentModal.open());
+  expect(await screen.findByText(/No recent files yet — type to find any file/)).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deep' } });
+  expect(await screen.findByText('Searching the project…')).toBeInTheDocument();
+  await waitFor(() => expect(answer).toBeTypeOf('function'));
+  answer(new Response(JSON.stringify(['src/never/opened/deep.ts']), { status: 200 }));
+  await waitFor(() => expect(items()).toEqual(['src/never/opened/deep.ts']));
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'zzz' } }); // the default mock: no hits
+  expect(await screen.findByText('Nothing found in the project')).toBeInTheDocument();
 });
