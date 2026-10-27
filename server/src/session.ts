@@ -289,6 +289,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       modes.ack(id);
     },
     info: () => { const i = who.info(); return { id: i.id, root: i.root, title: titles.title, model: i.model }; },
+    archiveId: () => who.ownId,
     busy,
     switching: () => phase.switching,
     switch: ({ id, dir }) => switchTo(id, dir, false),

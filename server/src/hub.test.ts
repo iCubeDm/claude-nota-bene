@@ -123,14 +123,40 @@ describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
     expect(r.earlier).toBe(1);
   });
 
-  it('cut keeps what a replay still needs: the last session event, an open ask, and what `keep` says', () => {
+  it('cut archives everything before the boundary, and also keeps what a replay still needs: the last session event, an open ask, a running task, and what `keep` says', () => {
     const hub = new EventHub();
     const ask = (id: string): Stored => ({ kind: 'permission', id, toolName: 'Bash', input: {}, ts: 1 });
     const done = (id: string): Stored => ({ kind: 'permission-done', id, allow: true, ts: 1 });
-    for (const ev of [{ ...session, title: 'old' }, user('a'), ask('p1'), done('p1'), ask('p2'), session, user('b'), boundary]) hub.emit(ev);
-    const cut = hub.cut({ keep: (ev) => ev.kind === 'user' && ev.id === 'b', archive: () => 1 });
-    expect(cut).toEqual([{ ...session, title: 'old' }, user('a'), ask('p1'), done('p1')]);
-    expect(replayOf(hub).events).toEqual([ask('p2'), session, user('b'), boundary]);
+    const task = (id: string, phase: 'started' | 'progress' | 'done'): Stored => agent({ t: 'task', id, phase });
+    const before = [{ ...session, title: 'old' }, user('a'), ask('p1'), done('p1'), task('t1', 'started'), task('t2', 'started'),
+      ask('p2'), task('t1', 'progress'), task('t2', 'done'), session, user('b')];
+    for (const ev of [...before, boundary]) hub.emit(ev);
+    const archived: ServerEvent[][] = [];
+    const cut = hub.cut({ keep: (ev) => ev.kind === 'user' && ev.id === 'b', archive: (evs) => { archived.push(evs); return 1; } });
+    expect(cut).toEqual(before); // segments are whole: the kept items are in it too (R-M7-12 ruling)
+    expect(archived).toEqual([before]);
+    expect(replayOf(hub).events).toEqual([task('t1', 'started'), ask('p2'), task('t1', 'progress'), session, user('b'), boundary]);
+  });
+
+  it('segments never overlap: a kept item is archived once, and dropped from the hub once nothing needs it', () => {
+    const hub = new EventHub();
+    const archived: ServerEvent[][] = [];
+    const archive = (evs: ServerEvent[]) => { archived.push(evs); return archived.length; };
+    let waiting = true;
+    const keep = (ev: ServerEvent) => waiting && ev.kind === 'user' && ev.id === 'u1';
+    const b2 = agent({ t: 'compacted', preTokens: 200 });
+    const b3 = agent({ t: 'compacted', preTokens: 300 });
+    for (const ev of [user('u1'), user('x'), boundary, user('y')]) hub.emit(ev);
+    hub.cut({ keep, archive });
+    hub.emit(b2);
+    hub.cut({ keep, archive });
+    expect(archived).toEqual([[user('u1'), user('x')], [boundary, user('y')]]);
+    expect(replayOf(hub).events).toEqual([user('u1'), b2]);
+    waiting = false; // its turn ended: the next cut drops it from the hub and writes nothing of it again
+    hub.emit(b3);
+    hub.cut({ keep, archive });
+    expect(archived[2]).toEqual([b2]);
+    expect(replayOf(hub).events).toEqual([b3]);
   });
 
   it('a failing archive leaves the history as it was', () => {

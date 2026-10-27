@@ -10,6 +10,8 @@ export type SessionManager = {
   /** answers with one `mode` event carrying `ack: id` (unless a session switch takes over, which announces its own) */
   setMode(mode: Mode, id?: string): Promise<void>;
   info(): { id: string | null; root: string; title: string | null; model: string | null };
+  /** The id the conversation's archive goes under (R-M7-1); null before the first id, while a fork's id is pending, and after a /clear that named no id. */
+  archiveId(): string | null;
   /** A send not yet answered by a result, a waiting permission, or a switch in progress (R-M4-4). */
   busy(): boolean;
   /** True from the start of a switch's checks to the new session's announcement. */

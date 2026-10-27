@@ -157,9 +157,10 @@ const ARCHIVE_RE = /^([0-9a-zA-Z-]{1,100})\.jsonl$/;
 /**
  * Archives (`<stateDir>/history/<id>.jsonl`, R-M7-1) whose session transcript is gone from every project: nothing
  * can resume that session, so nothing can page its archive in. A projects dir that cannot be read proves nothing
- * (another CLAUDE_CONFIG_DIR, a disk not mounted): then no archive is stale.
+ * (a disk not mounted): then no archive is stale. An archive written within CLEAN_MIN_AGE_MS is never stale either
+ * (a window with another CLAUDE_CONFIG_DIR may be writing it). The trash is the safety net for the rest.
  */
-export function staleArchives(projectsDir = defaultProjectsDir()): { files: string[]; bytes: number } {
+export function staleArchives(projectsDir = defaultProjectsDir(), now = Date.now()): { files: string[]; bytes: number } {
   const dir = path.join(stateDir(), 'history');
   const files: string[] = [];
   let bytes = 0;
@@ -176,7 +177,7 @@ export function staleArchives(projectsDir = defaultProjectsDir()): { files: stri
     if (!m || projects.some((p) => fs.existsSync(path.join(p, `${m[1]!}.jsonl`)))) continue;
     try {
       const st = fs.lstatSync(path.join(dir, n));
-      if (!st.isFile()) continue;
+      if (!st.isFile() || now - st.mtimeMs < CLEAN_MIN_AGE_MS) continue;
       files.push(n);
       bytes += st.size;
     } catch { /* vanished */ }
@@ -186,7 +187,7 @@ export function staleArchives(projectsDir = defaultProjectsDir()): { files: stri
 
 /** Moves the stale archives to `<stateDir>/trash/history/<stamp>/` (never deletes), as cleanAttachments does. */
 export function cleanStaleArchives(projectsDir = defaultProjectsDir(), now = Date.now()): { moved: number; bytes: number; trash: string; errors: string[] } {
-  return moveToTrash('history', staleArchives(projectsDir).files, now);
+  return moveToTrash('history', staleArchives(projectsDir, now).files, now);
 }
 
 function moveToTrash(kind: 'attachments' | 'history', files: string[], now: number): { moved: number; bytes: number; trash: string; errors: string[] } {

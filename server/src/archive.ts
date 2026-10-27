@@ -14,7 +14,8 @@ const streamed = (ev: ServerEvent) => ev.kind === 'agent' && (ev.e.t === 'messag
 /**
  * The conversation before each compaction (R-M7-1): the SDK replays a session only from its last compaction, so the
  * server keeps the part it cut. `<dir>/<sessionId>.jsonl`, one line per segment, `{"segment":n,"events":[…]}`,
- * numbered from 1 in the order they were cut. Every line is fsync'd before append returns.
+ * numbered from 1 in the order they were cut. Every line is fsync'd before append returns (and the directory, when
+ * the file is new); an fsync failure after the full write is reported and the segment counts as written.
  *
  * A line that does not parse (a torn write, a hand edit) is skipped and reported once per session; it keeps its
  * number (the next append is numbered after every line, valid or not), so no two lines ever share a number.
@@ -37,14 +38,19 @@ export class HistoryArchive {
     const { lines, valid, torn } = this.read(sessionId, file);
     const n = Math.max(lines, ...valid.map((l) => l.segment)) + 1;
     fs.mkdirSync(this.dir, { recursive: true });
+    const created = !fs.existsSync(file);
+    // a torn last line (a crash mid-write) is closed first, so the new segment starts on a line of its own
+    const line = Buffer.from(`${torn ? '\n' : ''}${JSON.stringify({ segment: n, events: kept } satisfies Line)}\n`);
     const fd = fs.openSync(file, 'a');
     try {
-      // a torn last line (a crash mid-write) is closed first, so the new segment starts on a line of its own
-      fs.writeSync(fd, `${torn ? '\n' : ''}${JSON.stringify({ segment: n, events: kept } satisfies Line)}\n`);
-      fs.fsyncSync(fd);
+      for (let off = 0; off < line.length;) off += fs.writeSync(fd, line, off, line.length - off); // a short write goes on
+      // the line is out: an fsync failure is reported, not thrown, or the caller would not cut and the next
+      // compaction would archive the same events again
+      this.sync(() => fs.fsyncSync(fd));
     } finally {
       fs.closeSync(fd);
     }
+    if (created) this.sync(() => { const d = fs.openSync(this.dir, 'r'); try { fs.fsyncSync(d); } finally { fs.closeSync(d); } }); // the new name
     return n;
   }
 
@@ -63,6 +69,14 @@ export class HistoryArchive {
     const below = this.read(sessionId, this.file(sessionId)).valid.filter((l) => l.segment < n).sort((a, b) => b.segment - a.segment);
     const top = below[0];
     return top ? { events: top.events, segment: top.segment, more: below.length > 1 } : null;
+  }
+
+  private sync(fn: () => void): void {
+    try {
+      fn();
+    } catch (e) {
+      this.report(e instanceof Error ? e : new Error(String(e)));
+    }
   }
 
   private file(sessionId: string): string {
@@ -126,7 +140,7 @@ export function historyRoutes(archive: HistoryArchive, current: () => string | n
       const raw = q.get('before') ?? '';
       const before = /^[0-9]{1,9}$/.test(raw) ? Number(raw) : 0;
       if (!SAFE_SESSION_ID.test(session) || before < 1) return text(res, 400, 'bad request');
-      if (session !== current()) return text(res, 409, 'not the current session');
+      if (session !== current()) return text(res, 409, 'not the current session'); // also: no own id yet (null)
       let page: ReturnType<HistoryArchive['before']>;
       try {
         page = archive.before(session, before);

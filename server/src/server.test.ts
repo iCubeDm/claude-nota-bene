@@ -206,6 +206,13 @@ describe('server', () => {
       expect(await r.text()).not.toContain('x');
     });
 
+    it('409 while the conversation has no id of its own: a fork before its first turn does not serve the source\'s archive', async () => {
+      new HistoryArchive({ dir: path.join(home, 'history') }).append('fake-session', [user('a')]);
+      const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, resume: 'fake-session', fork: true });
+      closers.push(s.close);
+      expect((await get(s, 'session=fake-session&before=2')).status).toBe(409);
+    });
+
     it('400 for a bad id or a bad before; 405 for a POST', async () => {
       const s = await bootWithArchive();
       for (const q of ['session=..%2Fx&before=2', 'before=2', 'session=fake-session', 'session=fake-session&before=0', 'session=fake-session&before=1.5', 'session=fake-session&before=abc']) {

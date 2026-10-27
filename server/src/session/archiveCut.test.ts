@@ -97,9 +97,68 @@ describe('archive cut at a compaction', () => {
     const seg = archiveAt().segment('S1', 1)!;
     expect(has(seg, 'message', 'm1')).toBe(true);
     expect(ofAgent(seg, 'compacting')).toHaveLength(2);
-    expect(seg.some((e) => e.kind === 'user')).toBe(false);
+    // the running send is in the segment too, the same event (same id) as the hub's copy
+    expect(seg.filter((e) => e.kind === 'user')).toEqual(r.events.filter((e) => e.kind === 'user'));
     push({ t: 'turn-end', stop: 'done', secs: 1, answers: ['u1'], queued: 0 });
     await until(() => !s.busy());
+    s.close();
+  });
+
+  it('a send in flight at a compaction survives a restart: it is in segment 1, the transcript replay has it not', async () => {
+    const first = pushed();
+    const a = hubWithLog();
+    const s1 = await createSessionManager({ hub: a.hub, backend: first.backend, cwd: '/proj' });
+    first.push({ t: 'init', sessionId: 'S1' });
+    s1.send({ id: 'u1', text: 'work' });
+    await until(() => first.sends.length === 1);
+    first.push(msg('m1'), compacted, msg('m2'), { t: 'turn-end', stop: 'done', secs: 1, answers: ['u1'], queued: 0 });
+    await until(() => !s1.busy());
+    s1.close();
+    const next = pushed([{ kind: 'user', id: 't1', text: 'summary', historic: true, ts: 0 }]); // from the compaction on
+    const b = hubWithLog();
+    const s2 = await createSessionManager({ hub: b.hub, backend: next.backend, cwd: '/proj', resume: 'S1' });
+    expect(b.replay().events.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(false);
+    expect(b.replay().earlier).toBe(1);
+    expect(archiveAt().segment('S1', 1)!.filter((e) => e.kind === 'user')).toMatchObject([{ id: 'u1', text: 'work' }]);
+    s2.close();
+  });
+
+  it('two compactions in one turn give segments 1 and 2 with no event in both', async () => {
+    const { backend, sends, push } = pushed();
+    const { hub, live } = hubWithLog();
+    const s = await createSessionManager({ hub, backend, cwd: '/proj' });
+    push({ t: 'init', sessionId: 'S1' });
+    s.send({ id: 'u1', text: 'work' });
+    await until(() => sends.length === 1);
+    push(msg('m1'), compacted, msg('m2'), { t: 'compacted', preTokens: 2000 }, msg('m3'));
+    await until(() => has(live, 'message', 'm3'));
+    const one = archiveAt().segment('S1', 1)!;
+    const two = archiveAt().segment('S1', 2)!;
+    const key = (e: ServerEvent) => JSON.stringify(e);
+    expect(one.map(key).filter((k) => two.map(key).includes(k))).toEqual([]);
+    expect(one.some((e) => e.kind === 'user' && e.id === 'u1')).toBe(true);
+    expect(two.some((e) => e.kind === 'user')).toBe(false);
+    expect(has(two, 'message', 'm2')).toBe(true);
+    // the turn ends, a third compaction: u1 is dropped from the hub and written nowhere again
+    push({ t: 'turn-end', stop: 'done', secs: 1, answers: ['u1'], queued: 0 }, msg('m4'), compacted);
+    await until(() => archiveAt().count('S1') === 3);
+    expect(archiveAt().segment('S1', 3)!.some((e) => e.kind === 'user')).toBe(false);
+    s.close();
+  });
+
+  it('a task running at a compaction still shows after a reload', async () => {
+    const { backend, sends, push } = pushed();
+    const { hub, live, replay } = hubWithLog();
+    const s = await createSessionManager({ hub, backend, cwd: '/proj' });
+    push({ t: 'init', sessionId: 'S1' });
+    s.send({ id: 'u1', text: 'work' });
+    await until(() => sends.length === 1);
+    push({ t: 'task', id: 'bg', phase: 'started', desc: 'build' }, { t: 'task', id: 'quick', phase: 'started' },
+      { t: 'task', id: 'quick', phase: 'done' }, compacted, msg('m2'));
+    await until(() => has(live, 'message', 'm2'));
+    const tasks = replay().events.filter((e) => e.kind === 'agent' && e.e.t === 'task').map((e) => (e as { e: { id: string } }).e.id);
+    expect(tasks).toEqual(['bg']);
+    expect(ofAgent(archiveAt().segment('S1', 1)!, 'task')).toHaveLength(3);
     s.close();
   });
 
@@ -168,8 +227,10 @@ describe('archive cut at a compaction', () => {
     push({ t: 'reset' }, msg('m2'), compacted, msg('m3'));
     await until(() => has(log, 'message', 'm3'));
     expect(archiveAt().count('S1')).toBe(1);
+    expect(s.archiveId()).toBeNull(); // /history answers 409 for the cleared id meanwhile
     push({ t: 'init', sessionId: 'S3' }, compacted);
     await until(() => replay().earlier === 1);
+    expect(s.archiveId()).toBe('S3');
     expect(has(archiveAt().segment('S3', 1)!, 'message', 'm2')).toBe(true);
     s.close();
   });
@@ -182,6 +243,7 @@ describe('archive cut at a compaction', () => {
     await until(() => has(live, 'message', 'm1'));
     expect(archiveAt().count('S0')).toBe(0);
     expect(replay().earlier).toBeUndefined();
+    expect(s.archiveId()).toBeNull();
     push({ t: 'init', sessionId: 'F1' }, msg('m2'), compacted);
     await until(() => replay().earlier === 1);
     expect(archiveAt().count('F1')).toBe(1);

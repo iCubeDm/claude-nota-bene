@@ -9,6 +9,8 @@ export class EventHub {
   private history: ServerEvent[] = [];
   /** archived segments of the current conversation (R-M7-4): every replay carries it while it is > 0 */
   private earlier = 0;
+  /** events of the history that a cut already wrote to the archive (kept for a reload, never written twice) */
+  private archived = new WeakSet<ServerEvent>();
   private socks = new Set<Sock>();
 
   emit(ev: EmitInput, o: { store?: boolean } = {}): void {
@@ -47,6 +49,7 @@ export class EventHub {
   reset(events: ServerEvent[] = [], o: { earlier?: number } = {}): void {
     this.history = [...events];
     this.earlier = o.earlier ?? 0;
+    this.archived = new WeakSet();
     const frame = this.replayFrame();
     for (const s of [...this.socks]) {
       try {
@@ -58,12 +61,14 @@ export class EventHub {
   }
 
   /**
-   * A compaction (R-M7-1, R-M7-2): removes and returns the history before the last stored `compacted` event, which
-   * stays, with everything after it. `archive` stores the removed part first and returns its segment number (the
-   * new `earlier`); when it throws, nothing is removed. Kept back, in their order before the boundary, is what a
-   * reloaded page still needs: the last `session` event (the header), an ask with no answer yet, and whatever `keep`
-   * says (the façade: a send still waiting, so a reload mid-turn still shows the turn running). No live socket
-   * hears of a cut: their feeds already hold all of it.
+   * A compaction (R-M7-1, R-M7-2): every event before the last stored `compacted` event (the boundary, which stays
+   * with everything after it) goes to `archive` as one segment, which returns its number (the new `earlier`); when
+   * it throws, nothing changes. Segments never overlap: an event already written by an earlier cut is not written
+   * again. Some events are archived AND kept in the hub, in their order before the boundary, because a reloaded page
+   * still needs them: the last `session` event (the header), an ask with no answer yet, the events of a task not
+   * done yet, and whatever `keep` says (the façade: a send still waiting, so a reload mid-turn shows the turn
+   * running; the archived copy is the same event, same id, so a page that loads the segment can dedupe it). Returns
+   * what was written. No live socket hears of a cut: their feeds already hold all of it.
    */
   cut(o: { keep?: (ev: ServerEvent) => boolean; archive?: (events: ServerEvent[]) => number } = {}): ServerEvent[] {
     const at = this.history.findLastIndex((ev) => ev.kind === 'agent' && ev.e.t === 'compacted');
@@ -71,14 +76,18 @@ export class EventHub {
     const before = this.history.slice(0, at);
     const lastSession = before.findLastIndex((ev) => ev.kind === 'session');
     const answered = new Set(before.flatMap((ev) => (ev.kind === 'permission-done' ? [ev.id] : [])));
+    const doneTasks = new Set(before.flatMap((ev) => (ev.kind === 'agent' && ev.e.t === 'task' && ev.e.phase === 'done' ? [ev.e.id] : [])));
     const stays = (ev: ServerEvent, i: number) => i === lastSession
       || (ev.kind === 'permission' && !answered.has(ev.id))
+      || (ev.kind === 'agent' && ev.e.t === 'task' && !doneTasks.has(ev.e.id))
       || (o.keep?.(ev) ?? false);
     const kept = before.filter(stays);
-    const moved = before.filter((ev, i) => !stays(ev, i));
-    if (moved.length === 0) return [];
-    const n = o.archive?.(moved) ?? 0;
-    if (n > 0) this.earlier = n;
+    const moved = before.filter((ev) => !this.archived.has(ev));
+    if (moved.length) {
+      const n = o.archive?.(moved) ?? 0;
+      if (n > 0) this.earlier = n;
+      for (const ev of kept) this.archived.add(ev);
+    }
     this.history = [...kept, ...this.history.slice(at)];
     return moved;
   }

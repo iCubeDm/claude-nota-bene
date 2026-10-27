@@ -127,7 +127,7 @@ export async function startServer(o: {
         ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
         ...attachmentRoutes(attachments, hub),
         // only the current conversation's archive: a page of another one (before a switch or a /clear) gets 409
-        ...historyRoutes(archive, () => manager.info().id, hub),
+        ...historyRoutes(archive, () => manager.archiveId(), hub),
         ...markRoutes(marks, hub, {
           isSent: (id) => store.get(manager.info().id).some((c) => c.id === id && c.status === 'sent'),
         }),

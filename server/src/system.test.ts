@@ -127,7 +127,12 @@ describe('storage', () => {
       fs.writeFileSync(path.join(projects, '-p-proj', 'live-1.jsonl'), '{}');
       fs.mkdirSync(path.join(home, 'history'));
       fs.writeFileSync(path.join(home, 'history', 'live-1.jsonl'), 'aaaa'); // its transcript exists: kept
-      fs.writeFileSync(path.join(home, 'history', 'gone-1.jsonl'), 'bbbbbb'); // its transcript is gone: stale
+      fs.writeFileSync(path.join(home, 'history', 'gone-1.jsonl'), 'bbbbbb'); // its transcript is gone, over a day old: stale
+      const t = (Date.now() - CLEAN_MIN_AGE_MS - 60_000) / 1000;
+      fs.utimesSync(path.join(home, 'history', 'gone-1.jsonl'), t, t);
+      fs.utimesSync(path.join(home, 'history', 'live-1.jsonl'), t, t);
+      // gone, but written within the day (another CLAUDE_CONFIG_DIR's live session, say): kept
+      fs.writeFileSync(path.join(home, 'history', 'gone-2.jsonl'), 'dd');
       fs.writeFileSync(path.join(home, 'history', 'notes.txt'), 'c'); // not an archive name: never touched
       expect(staleArchives(projects)).toEqual({ files: ['gone-1.jsonl'], bytes: 6 });
       // an unreadable or missing projects dir proves nothing: every archive is kept
@@ -136,7 +141,7 @@ describe('storage', () => {
       expect(r).toMatchObject({ moved: 1, bytes: 6, errors: [] });
       expect(r.trash.startsWith(path.join(home, 'trash', 'history'))).toBe(true);
       expect(fs.existsSync(path.join(r.trash, 'gone-1.jsonl'))).toBe(true);
-      expect(fs.readdirSync(path.join(home, 'history')).sort()).toEqual(['live-1.jsonl', 'notes.txt']);
+      expect(fs.readdirSync(path.join(home, 'history')).sort()).toEqual(['gone-2.jsonl', 'live-1.jsonl', 'notes.txt']);
     } finally {
       fs.rmSync(projects, { recursive: true, force: true });
     }
