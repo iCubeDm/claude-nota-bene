@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeAnchor } from './resolve';
-import { offsetsOf, rangeForAnchor, rangeFromOffsets, textOf } from './text';
+import { collapsedLength, offsetsOf, rangeForAnchor, rangeFromOffsets, rawIndexOf, textOf } from './text';
 
 function el(html: string): HTMLElement {
   const root = document.createElement('div');
@@ -160,5 +160,22 @@ describe('rangeForAnchor', () => {
     const a = makeAnchor(src, textOf(root), 6, 10);
     root.innerHTML = '<p>nothing here</p>';
     expect(rangeForAnchor(root, a)).toBeNull();
+  });
+});
+
+describe('the whitespace rule on a plain string (tool panels, M7-17)', () => {
+  const cases = ['a  b', '  lead and trail \n\t ', 'x\n\n\ny\t\tz', '\u00a0nb\u00a0\u00a0sp\u00a0', 'one', '', '   ', 'a \u00a0\n b'];
+  it.each(cases.map((c) => [JSON.stringify(c), c]))('matches the DOM model on %s', (_n, raw) => {
+    const root = document.createElement('div');
+    const pre = document.createElement('pre');
+    pre.textContent = raw;
+    root.appendChild(pre);
+    document.body.appendChild(root);
+    const text = textOf(root);
+    expect(collapsedLength(raw)).toBe(text.length);
+    // every collapsed char starts at the same raw index in both
+    for (let n = 0; n < text.length; n++) expect(rawIndexOf(raw, n)).toBe(rangeFromOffsets(root, n, n + 1)!.startOffset);
+    expect(rawIndexOf(raw, text.length + 5)).toBe(raw.length);
+    root.remove();
   });
 });

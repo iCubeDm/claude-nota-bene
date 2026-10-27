@@ -93,6 +93,37 @@ export function textOf(root: Element): string {
   return build(root).text;
 }
 
+/**
+ * The same whitespace rule on a plain string, for a block whose text is one string (a tool panel's `pre`): walks `raw`
+ * and returns the raw index where collapsed offset `stop` falls, or the collapsed length when `stop` is Infinity.
+ * Pinned against `build` in text.test.ts.
+ */
+function walk(raw: string, stop: number): number {
+  let k = 0;
+  let space = false; // a whitespace run after emitted text: one space, emitted once a char follows (the end is trimmed)
+  let run = 0; // where that run starts: the space's own raw index
+  for (let i = 0; i < raw.length; i++) {
+    if (WS.test(raw[i]!)) {
+      if (k > 0 && !space) { space = true; run = i; }
+      continue;
+    }
+    if (space) {
+      if (k >= stop) return run;
+      k++;
+      space = false;
+    }
+    if (k >= stop) return i;
+    k++;
+  }
+  return stop === Infinity ? k : raw.length;
+}
+
+/** The length of `raw` in the anchor text model: whitespace runs as one space, the ends trimmed. */
+export const collapsedLength = (raw: string): number => walk(raw, Infinity);
+
+/** The raw index in `raw` where its collapsed offset `n` falls (`raw.length` past the end). */
+export const rawIndexOf = (raw: string, n: number): number => walk(raw, n);
+
 // Normalised offset of a DOM boundary point, or null if outside root.
 function pointOffset(root: Element, m: Model, container: Node, offset: number): number | null {
   if (!root.contains(container)) return null;
