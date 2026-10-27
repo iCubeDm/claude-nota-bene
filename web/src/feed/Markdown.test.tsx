@@ -97,6 +97,19 @@ describe('Markdown', () => {
     await waitFor(() => expect(container.querySelector('.mermaid-out')).toHaveTextContent('ошибка mermaid: bad graph'));
   });
 
+  it('a mermaid syntax error leaves no error graphic in <body>', async () => {
+    vi.mocked(mermaid.render).mockImplementationOnce(async (id: string) => {
+      const d = document.createElement('div'); // what mermaid 10 does: its temp box with the bomb stays in body
+      d.id = `d${id}`;
+      d.innerHTML = `<svg id="${id}"></svg>`;
+      document.body.appendChild(d);
+      throw new Error('Syntax error in text');
+    });
+    const { container } = render(<Markdown text={MERMAID} final />);
+    await waitFor(() => expect(container.querySelector('.mermaid-out')).toHaveTextContent(/Syntax error in text/));
+    expect(document.body.querySelector('[id^="dm"]')).toBeNull();
+  });
+
   it('a failed mermaid load says to reload and is retried by the next diagram (a page older than the build)', async () => {
     setLang('ru');
     vi.resetModules();

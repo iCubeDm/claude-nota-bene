@@ -81,10 +81,18 @@ function postProcess(root: HTMLElement, final: boolean) {
       pre.replaceWith(out);
       loadMermaid()
         .then(
-          (m) => m.render(`m${++seq}`, c.textContent ?? '').then(
-            ({ svg }) => { out.innerHTML = svg; },
-            (e: unknown) => { out.textContent = t('mermaidError', e instanceof Error ? e.message : String(e)); },
-          ),
+          (m) => {
+            const id = `m${++seq}`;
+            return m.render(id, c.textContent ?? '').then(
+              ({ svg }) => { out.innerHTML = svg; },
+              (e: unknown) => {
+                // on a syntax error mermaid leaves its error graphic (the "bomb") in <body>, under the app
+                document.getElementById(`d${id}`)?.remove();
+                document.getElementById(id)?.remove();
+                out.textContent = t('mermaidError', e instanceof Error ? e.message : String(e));
+              },
+            );
+          },
           // the page is older than the build on disk (its chunk names are gone): a reload fixes it
           () => { out.textContent = t('mermaidStale'); },
         );
