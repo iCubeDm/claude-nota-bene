@@ -19,7 +19,7 @@ import { toast } from '../shell/toast.ts';
 import { recordCompactMs } from '../feed/compactTiming.ts';
 import { feedUiSlice, TOOL_SRC } from '../feed/uiSlice.ts';
 import { persistListeners, type PersistState } from './persist.ts';
-import { emptyFeed, reduce, type FeedState } from './feed.ts';
+import { emptyFeed, historyPrepended, prependHistory, reduce, type FeedState } from './feed.ts';
 
 /** A live compaction's duration feeds the estimate of the next one (a replay is history: it would count twice). */
 const compactTimingMiddleware: Middleware = () => (next) => (action) => {
@@ -48,7 +48,10 @@ export const feedSlice = createSlice({
   name: 'feed',
   initialState: emptyFeed,
   reducers: {},
-  extraReducers: (b) => b.addCase(serverEvent, (state, a) => reduce(state as FeedState, a.payload)),
+  extraReducers: (b) => b
+    .addCase(serverEvent, (state, a) => reduce(state as FeedState, a.payload))
+    // an archived segment (R-M7-4): not a server event, so no other slice (tasks, controls, comments) ever sees it
+    .addCase(historyPrepended, (state, a) => prependHistory(state as FeedState, a.payload)),
 });
 
 export type ConnState = 'connecting' | 'open' | 'closed'; // connecting = never open yet; closed = dropped after an open

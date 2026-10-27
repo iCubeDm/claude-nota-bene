@@ -244,6 +244,33 @@ test('prompt suggestion: ghost text in the idle empty composer, Tab fills it @co
   await expect(composer(page)).not.toHaveAttribute('placeholder', 'now write the tests');
 });
 
+// M7-13 (R-M7-4): the server archives what a compaction cuts; a reloaded page gets the button, a live one keeps its feed
+test('after a compaction and a reload, "Show before compaction" brings the earlier turn back @controls', async ({ page }) => {
+  await open(page);
+  const text = await turn(page, '', 'archived');
+  const compact = page.getByRole('button', { name: en.compactTip });
+  const markers = page.locator('[data-kind="marker"]').filter({ hasText: /context compacted/ });
+  const n = await markers.count();
+  await compact.click();
+  await expect(markers).toHaveCount(n + 1);
+  await expect(compact).toBeEnabled();
+  const show = page.getByRole('button', { name: en.earlierShow });
+  await expect(bubble(page, text)).toBeVisible(); // the live page still holds everything: no button
+  await expect(show).toHaveCount(0);
+
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await expect(markers.last()).toBeVisible();
+  await expect(bubble(page, text)).toHaveCount(0); // the replay starts at the boundary
+  await show.click();
+  await expect(bubble(page, text)).toBeVisible();
+  await expect(donesAfter(page, text).first()).toBeVisible();
+  // the earlier turn sits above the boundary line
+  const order = await page.locator('[data-kind="user"], [data-kind="marker"]').evaluateAll((els, t) =>
+    els.map((e) => (e.getAttribute('data-kind') === 'user' && e.textContent?.includes(t) ? 'turn' : e.getAttribute('data-kind'))), text);
+  expect(order.indexOf('turn')).toBeLessThan(order.lastIndexOf('marker'));
+});
+
 test('compact adds its boundary line; clear asks first, empties the feed, gets a new session id and survives a reload @controls', async ({ page }) => {
   await open(page);
   const text = await turn(page, '', 'before compact');

@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { Comment, MediaAnchor } from '@nota-bene/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Comment, MediaAnchor, ServerEvent } from '@nota-bene/shared';
+import { historyPrepended } from '@/store/feed.ts';
+import { openSettings } from '@/tabs/slice.ts';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
@@ -287,4 +289,67 @@ it('clicking the thumbnail jumps to the media tab', () => {
   fireEvent.click(view.container.querySelector('[data-media-thumb]')!);
   expect(store.getState().tabs.active).toBe('file:media/clip.mp4');
   expect(store.getState().files.jump).toMatchObject({ path: 'media/clip.mp4', id: 'c1' });
+});
+
+describe('a comment whose source went into the archive (R-M7-4)', () => {
+  /** a page reloaded after a compaction: the feed starts at the boundary, `earlier` segments are archived */
+  function archived(c: Comment, earlier = 1) {
+    const store = makeStore({ url: 'ws://x', connect: (() => ({ send: () => true, close() {} })) as never });
+    act(() => void store.dispatch(serverEvent({
+      kind: 'replay', earlier,
+      events: [{ kind: 'session', id: 's1', root: '/p', title: null, model: null }, { kind: 'agent', ts: 5, e: { t: 'compacted', preTokens: 1000 } }],
+    })));
+    act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [c] })));
+    render(
+      <Provider store={store}>
+        <TooltipProvider>
+          <main data-chat-pane><div id="items" /></main>
+          <CommentCard id={c.id} index={0} />
+        </TooltipProvider>
+      </Provider>,
+    );
+    return store;
+  }
+  const load = (store: ReturnType<typeof archived>, events: ServerEvent[], more = false) => act(() => {
+    const f = store.getState().feed;
+    store.dispatch(historyPrepended({ events, segment: f.earlier, more, session: 's1', epoch: f.epoch }));
+  });
+
+  it('a sent comment on a message: "before compaction", not orphaned, no jump; once loaded it resolves as usual', () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    const store = archived(comment({ status: 'sent', sentIn: 'u0' }));
+    expect(screen.getByText(/1 · до сжатия/)).toBeInTheDocument();
+    expect(screen.queryByText(/фрагмент изменился/)).toBeNull();
+    fireEvent.click(screen.getByText('brave world'));
+    expect(scrolled).not.toHaveBeenCalled();
+    expect(screen.getByText('brave world')).not.toHaveClass('cursor-pointer');
+    // the segment arrives: the label is the message's own, and the quote jumps again
+    load(store, [{ kind: 'user', id: 'a1', text: 'hello brave world', ts: 1, historic: true }]);
+    expect(screen.queryByText(/до сжатия/)).toBeNull();
+    expect(screen.getByText(/1 · моё сообщение/)).toBeInTheDocument();
+    expect(screen.getByText('brave world')).toHaveClass('cursor-pointer');
+  });
+
+  it('a comment on an agent action (tool:) is "before compaction" too', () => {
+    const store = archived(comment({ status: 'sent', sentIn: 'u0', anchor: { source: { kind: 'message', id: 'tool:t1' }, start: 0, end: 2, quote: 'ls', prefix: '', suffix: '' } }));
+    expect(screen.getByText(/1 · до сжатия/)).toBeInTheDocument();
+    expect(screen.queryByText(/фрагмент изменился/)).toBeNull();
+    // no jump: a click on the quote leaves the open file tab in front (a jump to an action shows the chat first)
+    act(() => void store.dispatch(openSettings()));
+    const active = store.getState().tabs.active;
+    expect(active).not.toBe('chat');
+    fireEvent.click(screen.getByText('ls'));
+    expect(store.getState().tabs.active).toBe(active);
+    load(store, [{ kind: 'agent', ts: 1, e: { t: 'tool-call', id: 't1', name: 'Bash', input: { command: 'ls' }, sub: false } }]);
+    expect(screen.getByText(/1 · команда Bash \(ls\)/)).toBeInTheDocument();
+  });
+
+  it('everything loaded and the source still missing: an orphan again', () => {
+    const store = archived(comment({ status: 'sent', sentIn: 'u0' }));
+    load(store, [{ kind: 'user', id: 'other', text: 'unrelated', ts: 1, historic: true }]);
+    expect(store.getState().feed.earlier).toBe(0);
+    expect(screen.queryByText(/до сжатия/)).toBeNull();
+    expect(screen.getByText(/фрагмент изменился/)).toBeInTheDocument();
+  });
 });

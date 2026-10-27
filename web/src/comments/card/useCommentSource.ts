@@ -6,6 +6,7 @@ import { rangeForAnchor } from '@/anchors/text.ts';
 import { jumpToFileComment, selectFileLoad, selectFileVersion } from '@/files/slice.ts';
 import { activate } from '@/tabs/slice.ts';
 import { revealToolOf, TOOL_SRC } from '@/feed/uiSlice.ts';
+import { t } from '@/i18n/index.ts';
 import { selectReplyLabel, useAppDispatch, useAppSelector, type RootState } from '@/store/store.ts';
 import { whereOfFile } from '../send.ts';
 
@@ -39,6 +40,11 @@ export interface CommentSource {
   where: string | null;
   /** The quote can no longer be found in its source. */
   orphan: boolean;
+  /**
+   * The source (a message, an action, a plan) is missing from the feed while archived segments remain unloaded
+   * (R-M7-4): it most likely went into the archive. Not an orphan, and no jump; once its segment loads it resolves.
+   */
+  beforeCompact: boolean;
   /** A media comment: the file's current version, known while its tab is open (undefined = unknown, no claim). */
   version: string | undefined;
   /** Show the source: open its file tab, or scroll the chat to the fragment. */
@@ -50,10 +56,13 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
   const dispatch = useAppDispatch();
   // a string compared by value: the card re-renders when its source item's text changes, not on every feed delta
   const srcState = useAppSelector((s) => sourceState(s, c?.anchor.source));
-  const where = useAppSelector((s) => {
+  // fully loaded (earlier 0), a source still missing is an orphan again
+  const beforeCompact = useAppSelector((s) => s.feed.earlier > 0) && srcState === null;
+  const label = useAppSelector((s) => {
     const src = c?.anchor.source;
     return src?.kind === 'message' ? selectReplyLabel(s, src.id) : src ? whereOfFile(src) : null;
   });
+  const where = beforeCompact ? t('srcBeforeCompact') : label;
   // a file source: its open view's load state; undefined (tab closed / not loaded yet) means "unknown", not orphaned
   const fileLoad = useAppSelector((s) => (c?.anchor.source.kind === 'file' ? selectFileLoad(s, c.anchor.source.path, c.anchor.source.ref) : undefined));
   // a media comment: the file's current version, known while its tab is open (undefined = unknown, no claim)
@@ -76,10 +85,10 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
     const src = c?.anchor.source;
     if (src?.kind === 'file') return;
     if (!c || src?.kind !== 'message' || srcState === undefined || srcState === 'streaming') return setOrphan(false);
-    if (srcState === null) return setOrphan(true);
+    if (srcState === null) return setOrphan(!beforeCompact);
     const root = itemRoot(src.id);
     setOrphan(!!root && !rangeForAnchor(root, c.anchor));
-  }, [c, srcState]);
+  }, [c, srcState, beforeCompact]);
 
   const jump = () => {
     if (!c) return;
@@ -105,5 +114,5 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
     setTimeout(() => root.classList.remove('nb-flash'), 1300);
   };
 
-  return { where, orphan, version, jump };
+  return { where, orphan, beforeCompact, version, jump };
 }

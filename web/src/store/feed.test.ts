@@ -1,6 +1,6 @@
 import type { ServerEvent, WireAgentEvent } from '@nota-bene/shared';
-import { expect, test } from 'vitest';
-import { emptyFeed, reduce, type FeedState } from './feed.ts';
+import { describe, expect, test } from 'vitest';
+import { emptyFeed, prependHistory, reduce, type FeedState } from './feed.ts';
 
 type Turn = Extract<WireAgentEvent, { t: 'turn-end' }>;
 const agent = (e: WireAgentEvent, ts = 1): ServerEvent => ({ kind: 'agent', e, ts });
@@ -301,4 +301,76 @@ test('the live result that follows a clear adds no done line; one after a new me
   expect(cleared.busy).toBe(false);
   const next = fold([user({ id: 'u2' }), result()], cleared);
   expect(next.items.map((i) => i.kind)).toEqual(['marker', 'user', 'done']);
+});
+
+describe('history before a compaction (R-M7-4)', () => {
+  const session = (id = 's1'): ServerEvent => ({ kind: 'session', id, root: '/p', title: null, model: null });
+  const marker = agent({ t: 'compacted', preTokens: 1000 }, 50);
+  /** a reloaded page after one compaction: the kept session event, the boundary, a turn after it */
+  const replayed = (earlier = 2, extra: ServerEvent[] = []) =>
+    reduce(emptyFeed, { kind: 'replay', events: [session(), marker, user({ id: 'u9', text: 'after' }), ...extra], earlier });
+  const page = (s: FeedState, events: ServerEvent[], segment: number, more: boolean) =>
+    ({ events, segment, more, session: s.session!.id!, epoch: s.epoch });
+
+  test('the replay sets earlier; a reset and a replay without it clear it', () => {
+    expect(replayed(3).earlier).toBe(3);
+    expect(reduce(replayed(3), { kind: 'replay', events: [] }).earlier).toBe(0);
+    expect(reduce(replayed(3), agent({ t: 'reset', newId: 'n' })).earlier).toBe(0);
+    expect(emptyFeed.earlier).toBe(0);
+  });
+
+  test('historyPrepended puts the segment\'s feed items first', () => {
+    const s = replayed(1);
+    const next = prependHistory(s, page(s, [user({ id: 'u1', text: 'before', historic: true }), message('a1:0', 'old reply'), result()], 1, false));
+    expect(next.items.map((i) => i.kind)).toEqual(['user', 'assistant', 'done', 'marker', 'user']);
+    expect(next.items[0]).toMatchObject({ id: 'u1', text: 'before' });
+    expect(next.earlier).toBe(0); // fully loaded
+  });
+
+  test('historyPrepended keeps live state', () => {
+    // live: a turn is running, one send waits, a compaction runs
+    const s = fold([user({ id: 'u10', text: 'running' }), compacting(70)], replayed(2));
+    expect(s.busy).toBe(true);
+    const seg: ServerEvent[] = [
+      session('other'),
+      { kind: 'permission', id: 'p1', toolName: 'Bash', input: { command: 'rm' }, ts: 3 },
+      agent({ t: 'task', id: 'k1', phase: 'started', desc: 'explore' }),
+      user({ id: 'u1', text: 'old send' }), // not historic: in the segment it ran live
+      result({ answers: 'all', queued: 3 }),
+      { kind: 'resumed', id: 'abcdef1234' },
+    ];
+    const next = prependHistory(s, page(s, seg, 2, true));
+    expect(next.items.map((i) => i.kind)).toEqual(['permission', 'user', 'done', 'notice', ...s.items.map((i) => i.kind)]);
+    expect(next.items[1]).not.toHaveProperty('duringWork'); // reduced on its own: nothing was running before it in the segment
+    expect(next.items.slice(4)).toEqual(s.items);
+    const { items: _a, earlier: _b, ...live } = next;
+    const { items: _c, earlier: _d, ...before } = s;
+    expect(live).toEqual(before); // busy, waiting, session, compacting, forcePending, streamN, turnSeq, epoch
+    expect(next.earlier).toBe(1);
+  });
+
+  test('an item already in the feed is not prepended again: a running send kept across the cut, a queued one replayed from the transcript', () => {
+    // the running send u5 stays before the boundary; the queued u6 came back as a historic event of the transcript
+    const s = reduce(emptyFeed, {
+      kind: 'replay', earlier: 1,
+      events: [session(), user({ id: 'u5', text: 'running' }), marker, user({ id: 'u6', text: 'queued', historic: true })],
+    });
+    const seg = [user({ id: 'u4', text: 'older' }), result(), user({ id: 'u5', text: 'running' }), message('a5:0', 'half'), user({ id: 'u6', text: 'queued' })];
+    const next = prependHistory(s, page(s, seg, 1, false));
+    expect(next.items.filter((i) => i.kind === 'user').map((i) => (i as { id: string }).id)).toEqual(['u4', 'u5', 'u6']);
+    expect(next.items.map((i) => i.kind)).toEqual(['user', 'done', 'assistant', 'user', 'marker', 'user']);
+  });
+
+  test('a page for another session, an older epoch or a segment already loaded is dropped', () => {
+    const s = replayed(2);
+    const seg = [user({ id: 'u1', historic: true })];
+    expect(prependHistory(s, { ...page(s, seg, 2, true), session: 'other' })).toBe(s);
+    expect(prependHistory(s, { ...page(s, seg, 2, true), epoch: s.epoch - 1 })).toBe(s);
+    const once = prependHistory(s, page(s, seg, 2, true));
+    expect(prependHistory(once, page(s, seg, 2, true))).toBe(once); // a second answer for segment 2
+    // a replay after the request bumps the epoch
+    const again = reduce(s, { kind: 'replay', events: [session(), marker], earlier: 2 });
+    expect(again.epoch).toBe(s.epoch + 1);
+    expect(prependHistory(again, page(s, seg, 2, true))).toBe(again);
+  });
 });

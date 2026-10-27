@@ -4,6 +4,7 @@ import { refClick } from '@/refs/refs.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { Markdown } from './Markdown.tsx';
 import { CompactingLine, DoneLine, IdleCompactLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
+import { EarlierButton } from './EarlierButton.tsx';
 import { PlanCard } from './PlanCard.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
 import { ToolGroup } from './ToolGroup.tsx';
@@ -15,12 +16,14 @@ const AWAY_PX = 200;
 
 /** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
 export function Feed() {
-  const { items, compacting, busy } = useAppSelector(selectFeed);
+  const { items, compacting, busy, epoch, earlier } = useAppSelector(selectFeed);
   const t = useT();
   const dispatch = useAppDispatch();
   const root = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const lastLen = useRef(0);
+  /** the pane's distance from the end, measured right before an archived segment is prepended; null otherwise */
+  const prepending = useRef<number | null>(null);
   const [away, setAway] = useState(false);
   const [unread, setUnread] = useState(false); // something new arrived below while away
   const chatPane = () => root.current?.closest<HTMLElement>('[data-chat-pane]') ?? null;
@@ -41,6 +44,15 @@ export function Feed() {
 
   useLayoutEffect(() => {
     const pane = root.current?.closest<HTMLElement>('[data-chat-pane]');
+    // an archived segment went in above: keep what the reader looks at in place (same distance from the end), and
+    // neither scroll to the end nor mark it as new below
+    const fromEnd = prepending.current;
+    prepending.current = null;
+    if (fromEnd !== null) {
+      lastLen.current = items.length;
+      if (pane) pane.scrollTop = pane.scrollHeight - fromEnd;
+      return;
+    }
     // a new user message always scrolls down, like the prototype; everything else only when already near the bottom
     const sentNow = items.length > lastLen.current && items[items.length - 1]?.kind === 'user';
     lastLen.current = items.length;
@@ -48,7 +60,13 @@ export function Feed() {
       pane.scrollTop = pane.scrollHeight;
       stick.current = true;
     } else if (pane) setUnread(true);
-  }, [items, compacting]);
+    // `earlier`: a page that added nothing new (all kept items, or a 404) still ends its prepend here
+  }, [items, compacting, earlier]);
+
+  const beforePrepend = () => {
+    const p = chatPane();
+    prepending.current = p ? p.scrollHeight - p.scrollTop : null;
+  };
 
   const toLatest = () => {
     const p = chatPane();
@@ -59,6 +77,8 @@ export function Feed() {
 
   return (
     <div ref={root} onClick={(e) => refClick(e, dispatch)}>
+      {/* keyed by the feed's epoch: a replay or /clear starts it afresh (no loading or failure left over) */}
+      <EarlierButton key={epoch} beforePrepend={beforePrepend} />
       {items.length === 0 && (
         <div data-kind="empty" className="py-6 text-center text-sm text-muted-foreground">
           {t('emptyChat')}

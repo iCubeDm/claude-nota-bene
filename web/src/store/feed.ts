@@ -1,3 +1,4 @@
+import { createAction } from '@reduxjs/toolkit';
 import type { ImageRef, ServerEvent, WireAgentEvent } from '@nota-bene/shared';
 
 export type FeedItem =
@@ -35,9 +36,45 @@ export type FeedState = {
   turnSeq: number;
   /** ts of the `compacting` event while a compaction (manual or auto) runs; null otherwise */
   compacting: number | null;
+  /**
+   * archived segments from before this conversation's compactions still to load (R-M7-4): set by the replay, lowered
+   * by each loaded page, 0 once there is nothing more (fully loaded, a /clear, or none). The next page is `earlier + 1`.
+   */
+  earlier: number;
+  /**
+   * bumped by every replay: a history page asked for under an older epoch belongs to another feed. A /clear needs no
+   * bump: it sets `earlier` to 0, so no page applies until the next replay, which bumps it.
+   */
+  epoch: number;
 };
 
-export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, turnSeq: 0, compacting: null };
+export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, turnSeq: 0, compacting: null, earlier: 0, epoch: 0 };
+
+/** One `GET /history` page: the archived events of segment `segment`; `more`: older segments exist. */
+export type HistoryPage = { events: ServerEvent[]; segment: number; more: boolean };
+/** A page plus the session and feed epoch it was asked for under. */
+export type HistoryPrepend = HistoryPage & { session: string; epoch: number };
+
+export const historyPrepended = createAction<HistoryPrepend>('feed/historyPrepended');
+
+/**
+ * Puts an archived segment's feed items before the feed's. A segment holds every kind of event (session, permission,
+ * task, user sends that ran live, turn-ends): it is reduced on its own from an empty feed and only its items are kept,
+ * so it never touches live state. An item already in the feed is left out: the cut archives what it keeps (a running
+ * or queued send, an open ask) and the transcript replays queued sends under the same id. A page for another session,
+ * an older epoch or a segment already loaded changes nothing.
+ */
+export function prependHistory(s: FeedState, p: HistoryPrepend): FeedState {
+  if (p.epoch !== s.epoch || p.session !== s.session?.id || p.segment > s.earlier) return s;
+  const key = (it: FeedItem) => ('id' in it ? `${it.kind}:${it.id}` : null);
+  const have = new Set(s.items.map(key).filter((k) => k !== null));
+  const fresh = p.events.reduce(reduce, emptyFeed).items.filter((it) => {
+    const k = key(it);
+    return k === null || !have.has(k);
+  });
+  const earlier = p.more ? Math.max(0, p.segment - 1) : 0;
+  return { ...s, earlier, items: fresh.length ? [...fresh, ...s.items] : s.items };
+}
 
 export const ARG_KEYS = ['command', 'file_path', 'pattern', 'description', 'url', 'query', 'skill', 'prompt'];
 
@@ -154,7 +191,8 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
   switch (ev.kind) {
     case 'replay':
       // the replayed results are history: keep the live counter, or a reconnect would look like a finished turn
-      return { ...ev.events.reduce(reduce, emptyFeed), turnSeq: s.turnSeq };
+      // a new feed: its own count of archived segments (R-M7-4), and a new epoch so an older history page is dropped
+      return { ...ev.events.reduce(reduce, emptyFeed), turnSeq: s.turnSeq, earlier: ev.earlier ?? 0, epoch: s.epoch + 1 };
     case 'agent':
       return reduceAgent(s, ev.e, ev.ts);
     case 'user': {

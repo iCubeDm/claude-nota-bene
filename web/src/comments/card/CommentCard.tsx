@@ -23,7 +23,7 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   // the comment set belongs to the session being left: edit and delete wait for the new one
   const switching = useAppSelector(selectSwitching);
   const c = useAppSelector(selectComments).find((x) => x.id === id);
-  const { where, orphan, version, jump } = useCommentSource(c);
+  const { where, orphan, beforeCompact, version, jump } = useCommentSource(c);
   const [editing, setEditing] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const live = useRef(false); // true while an edit is open; guards double finish (✓ then blur)
@@ -93,8 +93,8 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
         </div>
       ) : (
         <div
-          onClick={popover ? undefined : jump}
-          className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover ? '' : 'cursor-pointer'}`}
+          onClick={popover || beforeCompact ? undefined : jump}
+          className={`line-clamp-3 border-l-2 border-nb-accent pl-2 text-xs text-muted-foreground ${popover || beforeCompact ? '' : 'cursor-pointer'}`}
         >
           {isMediaAnchor(c.anchor) ? null : c.anchor.quote}
         </div>

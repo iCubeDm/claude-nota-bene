@@ -4,6 +4,11 @@ export const ru = {
   langTip: 'Язык интерфейса: English',
   toLatest: 'В конец разговора',
   emptyChat: 'Напиши агенту, чтобы начать',
+  // the conversation before its compactions (M7-13, R-M7-4)
+  earlierShow: 'Показать до сжатия',
+  earlierLoading: 'Загружаю…',
+  earlierFailed: 'Не удалось загрузить',
+  srcBeforeCompact: 'до сжатия',
   connecting: 'подключение…', // new in M0 (the prototype set the label from markup)
   offline: 'нет связи с сервером…',
   serverError: (w?: string) => `Ошибка сервера${w ? ' · ' + w : ''}`,
