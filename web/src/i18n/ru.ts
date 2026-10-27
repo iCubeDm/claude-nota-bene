@@ -2,6 +2,7 @@
 // the prototype's <kbd> tags are dropped and <br> became "\n"; consumers render them as text (whitespace-pre-line).
 export const ru = {
   langTip: 'Язык интерфейса: English',
+  toLatest: 'В конец разговора',
   emptyChat: 'Напиши агенту, чтобы начать',
   connecting: 'подключение…', // new in M0 (the prototype set the label from markup)
   offline: 'нет связи с сервером…',

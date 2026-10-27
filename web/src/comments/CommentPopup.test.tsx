@@ -432,3 +432,19 @@ it('two clicks on Add in one tick start one prepare', async () => {
   expect(prepare).toHaveBeenCalledTimes(1);
   expect(comments()).toHaveLength(1);
 });
+
+it('the textarea grows with a long comment (the cap and the scrolling are CSS) and the popup keeps its side', () => {
+  const h = vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get').mockReturnValue(180);
+  const popH = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(100);
+  setup();
+  const popup = box().parentElement!.closest<HTMLElement>('[style]')!; // the popup root (the textarea has its own height style)
+  expect(popup.style.top).toBe('46px'); // below the selection (bottom 40 + 6)
+  fireEvent.change(box(), { target: { value: 'a long comment\n'.repeat(12) } });
+  expect(box().style.height).toBe('180px');
+  expect(box().className).toMatch(/max-h-\[40vh\]/);
+  popH.mockReturnValue(window.innerHeight); // grown taller than the room below: it moves up, never flips above the selection
+  fireEvent.change(box(), { target: { value: 'a long comment\n'.repeat(40) } });
+  expect(popup.style.top).toBe('8px');
+  h.mockRestore();
+  popH.mockRestore();
+});

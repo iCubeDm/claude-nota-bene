@@ -149,3 +149,31 @@ it('a server error is not a chat item (it is a toast)', () => {
   act(() => void store.dispatch(serverEvent({ kind: 'server-error', where: 'ws', message: 'boom' })));
   expect(view.container.querySelector('[data-kind="notice"]')).toBeNull();
 });
+
+it('scrolled up: a "jump to the latest" button appears, marks new items, and scrolls to the end', () => {
+  const store = makeStore({ url: 'ws://x', connect: vi.fn(() => ({ send: () => true, close() {} })) });
+  render(
+    <Provider store={store}>
+      <main data-chat-pane>
+        <Feed />
+      </main>
+    </Provider>,
+  );
+  const pane = document.querySelector<HTMLElement>('[data-chat-pane]')!;
+  Object.defineProperty(pane, 'scrollHeight', { configurable: true, value: 5000 });
+  Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 600 });
+  const scrollTo = vi.fn();
+  pane.scrollTo = scrollTo as never;
+  expect(screen.queryByRole('button', { name: 'Jump to the latest' })).toBeNull();
+  pane.scrollTop = 1000; // far from the end
+  fireEvent.scroll(pane);
+  const btn = screen.getByRole('button', { name: 'Jump to the latest' });
+  expect(btn.dataset.unread).toBeUndefined();
+  act(() => { store.dispatch(serverEvent({ kind: 'sdk', ts: 1, m: { type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'new' }] } } } as never)); });
+  expect(btn.dataset.unread).toBe('true'); // something new below while away
+  fireEvent.click(btn);
+  expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: 'smooth' });
+  pane.scrollTop = 4400; // arrived at the end
+  fireEvent.scroll(pane);
+  expect(screen.queryByRole('button', { name: 'Jump to the latest' })).toBeNull();
+});

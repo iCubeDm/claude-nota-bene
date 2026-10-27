@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { refClick } from '@/refs/refs.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
@@ -9,6 +9,9 @@ import { PermissionCard } from './PermissionCard.tsx';
 import { ToolLine } from './ToolLine.tsx';
 import { UserMessage } from './UserMessage.tsx';
 
+/** Farther from the end than this, the "jump to the latest" button shows. */
+const AWAY_PX = 200;
+
 /** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
 export function Feed() {
   const { items, compacting } = useAppSelector(selectFeed);
@@ -17,13 +20,19 @@ export function Feed() {
   const root = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const lastLen = useRef(0);
+  const [away, setAway] = useState(false);
+  const [unread, setUnread] = useState(false); // something new arrived below while away
+  const chatPane = () => root.current?.closest<HTMLElement>('[data-chat-pane]') ?? null;
 
   // The scroll container is the nearest ancestor marked data-chat-pane (App's <main>).
   useLayoutEffect(() => {
     const pane = root.current?.closest<HTMLElement>('[data-chat-pane]');
     if (!pane) return;
     const onScroll = () => {
-      stick.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
+      const left = pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+      stick.current = left < 80;
+      setAway(left > AWAY_PX);
+      if (left <= AWAY_PX) setUnread(false);
     };
     pane.addEventListener('scroll', onScroll);
     return () => pane.removeEventListener('scroll', onScroll);
@@ -37,8 +46,15 @@ export function Feed() {
     if (pane && (stick.current || sentNow)) {
       pane.scrollTop = pane.scrollHeight;
       stick.current = true;
-    }
+    } else if (pane) setUnread(true);
   }, [items, compacting]);
+
+  const toLatest = () => {
+    const p = chatPane();
+    if (!p) return;
+    stick.current = true; // the items that land during the smooth scroll follow it down
+    p.scrollTo({ top: p.scrollHeight, behavior: 'smooth' });
+  };
 
   return (
     <div ref={root} onClick={(e) => refClick(e, dispatch)}>
@@ -70,6 +86,22 @@ export function Feed() {
         }
       })}
       {compacting !== null && <CompactingLine since={compacting} />}
+      {away && (
+        // sticky inside the scrolling pane: it stays at the pane's bottom edge without taking room in the transcript
+        <div data-anchor-skip className="pointer-events-none sticky bottom-3 flex h-0 justify-end">
+          <button
+            type="button"
+            onClick={toLatest}
+            aria-label={t('toLatest')}
+            title={t('toLatest')}
+            data-unread={unread || undefined}
+            className="pointer-events-auto relative -translate-y-full rounded-full border border-border-soft bg-popover/90 p-2 text-muted-foreground shadow-md backdrop-blur hover:text-foreground"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+            {unread && <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-nb-accent" />}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
