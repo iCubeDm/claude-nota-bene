@@ -9,7 +9,12 @@ export class EventHub {
   private history: ServerEvent[] = [];
   /** archived segments of the current conversation (R-M7-4): every replay carries it while it is > 0 */
   private earlier = 0;
-  /** events of the history that a cut already wrote to the archive (kept for a reload, never written twice) */
+  /**
+   * Events of the history that a cut already wrote to the archive (kept for a reload, never written twice).
+   * Invariant: an archived event is never put back into the hub by value. The marks are by reference, and `reset()`
+   * clears them (every reset brings new objects: a transcript replay holds only what came after the last compaction,
+   * which no segment has); a copy of an archived event put back would be written into a segment again.
+   */
   private archived = new WeakSet<ServerEvent>();
   private socks = new Set<Sock>();
 
@@ -76,10 +81,10 @@ export class EventHub {
     const before = this.history.slice(0, at);
     const lastSession = before.findLastIndex((ev) => ev.kind === 'session');
     const answered = new Set(before.flatMap((ev) => (ev.kind === 'permission-done' ? [ev.id] : [])));
-    const doneTasks = new Set(before.flatMap((ev) => (ev.kind === 'agent' && ev.e.t === 'task' && ev.e.phase === 'done' ? [ev.e.id] : [])));
+    const taskKept = runningTasks(before);
     const stays = (ev: ServerEvent, i: number) => i === lastSession
       || (ev.kind === 'permission' && !answered.has(ev.id))
-      || (ev.kind === 'agent' && ev.e.t === 'task' && !doneTasks.has(ev.e.id))
+      || taskKept.has(i)
       || (o.keep?.(ev) ?? false);
     const kept = before.filter(stays);
     const moved = before.filter((ev) => !this.archived.has(ev));
@@ -100,4 +105,21 @@ export class EventHub {
     if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'send-refused' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode' || ev.kind === 'idle-compact' || ev.kind === 'hello') return ev;
     return { ...ev, ts: ev.ts ?? Date.now() } as ServerEvent;
   }
+}
+
+/**
+ * The indexes of the task events a replay needs for the tasks still running at the boundary: per id its last
+ * `started`, its last `progress` and its last `updated` that names a desc. That is all the web's reduceTasks reads
+ * (a progress overwrites tokens, tool and summary; an updated with a desc overwrites the desc, one without changes
+ * nothing; a later started restarts the task), so the trimmed events replay to the same state. The rest is archived.
+ */
+function runningTasks(before: ServerEvent[]): Set<number> {
+  const last = new Map<string, Map<string, number>>(); // id -> phase -> index
+  before.forEach((ev, i) => {
+    if (ev.kind !== 'agent' || ev.e.t !== 'task') return;
+    const { id, phase } = ev.e;
+    if (phase === 'done') last.delete(id);
+    else if (phase !== 'updated' || ev.e.desc) last.set(id, (last.get(id) ?? new Map()).set(phase, i));
+  });
+  return new Set([...last.values()].flatMap((m) => [...m.values()]));
 }

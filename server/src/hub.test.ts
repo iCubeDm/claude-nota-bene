@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import type { ServerEvent } from '@nota-bene/shared';
+import { reduceTasks, type ServerEvent } from '@nota-bene/shared';
 import { EventHub } from './hub.ts';
 import { guard } from './errors.ts';
 
@@ -157,6 +157,48 @@ describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
     hub.cut({ keep, archive });
     expect(archived[2]).toEqual([b2]);
     expect(replayOf(hub).events).toEqual([b3]);
+  });
+
+  it('kept items are marked as archived only after the write returns: a failed cut leaves them for the next one', () => {
+    const hub = new EventHub();
+    const keep = (ev: ServerEvent) => ev.kind === 'user' && ev.id === 'u1';
+    hub.emit(user('u1'));
+    hub.emit(boundary);
+    expect(() => hub.cut({ keep, archive: () => { throw new Error('ENOSPC'); } })).toThrow('ENOSPC');
+    const b2 = agent({ t: 'compacted', preTokens: 200 });
+    hub.emit(b2);
+    const written: ServerEvent[][] = [];
+    hub.cut({ keep, archive: (evs) => { written.push(evs); return 1; } });
+    expect(written).toEqual([[user('u1'), boundary]]);
+  });
+
+  it('an unfinished task keeps only its started, last progress and last updated with a desc; the tasks replay the same', () => {
+    const hub = new EventHub();
+    let ts = 0;
+    const task = (e: Omit<Extract<Stored, { kind: 'agent' }>['e'] & { t: 'task' }, 't'>): Stored => ({ kind: 'agent', e: { t: 'task', ...e }, ts: ++ts });
+    const archived: ServerEvent[][] = [];
+    const archive = (evs: ServerEvent[]) => { archived.push(evs); return archived.length; };
+    const tasksOf = () => reduceTasks({}, replayOf(hub) as ServerEvent);
+    hub.emit(task({ id: 'bg', phase: 'started', desc: 'build', type: 'local_agent' }));
+    hub.emit(task({ id: 'bg', phase: 'updated', desc: 'build, step 2' }));
+    for (let i = 0; i < 200; i++) hub.emit(task({ id: 'bg', phase: 'progress', tokens: i, tool: 'Bash', summary: `s${i}` }));
+    hub.emit(task({ id: 'bg', phase: 'updated' })); // no desc: changes nothing in the reducer
+    let expected = tasksOf();
+    hub.emit(boundary);
+    hub.cut({ archive });
+    expect(tasksOf()).toEqual(expected);
+    for (let i = 200; i < 400; i++) hub.emit(task({ id: 'bg', phase: 'progress', tokens: i, tool: 'Read', summary: `s${i}` }));
+    expected = tasksOf();
+    hub.emit(agent({ t: 'compacted', preTokens: 200 }));
+    hub.cut({ archive });
+    const kept = replayOf(hub).events.filter((e) => e.kind === 'agent' && e.e.t === 'task');
+    expect(kept.length).toBeLessThanOrEqual(3);
+    expect(tasksOf()).toEqual(expected);
+    expect(tasksOf().bg).toMatchObject({ desc: 'build, step 2', tokens: 399, summary: 's399' });
+    // everything is still archived, once
+    const all = archived.flat().filter((e) => e.kind === 'agent' && e.e.t === 'task');
+    expect(all).toHaveLength(1 + 1 + 400 + 1);
+    expect(new Set(all).size).toBe(all.length);
   });
 
   it('a failing archive leaves the history as it was', () => {

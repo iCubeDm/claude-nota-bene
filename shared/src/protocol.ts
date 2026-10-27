@@ -327,3 +327,4 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
 }
 
 export type { AgentEvent, StopReason, WireAgentEvent } from './agent.ts';
+export { reduceTasks, type Task, type TasksState } from './tasks.ts';
