@@ -6,6 +6,7 @@ import { Markdown } from './Markdown.tsx';
 import { CompactingLine, DoneLine, IdleCompactLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
 import { PlanCard } from './PlanCard.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
+import { ToolGroup } from './ToolGroup.tsx';
 import { ToolLine } from './ToolLine.tsx';
 import { UserMessage } from './UserMessage.tsx';
 
@@ -14,7 +15,7 @@ const AWAY_PX = 200;
 
 /** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
 export function Feed() {
-  const { items, compacting } = useAppSelector(selectFeed);
+  const { items, compacting, busy } = useAppSelector(selectFeed);
   const t = useT();
   const dispatch = useAppDispatch();
   const root = useRef<HTMLDivElement>(null);
@@ -64,6 +65,15 @@ export function Feed() {
         </div>
       )}
       {items.map((it, i) => {
+        if (it.kind === 'tool') {
+          // a run of consecutive actions is drawn once, by its first item; one action alone stays a plain line
+          if (items[i - 1]?.kind === 'tool') return null;
+          let end = i + 1;
+          while (items[end]?.kind === 'tool') end++;
+          if (end - i === 1) return <ToolLine key={`tool:${it.id}:${i}`} item={it} />;
+          const run = items.slice(i, end) as Extract<typeof it, { kind: 'tool' }>[];
+          return <ToolGroup key={`group:${it.id}:${i}`} items={run} live={busy && end === items.length} />;
+        }
         switch (it.kind) {
           case 'user':
             return it.idle ? <IdleCompactLine key={it.id} item={it} /> : <UserMessage key={it.id} item={it} />;
@@ -73,8 +83,6 @@ export function Feed() {
                 <Markdown text={it.text} final={it.final} />
               </div>
             );
-          case 'tool':
-            return <ToolLine key={`tool:${it.id}:${i}`} item={it} />;
           case 'done':
             return <DoneLine key={`done:${i}`} item={it} />;
           case 'permission':

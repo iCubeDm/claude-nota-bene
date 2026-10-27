@@ -47,6 +47,8 @@ export const ru = {
   commentPh: 'Комментарий…',
   popHint: '⌘/Ctrl+Enter — добавить · Esc — отмена',
   add: 'Добавить',
+  nActions: (n: number) => `${n} ${{ one: 'действие', few: 'действия' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'действий'}`,
+  nErrors: (n: number) => `${n} ${{ one: 'ошибка', few: 'ошибки' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'ошибок'}`,
   nComments: (n: number) => `${n} ${{ one: 'комментарий', few: 'комментария' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'комментариев'}`,
   commentsLc: 'комментарии',
   srcChat: 'чат',

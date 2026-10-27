@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientMessage } from '@nota-bene/shared';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
@@ -176,4 +176,58 @@ it('scrolled up: a "jump to the latest" button appears, marks new items, and scr
   pane.scrollTop = 4400; // arrived at the end
   fireEvent.scroll(pane);
   expect(screen.queryByRole('button', { name: 'Jump to the latest' })).toBeNull();
+});
+
+describe('action groups', () => {
+  const tool = (id: string, name: string, cmd: string) => ({ type: 'tool_use', id, name, input: { command: cmd } });
+  const result = (id: string, isError = false) => ({ type: 'tool_result', tool_use_id: id, content: 'out', is_error: isError });
+  function run(store: ReturnType<typeof makeStore>, n: number, o: { errors?: number; end?: boolean } = {}) {
+    act(() => {
+      store.dispatch(serverEvent({ kind: 'user', id: 'u1', text: 'go', ts: 0 } as never));
+      for (let i = 1; i <= n; i++) {
+        store.dispatch(serverEvent({ kind: 'sdk', ts: i, m: { type: 'assistant', uuid: `a${i}`, message: { content: [tool(`t${i}`, 'Bash', `cmd-${i}`)] } } as never }));
+        store.dispatch(serverEvent({ kind: 'sdk', ts: i, m: { type: 'user', message: { content: [result(`t${i}`, i <= (o.errors ?? 0))] } } as never }));
+      }
+      if (o.end) store.dispatch(serverEvent({ kind: 'sdk', ts: 99, m: { type: 'result', subtype: 'success', duration_ms: 1000, user_message_uuids: ['u1'] } as never }));
+    });
+  }
+
+  it('a single action stays a plain line', () => {
+    const { store, view } = setup();
+    run(store, 1, { end: true });
+    expect(view.container.querySelector('[data-kind="tool-group"]')).toBeNull();
+    expect(screen.getByRole('button', { name: /Bash · cmd-1/ })).toBeInTheDocument();
+  });
+
+  it('consecutive actions fold into "N actions", collapsed; a click shows every line, each still expandable', () => {
+    const { store, view } = setup();
+    run(store, 3, { end: true });
+    const group = view.container.querySelector('[data-kind="tool-group"]')!;
+    const head = screen.getByRole('button', { name: '3 actions' });
+    expect(head).toHaveAttribute('aria-expanded', 'false');
+    expect(group.querySelectorAll('[data-kind="tool"]')).toHaveLength(0); // done: nothing below the head
+    fireEvent.click(head);
+    expect(group.querySelectorAll('[data-kind="tool"]')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: /Bash · cmd-2/ }));
+    expect(screen.getByTestId('tool-panel')).toHaveTextContent('cmd-2');
+  });
+
+  it('while the turn runs, the last action shows under the head', () => {
+    const { store, view } = setup();
+    run(store, 2);
+    const group = view.container.querySelector('[data-kind="tool-group"]')!;
+    const shown = [...group.querySelectorAll('[data-kind="tool"]')];
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toHaveTextContent('Bash · cmd-2');
+  });
+
+  it('errors are counted on the head in red, the group stays collapsed', () => {
+    setLang('ru');
+    const { store } = setup();
+    run(store, 5, { errors: 2, end: true });
+    const head = screen.getByRole('button', { name: /^5 действий/ });
+    expect(head).toHaveTextContent('5 действий · 2 ошибки');
+    expect(head.querySelector('.text-destructive')).toHaveTextContent('2 ошибки');
+    expect(head).toHaveAttribute('aria-expanded', 'false');
+  });
 });
