@@ -242,6 +242,7 @@ export const en: Dict = {
   mode_auto_desc: 'A classifier approves safe actions itself, asks about the rest',
   // model and effort
   modelTip: 'Model and effort · a change applies from the next reply',
+  modelOthers: 'Other versions',
   modelUnknown: 'Model',
   effortLabel: 'Effort',
   effort_low: 'Low',

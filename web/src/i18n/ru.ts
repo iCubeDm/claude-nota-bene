@@ -239,6 +239,7 @@ export const ru = {
   mode_auto_desc: 'Безопасное одобряет сам классификатор, спорное спрашивает',
   // model and effort
   modelTip: 'Модель и усилие · смена применяется со следующего ответа',
+  modelOthers: 'Другие версии',
   modelUnknown: 'Модель',
   effortLabel: 'Усилие',
   effort_low: 'Низкое',

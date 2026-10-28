@@ -135,3 +135,36 @@ it('is disabled and sends nothing for a server older than protocol 6', async () 
   expect(pill()).toBeDisabled(); // protocol 5: the server would not know the message
   expect(sent).toEqual([]);
 });
+
+it('M3: no warning on a row that resolves to the model in use (default and opus); every row warns when the model is unmatched', async () => {
+  const { emit } = setup();
+  const twin: ModelOption[] = [{ value: 'default', name: 'Default', description: 'd', resolved: 'claude-opus-5' }, { value: 'opus', name: 'Opus 5', description: 'o', resolved: 'claude-opus-5' }, { value: 'haiku', name: 'Haiku 5', description: 'h', resolved: 'claude-haiku-5' }];
+  emit({ kind: 'hello', protocol: 6 }, { kind: 'models', models: twin }, { kind: 'model', model: 'claude-opus-5' }, { kind: 'stats', stats: { context: { used: 50_000, max: 200_000, pct: 25 }, limits: null, cost: null } });
+  let menu = await open();
+  expect(within(menu).getAllByTestId('cache-warn')).toHaveLength(1); // Haiku only
+  expect(within(within(menu).getByRole('group', { name: 'Opus 5' })).queryByTestId('cache-warn')).toBeNull();
+  await userEvent.keyboard('{Escape}');
+  emit({ kind: 'model', model: 'claude-mystery' });
+  menu = await open();
+  expect(within(menu).getAllByTestId('cache-warn')).toHaveLength(3);
+});
+
+it('13 rows are too long: aliases first, explicit ids under a collapsed "Other versions"; open when the current model is one of them', async () => {
+  const { emit } = setup();
+  const list: ModelOption[] = [
+    { value: 'sonnet', name: 'Sonnet', description: 's', resolved: 'claude-sonnet-5-5' },
+    { value: 'claude-sonnet-5', name: 'Sonnet 5', description: 'old', resolved: 'claude-sonnet-5' },
+  ];
+  emit({ kind: 'hello', protocol: 6 }, { kind: 'models', models: list }, { kind: 'model', model: 'claude-sonnet-5-5' });
+  const menu = await open();
+  expect(within(menu).getByText('Sonnet')).toBeInTheDocument();
+  expect(within(menu).queryByText('Sonnet 5')).toBeNull();
+  await userEvent.click(within(menu).getByText(/Other versions/));
+  expect(within(menu).getByText('Sonnet 5')).toBeInTheDocument();
+  await userEvent.click(within(menu).getByText(/Other versions/));
+  expect(within(menu).queryByText('Sonnet 5')).toBeNull();
+  await userEvent.keyboard('{Escape}');
+  emit({ kind: 'model', model: 'claude-sonnet-5' });
+  const m2 = await open();
+  expect(within(m2).getByText('Sonnet 5')).toBeInTheDocument(); // the model in use is listed there: shown open
+});
