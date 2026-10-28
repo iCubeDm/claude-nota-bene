@@ -1,12 +1,13 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Provider } from 'react-redux';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
 import { SERVER_RESTART_TIMEOUT_MS } from '@/controls/slice.ts';
 import { Header } from './Header.tsx';
+import { INFO_POLL_MS } from './RestartMenu.tsx';
 import { getToasts, resetToasts } from './toast.ts';
 
 globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
@@ -32,7 +33,7 @@ function setup() {
 }
 
 beforeEach(() => { setLang('en'); resetToasts(); });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it('hides the server item when the server is not supervised', async () => {
   mockFetch(false, () => new Response('', { status: 200 }));
@@ -88,4 +89,69 @@ it('no reconnect within 30 s releases the UI and toasts', async () => {
   await act(async () => { await vi.advanceTimersByTimeAsync(SERVER_RESTART_TIMEOUT_MS + 10); });
   expect(document.getElementById('conn')).toHaveTextContent('');
   expect(getToasts()).toHaveLength(1);
+});
+
+describe('the "code updated" button', () => {
+  const label = 'Restart server · code updated';
+  function mockInfo(info: () => object) {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      return url === '/info' ? new Response(JSON.stringify(info())) : new Response('');
+    }));
+    return calls;
+  }
+
+  it('is hidden when not supervised, even if the code changed', async () => {
+    mockInfo(() => ({ supervised: false, codeChanged: true }));
+    setup();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: label })).toBeNull();
+  });
+
+  it('is hidden when the code did not change', async () => {
+    mockInfo(() => ({ supervised: true, codeChanged: false }));
+    setup();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: label })).toBeNull();
+  });
+
+  it('is shown when supervised and changed; a click POSTs /restart-server; disabled while switching', async () => {
+    const calls = mockInfo(() => ({ supervised: true, codeChanged: true }));
+    setup();
+    const btn = await screen.findByRole('button', { name: label });
+    expect(btn).toHaveAttribute('title', "the server's code changed after it started; the session resumes");
+    expect(btn).not.toBeDisabled();
+    await userEvent.click(btn);
+    await waitFor(() => expect(calls).toContain('/restart-server'));
+    expect(screen.getByRole('button', { name: label })).toBeDisabled();
+  });
+
+  it('the 20 s poll (visible tab) and a window focus pick up a change', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible'); // jsdom says 'prerender'
+    let changed = false;
+    const calls = mockInfo(() => ({ supervised: true, codeChanged: changed }));
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // before mount: the interval must be a fake one
+    setup();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    changed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(INFO_POLL_MS + 10); });
+    expect(await screen.findByRole('button', { name: label })).toBeInTheDocument();
+    cleanup();
+    const n = calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(INFO_POLL_MS * 2); });
+    expect(calls).toHaveLength(n); // unmounted: timer and listener are gone
+    window.dispatchEvent(new Event('focus'));
+    expect(calls).toHaveLength(n);
+  });
+
+  it('a window focus re-reads /info', async () => {
+    let changed = false;
+    const calls = mockInfo(() => ({ supervised: true, codeChanged: changed }));
+    setup();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    changed = true;
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(await screen.findByRole('button', { name: label })).toBeInTheDocument();
+  });
 });

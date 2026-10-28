@@ -17,6 +17,7 @@ import { httpHandler, isAllowedHost } from './http.ts';
 import { SwitchError, createSessionManager } from './session.ts';
 import type { IdleConfig } from './idle.ts';
 import { listSessionsView } from './sessions.ts';
+import { codeChecker } from './codeStamp.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
 import { controlToken, systemRoutes } from './system.ts';
@@ -96,6 +97,7 @@ export async function startServer(o: {
     // supervised = our launcher is still our parent: an orphan (launcher killed) must not offer a restart nobody catches
     const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1'
       && process.ppid === Number(process.env.NOTA_BENE_LAUNCHER_PID);
+    const codeChanged = codeChecker({ repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..') });
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -174,7 +176,7 @@ export async function startServer(o: {
       info: () => {
         const { id, root, title, model } = manager.info();
         // busy and clients: for another window's Settings → Windows
-        return { root, session: id, title, model, supervised: supervised(), busy: manager.busy(), clients: hub.clients() };
+        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients() };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);

@@ -278,6 +278,8 @@ export const en: Dict = {
   restartAgent: 'Restart the agent',
   restartServer: 'Restart the server',
   restartServerTip: 'picks up server code changes; the window reconnects by itself',
+  codeUpdated: 'Restart server · code updated',
+  codeUpdatedTip: "the server's code changed after it started; the session resumes",
   restartFail: 'Could not restart the server: ',
   restartMenu: 'Restart menu',
   switchFail: 'Could not switch: ',
