@@ -214,10 +214,11 @@ describe('nota-bene launcher', () => {
   }, 15000);
 
   // what Claude Code sends when the /nb background task is stopped
-  it.each(['SIGTERM', 'SIGINT'] as const)('%s stops the child, removes the entry and exits 0 without a relaunch', async (sig) => {
+  // SIGTERM takes the same handler (the parent-shell test below goes through it)
+  it('SIGINT stops the child, removes the entry and exits 0 without a relaunch', async () => {
     const r = launch(['--port', '4795']);
     const w = await waitFor(() => windows()['4795']);
-    r.p.kill(sig);
+    r.p.kill('SIGINT');
     expect(await r.exited).toBe(0);
     expect(windows()['4795']).toBeUndefined();
     expect(alive(w.pid)).toBe(false);
@@ -395,7 +396,29 @@ describe('nota-bene launcher', () => {
     expect(alive(w.launcherPid!)).toBe(true);
     expect(fs.existsSync(path.join(tmp, 'nota-bene-4793.log'))).toBe(true);
     expect(await info(4793)).toMatchObject({ root: project });
-  }, 15000);
+    // a second launch on the same folder, plain and --detach, gives way to the window
+    const r2 = launch([]);
+    expect(await r2.exited, r2.err()).toBe(0);
+    expect(r2.out()).toBe('nota-bene: already open at http://127.0.0.1:4793\n');
+    const d2 = launch(['--detach']);
+    expect(await d2.exited, d2.err()).toBe(0);
+    expect(d2.out()).toBe('already-open http://127.0.0.1:4793\n');
+    expect(Object.keys(windows())).toEqual(['4793']);
+    // a window missing from the registry (a failed registry write, a prototype window) is found by /info
+    const other = path.join(tmp, 'project-b');
+    fs.mkdirSync(other);
+    const s2 = http.createServer((_, res) => res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: other })));
+    await new Promise<void>((r) => s2.listen(4792, '127.0.0.1', () => r()));
+    try {
+      const d3 = launch(['--detach'], {}, FAKE, other);
+      expect(await d3.exited, d3.err()).toBe(0);
+      expect(d3.out()).toBe('already-open http://127.0.0.1:4792\n');
+      expect(Object.keys(windows())).toEqual(['4793']);
+    } finally {
+      s2.closeAllConnections();
+      await new Promise((r) => s2.close(r));
+    }
+  }, 40000);
 
   it('two parallel --detach launches on one folder end with ONE window: one says opened, the other already-open', async () => {
     const [a, b] = [launch(['--detach']), launch(['--detach'])];
@@ -413,32 +436,6 @@ describe('nota-bene launcher', () => {
     expect(roots.filter((r) => r === project)).toHaveLength(1);
     expect(fs.existsSync(launchLock())).toBe(false); // released once the window was registered
   }, 30000);
-
-  it('a launch while a window serves the folder says "already open" with its URL and exits 0', async () => {
-    launch(['--port', '4794']);
-    await waitFor(() => windows()['4794']);
-    const r = launch([]);
-    expect(await r.exited, r.err()).toBe(0);
-    expect(r.out()).toBe('nota-bene: already open at http://127.0.0.1:4794\n');
-    const d = launch(['--detach']);
-    expect(await d.exited, d.err()).toBe(0);
-    expect(d.out()).toBe('already-open http://127.0.0.1:4794\n');
-    expect(Object.keys(windows())).toEqual(['4794']);
-  }, 20000);
-
-  it('a window missing from the registry (a failed registry write, a prototype window) is found by /info', async () => {
-    const s = http.createServer((_, res) => res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: project })));
-    await new Promise<void>((r) => s.listen(4793, '127.0.0.1', () => r()));
-    try {
-      const d = launch(['--detach']);
-      expect(await d.exited, d.err()).toBe(0);
-      expect(d.out()).toBe('already-open http://127.0.0.1:4793\n');
-      expect(windows()).toEqual({});
-    } finally {
-      s.closeAllConnections();
-      await new Promise((r) => s.close(r));
-    }
-  }, 15000);
 
   it.each([
     ['its owner is dead', (lock: string) => fs.writeFileSync(path.join(lock, 'pid'), String(deadPid()))],
