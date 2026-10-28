@@ -28,9 +28,9 @@ export const ONCE = (c: string) => !/^(Arrow|Comma|Period|Key[JL])/.test(c);
 export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string, box?: HTMLElement | null): string | null {
   const video = el instanceof HTMLVideoElement;
   const dur = Number.isFinite(el.duration) ? el.duration : Infinity;
-  // milliseconds: 0.1 s steps must not pile up float noise in currentTime
-  const seek = (to: number) => void (el.currentTime = Math.max(0, Math.min(dur, Math.round(to * 1000) / 1000)));
-  const by = (d: number) => (seek(el.currentTime + d), sec(d, unit));
+  const seek = (to: number) => void (el.currentTime = Math.max(0, Math.min(dur, to)));
+  // a step lands on whole milliseconds: 0.1 s steps must not pile up float noise (the frame step stays exact: 1/30 s)
+  const by = (d: number) => (seek(Math.round((el.currentTime + d) * 1000) / 1000), sec(d, unit));
   const vol = (d: number) => {
     if (d > 0 && el.muted) el.muted = false;
     el.volume = Math.max(0, Math.min(1, Math.round((el.volume + d) * 100) / 100));

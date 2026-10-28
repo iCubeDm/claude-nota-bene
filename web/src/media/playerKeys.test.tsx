@@ -102,6 +102,12 @@ it('frame step only while paused, video only; F fullscreens the player container
   expect(own).not.toHaveBeenCalled();
 });
 
+it('the frame step is not rounded to milliseconds: 30 steps are one second, no frame lost', () => {
+  const s = setup();
+  for (let i = 0; i < 30; i++) s.press('Period');
+  expect(s.st.time).toBeCloseTo(21, 9);
+});
+
 it('audio: no fullscreen, no frame step, but the rest works', () => {
   const s = setup('s.mp3');
   expect(s.press('KeyF')).toBe(true);
