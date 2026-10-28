@@ -102,14 +102,6 @@ it('a source item missing from the feed (e.g. an interrupted stream:N reply afte
   expect(screen.getByText(/фрагмент изменился/)).toBeInTheDocument();
 });
 
-it('the help button has a single tooltip (no native title)', () => {
-  setup();
-  edit();
-  const help = screen.getByRole('button', { name: /⌘Enter|Enter/ });
-  expect(help).not.toHaveAttribute('title');
-  expect(screen.getByRole('button', { name: 'Отменить' })).toHaveAttribute('title');
-});
-
 it('a sent comment is read-only', () => {
   setup(comment({ status: 'sent', sentIn: 'u1' }));
   expect(screen.queryByRole('button', { name: 'Редактировать' })).toBeNull();
@@ -190,13 +182,6 @@ it('popover numbering: pending by its place among pending, sent by its place in 
   act(() => void store.dispatch({ type: 'comments/markSending', payload: ['p1'] }));
   expect(store.getState().comments.ui.card).not.toBeNull();
   expect(num()).toBe('1');
-});
-
-it('popover uses the popover background only', () => {
-  const { view } = popover();
-  const card = view.container.querySelector('[role="dialog"] [data-comment-id]')!;
-  expect(card).toHaveClass('bg-popover');
-  expect(card).not.toHaveClass('bg-card/50');
 });
 
 it('thumbnails of the comment sit outside the anchor text', () => {

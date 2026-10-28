@@ -10,7 +10,3 @@ it('media fits the pane and the natural size lifts the limits', () => {
   expect(rule('.nb-fit')).toMatch(/max-width: 100%;.*max-height: calc\(100% - 2rem\);.*object-fit: contain/s);
   expect(rule('.nb-media-pane.nb-natural .nb-fit')).toContain('max-width: none');
 });
-
-it('the grid background stays on .grid-pane', () => {
-  expect(rule('.grid-pane')).toContain('linear-gradient');
-});

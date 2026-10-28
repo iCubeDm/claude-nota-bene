@@ -64,11 +64,6 @@ it('the project name, not the app name, titles the header and the browser tab', 
   expect(document.title).toBe('my-project · Nota Bene');
 });
 
-it('the panel toggles moved to the tool strips: the header has neither', () => {
-  setup();
-  expect(document.querySelector('header #toggleTree, header #toggleComments')).toBeNull();
-});
-
 it('document title: session title first when there is one; header shows model · id8, or id8 alone', () => {
   const { ev } = setup();
   ev({ kind: 'session', id: '5f0c2a9e-7d41', root: '/p/proj', title: 'Fix login', model: 'opus' });

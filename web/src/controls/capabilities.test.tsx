@@ -77,7 +77,7 @@ it('clear:false hides Clear; idleCompact:false hides only the idle toggle; usage
   expect(screen.queryByRole('meter')).toBeNull();
 });
 
-it('the pill menu offers only the agent\'s modes, and Shift+Tab cycles through them', async () => {
+it('the pill menu offers only the agent\'s modes, and Shift+Tab cycles through them (nextMode wraps)', async () => {
   const { sent, emit, hello } = setup();
   emit({ kind: 'mode', mode: 'default' });
   hello({ modes: ['default', 'plan'] });
@@ -88,9 +88,7 @@ it('the pill menu offers only the agent\'s modes, and Shift+Tab cycles through t
   screen.getByRole('textbox').focus();
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
   expect(sent.filter((m) => m.type === 'mode')).toMatchObject([{ mode: 'plan' }]);
-});
-
-it('nextMode skips the modes the agent lacks and wraps; a mode outside the list goes to its first', () => {
+  // nextMode itself: wraps, and a mode outside the list goes to its first
   expect(nextMode('plan', ['default', 'plan'])).toBe('default');
   expect(nextMode('default', ['default', 'plan'])).toBe('plan');
   expect(nextMode('auto', ['default', 'plan'])).toBe('default');
