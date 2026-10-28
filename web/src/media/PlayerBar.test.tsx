@@ -213,3 +213,28 @@ it('a video bar hides after 2.5 s of playing without the pointer, shows on movem
     vi.useRealTimers();
   }
 });
+
+it('a video bar sits on the picture: its width and bottom edge, centred; a narrow picture gets the minimum width', () => {
+  const rects = new Map<Element, DOMRect>();
+  const R = (x: number, y: number, w: number, h: number) => ({ x, y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h, toJSON() { return this; } }) as DOMRect;
+  vi.restoreAllMocks();
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) { return rects.get(this) ?? R(0, 0, 1000, 20); });
+  const mk = (vw: number, vh: number) => {
+    const s = setup();
+    Object.defineProperty(s.el, 'videoWidth', { value: vw, configurable: true });
+    Object.defineProperty(s.el, 'videoHeight', { value: vh, configurable: true });
+    rects.set(s.box.current!, R(0, 0, 1000, 800));
+    rects.set(s.el, R(0, 0, 1000, 800));
+    return s;
+  };
+  // 640x360 in a 1000x800 element: picture 1000x562.5 at y=118.75, so the bar is 1000 wide and 118.75 above the bottom
+  const a = mk(640, 360);
+  act(() => void a.el.dispatchEvent(new Event('loadedmetadata')));
+  const bar = () => document.querySelector<HTMLElement>('[data-player-bar]')!;
+  expect([bar().style.left, bar().style.width, bar().style.bottom]).toEqual(['0px', '1000px', '118.75px']);
+  cleanup();
+  // 100x400 in 1000x800: picture 200x800 at x=400; narrower than 360, so 360 wide centred on it (x=320)
+  const b = mk(100, 400);
+  act(() => void b.el.dispatchEvent(new Event('loadedmetadata')));
+  expect([bar().style.left, bar().style.width, bar().style.bottom]).toEqual(['320px', '360px', '0px']);
+});

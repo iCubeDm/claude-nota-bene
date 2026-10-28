@@ -8,6 +8,7 @@ import { BarButton, SpeedMenu, VolumeControl } from './PlayerControls.tsx';
 import { applyPlayerKey, startAnnotate, type Flash } from './playerKeys.ts';
 import { EnterFullscreenIcon, ExitFullscreenIcon, PauseIcon, PencilIcon, PipIcon, PlayIcon, ReplayIcon } from './playerIcons.tsx';
 import { Timeline } from './Timeline.tsx';
+import { useBarRect } from './useBarRect.ts';
 import { formatTime, type MarkerIn } from './timelineMath.ts';
 import { useMediaState } from './useMediaState.ts';
 
@@ -87,6 +88,7 @@ export function PlayerBar({ media, box, tabId, path, refName, flash }: {
   const [scrub, setScrub] = useState(false);
   const [hover, setHover] = useState(false);
   const fs = useIsFullscreen(box);
+  const place = useBarRect(media as HTMLVideoElement, box, video);
   const visible = useBarVisible(box, state.paused, menu || scrub || hover, flash);
   const show = !video || visible;
   const unit = t('unitSec');
@@ -102,8 +104,9 @@ export function PlayerBar({ media, box, tabId, path, refName, flash }: {
       inert={!show}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
+      style={video && place ? { left: place.left, width: place.width, bottom: place.bottom } : undefined}
       className={video
-        ? `pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 to-transparent px-3 pt-10 pb-1.5 text-white transition-opacity duration-200 ${show ? 'opacity-100' : 'opacity-0'}`
+        ? `pointer-events-none absolute ${place ? '' : 'inset-x-0 bottom-0 '}z-20 bg-gradient-to-t from-black/75 to-transparent px-3 pt-10 pb-1.5 text-white transition-opacity duration-200 ${show ? 'opacity-100' : 'opacity-0'}`
         : 'w-full max-w-[min(36rem,calc(100%-2rem))] rounded-lg border border-border bg-card px-3 pt-1.5 pb-1 text-foreground'}
     >
       <div className={video ? 'pointer-events-auto' : ''}>

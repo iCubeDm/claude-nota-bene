@@ -6,7 +6,7 @@ export type MediaSnapshot = {
   buffered: [number, number][];
 };
 
-const EVENTS = ['play', 'playing', 'pause', 'ended', 'seeking', 'seeked', 'timeupdate', 'durationchange', 'loadedmetadata', 'progress', 'volumechange', 'ratechange', 'emptied'] as const;
+const EVENTS = ['play', 'playing', 'pause', 'ended', 'seeking', 'seeked', 'timeupdate', 'durationchange', 'loadedmetadata', 'progress', 'loadeddata', 'canplay', 'canplaythrough', 'suspend', 'waiting', 'volumechange', 'ratechange', 'emptied'] as const;
 
 function read(el: HTMLMediaElement): MediaSnapshot {
   const buffered: [number, number][] = [];
