@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type Mode, type ServerEvent, type Stats } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type EffortLevel, type Mode, type ModelOption, type ServerEvent, type Stats } from '@nota-bene/shared';
 import { isWire, mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
@@ -57,7 +57,15 @@ export type FakeSessionScript = {
 };
 
 /** A --fake script: the turns alone (the M0-M3 format), or the turns and a session list. */
-export type FakeScript = FakeTurn[] | { turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number; /** what the fake agent can do; default: Claude's full set */ capabilities?: Partial<Capabilities> };
+export type FakeScript = FakeTurn[] | {
+  turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number;
+  /** what the fake agent can do; default: Claude's full set */ capabilities?: Partial<Capabilities>;
+  /** the models it offers (default none); with any, every init reports the running one (the first until one is picked) */
+  models?: ModelOption[];
+};
+
+/** What a fake agent knows of its model: the list, the one running, and what was asked of it (shared by the backend's tests). */
+type ModelState = { options: ModelOption[]; running?: string; sets: (string | null)[]; efforts: (EffortLevel | null)[] };
 
 /**
  * The fake fills only the fields later code reads (type, subtype, session_id, uuid,
@@ -105,10 +113,12 @@ class FakeSession implements FakeAgentSession {
   private readonly turns: FakeTurn[];
   private readonly ask: PermissionAsk;
   private readonly modes: Mode[];
+  private readonly mdl: ModelState;
   private sessionId: string; // a /clear replaces it
 
-  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], resume?: string, fork?: boolean) {
+  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], mdl: ModelState, resume?: string, fork?: boolean) {
     this.turns = turns;
+    this.mdl = mdl;
     this.modes = modes;
     this.ask = ask;
     // a resumed CLI session keeps its id; a fork gets a new one
@@ -131,6 +141,26 @@ class FakeSession implements FakeAgentSession {
 
   async setPermissionMode(mode: Mode): Promise<void> {
     this.modes.push(mode);
+  }
+
+  async supportedModels(): Promise<ModelOption[]> {
+    return this.mdl.options;
+  }
+
+  async setModel(model: string | null): Promise<void> {
+    this.mdl.sets.push(model);
+    this.mdl.running = model ?? undefined;
+  }
+
+  async setEffort(effort: EffortLevel | null): Promise<void> {
+    this.mdl.efforts.push(effort);
+  }
+
+  /** the id an init reports, as the CLI does: the resolved id of the row picked (else of the first, the default) */
+  private reportedModel(t: FakeTurn): string | undefined {
+    if (t.model) return t.model;
+    const o = this.mdl.options.find((x) => x.value === this.mdl.running || x.resolved === this.mdl.running) ?? this.mdl.options[0];
+    return this.mdl.running && !o ? this.mdl.running : o && (o.resolved ?? o.value);
   }
 
   async fileSuggestions(): Promise<string[]> {
@@ -232,7 +262,7 @@ class FakeSession implements FakeAgentSession {
       // like the CLI: init at the start of every turn
       yield sdk({
         type: 'system', subtype: 'init', session_id: this.sessionId, uuid: `fake-init-${n}`,
-        ...(t.initMode ? { permissionMode: t.initMode } : {}), ...(t.model ? { model: t.model } : {}),
+        ...(t.initMode ? { permissionMode: t.initMode } : {}), ...(this.reportedModel(t) ? { model: this.reportedModel(t) } : {}),
       });
       let k = 0;
       for (const f of t.frames ?? []) {
@@ -312,7 +342,7 @@ class FakeSession implements FakeAgentSession {
 
 let forkCount = 0;
 
-type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: boolean };
+type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: boolean; model?: string; effort?: EffortLevel };
 
 /**
  * `startModes` records the mode each agent started with, `setModes` every setPermissionMode call, `starts` every
@@ -321,10 +351,16 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities> } = {},
-): Omit<AgentBackend, 'start'> & { start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[] } {
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[] } = {},
+): Omit<AgentBackend, 'start'> & {
+  start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[];
+  /** every setModel / setEffort call, in order */
+  setModels: (string | null)[]; setEfforts: (EffortLevel | null)[];
+} {
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
+  const setModels: (string | null)[] = [];
+  const setEfforts: (EffortLevel | null)[] = [];
   const starts: Started[] = [];
   const cwdOf = (x: FakeSessionScript) => (x.cwd ? path.resolve(o.base ?? '/', x.cwd) : undefined);
   const real = (p: string) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
@@ -338,11 +374,16 @@ export function fakeBackend(
     capabilities: { ...CLAUDE_CAPABILITIES, ...o.capabilities },
     startModes,
     setModes,
+    setModels,
+    setEfforts,
     starts,
     start: (s) => {
       startModes.push(s.permissionMode);
-      starts.push({ cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}), ...(s.fork ? { fork: true } : {}) });
-      return new FakeSession(turns, s.ask, setModes, s.resume, s.fork);
+      starts.push({
+        cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}), ...(s.fork ? { fork: true } : {}),
+        ...(s.model ? { model: s.model } : {}), ...(s.effort ? { effort: s.effort } : {}),
+      });
+      return new FakeSession(turns, s.ask, setModes, { options: o.models ?? [], ...(s.model ? { running: s.model } : {}), sets: setModels, efforts: setEfforts }, s.resume, s.fork);
     },
     listSessions: async () => sessions.map((x) => {
       const cwd = cwdOf(x);
@@ -367,5 +408,5 @@ export function fakeBackend(
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
   return Array.isArray(script)
     ? fakeBackend(script, { base })
-    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}) });
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}) });
 }

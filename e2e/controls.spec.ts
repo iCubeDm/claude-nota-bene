@@ -99,6 +99,24 @@ test.afterEach(async ({ page }) => {
   await setMode(page, t, 'default');
 });
 
+test('model pill: pick another model and an effort; a reload keeps them @controls', async ({ page }) => {
+  await open(page);
+  const modelPill = page.getByRole('button', { name: en.modelTip });
+  await expect(modelPill).toBeEnabled(); // the list has arrived
+  await modelPill.click();
+  await page.getByRole('menuitem', { name: /^Opus 5/ }).click();
+  await expect(modelPill).toHaveText('Opus 5');
+  await modelPill.click();
+  await page.getByRole('group', { name: 'Opus 5' }).getByRole('menuitem', { name: en.effort_max }).click();
+  await expect(modelPill).toHaveText(`Opus 5 · ${en.effort_max}`);
+  await page.reload();
+  await expect(modelPill).toHaveText(`Opus 5 · ${en.effort_max}`);
+  // leave the shared server on its first model, as the other tests expect
+  await modelPill.click();
+  await page.getByRole('menuitem', { name: /^Sonnet 5/ }).click();
+  await expect(modelPill).toHaveText('Sonnet 5');
+});
+
 test('plan card: comment on it, approve from acceptEdits, one restoring mode message @controls', async ({ page }) => {
   const t = track(page);
   await open(page);

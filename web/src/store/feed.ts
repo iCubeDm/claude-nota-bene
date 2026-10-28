@@ -260,6 +260,8 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'comments': // handled by the comments store, not the feed
     case 'stats': // handled by the stats store (M4)
     case 'mode':
+    case 'model': // the controls slice
+    case 'models':
     case 'idle-compact': // the controls slice
     case 'hello':
     case 'occupied': // the conn slice (M7-15)

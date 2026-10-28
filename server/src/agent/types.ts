@@ -1,4 +1,4 @@
-import type { AgentEvent, Capabilities, ImageType, Mode, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, Stats } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
@@ -14,6 +14,12 @@ export interface AgentSession {
   fileSuggestions(query: string): Promise<string[]>;
   /** Changes the permission mode of the running CLI; rejects when the CLI refuses. */
   setPermissionMode(mode: Mode): Promise<void>;
+  /** The models the agent offers; rejects when the CLI cannot answer. */
+  supportedModels(): Promise<ModelOption[]>;
+  /** From the next response on (a running turn goes on); null: the agent's default. Rejects when the CLI refuses. */
+  setModel(model: string | null): Promise<void>;
+  /** From the next response on; null: the model's default effort. */
+  setEffort(effort: EffortLevel | null): Promise<void>;
   /** Context window usage; rejects when the CLI cannot answer. */
   contextUsage(): Promise<{ used: number; max: number; pct: number }>;
   /** Session cost and plan limits; throws UsageUnavailableError when the SDK has no usage API. */
@@ -32,7 +38,7 @@ export type SessionInfo = { customTitle?: string; summary?: string; firstPrompt?
 export interface AgentBackend {
   /** what this agent can do; sent in `hello`, enforced by the server (R-M7-15) */
   readonly capabilities: Capabilities;
-  start(o: { cwd: string; resume?: string; /** with resume: branch into a new session id (SDK forkSession) */ fork?: boolean; permissionMode: Mode; ask: PermissionAsk }): AgentSession;
+  start(o: { cwd: string; resume?: string; /** with resume: branch into a new session id (SDK forkSession) */ fork?: boolean; permissionMode: Mode; /** absent: the agent's default */ model?: string; effort?: EffortLevel; ask: PermissionAsk }): AgentSession;
   /** `attachments` receives the images found in the transcript; the events carry ImageRefs only. */
   /** Every project's sessions, newest first (sdk: listSessions({ limit: 300 })). */
   listSessions(): Promise<SessionListEntry[]>;

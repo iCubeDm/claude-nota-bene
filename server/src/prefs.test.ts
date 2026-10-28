@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { prefsKey, readPrefs, setIdleCompactPref, setModePref } from './prefs.ts';
+import { prefsKey, readPrefs, setIdleCompactPref, setModePref, setModelPref } from './prefs.ts';
 
 let home: string;
 const prevHome = process.env.NOTA_BENE_HOME;
@@ -24,7 +24,7 @@ describe('prefs', () => {
   });
 
   it('defaults when the file is missing', () => {
-    expect(readPrefs()).toEqual({ modes: {}, idleCompact: {} });
+    expect(readPrefs()).toEqual({ modes: {}, models: {}, idleCompact: {} });
   });
   it('stores a mode per project dir and keeps the others', () => {
     setModePref('/a', 'plan');
@@ -39,13 +39,25 @@ describe('prefs', () => {
   });
   it('corrupt file falls back to defaults and is overwritten by the next save', () => {
     fs.writeFileSync(path.join(home, 'prefs.json'), '{');
-    expect(readPrefs()).toEqual({ modes: {}, idleCompact: {} });
+    expect(readPrefs()).toEqual({ modes: {}, models: {}, idleCompact: {} });
     setModePref('/a', 'plan');
     expect(readPrefs().modes[prefsKey('/a')]).toBe('plan');
   });
   it('drops unknown mode values', () => {
     fs.writeFileSync(path.join(home, 'prefs.json'), JSON.stringify({ modes: { '/a': 'bogus', '/b': 'plan' }, lang: 'en' }));
-    expect(readPrefs()).toEqual({ modes: { '/b': 'plan' }, lang: 'en', idleCompact: {} });
+    expect(readPrefs()).toEqual({ modes: { '/b': 'plan' }, models: {}, lang: 'en', idleCompact: {} });
+  });
+  it('stores a model with its effort per project, keeps the others and the modes, drops an empty effort', () => {
+    setModePref('/a', 'plan');
+    setModelPref('/a', { model: 'opus', effort: 'high' });
+    setModelPref('/b', { model: 'sonnet' });
+    setModelPref('/b', { model: 'haiku' });
+    expect(readPrefs().models).toEqual({ [prefsKey('/a')]: { model: 'opus', effort: 'high' }, [prefsKey('/b')]: { model: 'haiku' } });
+    expect(readPrefs().modes[prefsKey('/a')]).toBe('plan');
+  });
+  it('drops malformed model entries and unknown efforts on read', () => {
+    fs.writeFileSync(path.join(home, 'prefs.json'), JSON.stringify({ models: { '/a': 'opus', '/b': { model: '' }, '/c': { model: 'x', effort: 'ultra' }, '/d': { model: 'y', effort: 'max' } } }));
+    expect(readPrefs().models).toEqual({ '/c': { model: 'x' }, '/d': { model: 'y', effort: 'max' } });
   });
   it('leaves no tmp file', () => {
     setModePref('/a', 'plan');

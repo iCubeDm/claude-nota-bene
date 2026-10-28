@@ -83,6 +83,14 @@ test('comments carry a sessionId: string id or null, required', () => {
   expect(P({ type: 'comments', sessionId: 5, items: [] })).toHaveProperty('error');
   expect(P({ type: 'comments', sessionId: SID, items: [] })).toEqual({ type: 'comments', sessionId: SID, items: [] });
 });
+test('model needs a model id; effort is one of the five levels; id is a short string', () => {
+  expect(P({ type: 'model', model: 'sonnet' })).toEqual({ type: 'model', model: 'sonnet' });
+  expect(P({ type: 'model', model: 'opus', effort: 'xhigh', id: 'a1', extra: 1 })).toEqual({ type: 'model', model: 'opus', effort: 'xhigh', id: 'a1' });
+  for (const bad of [{}, { model: '' }, { model: 3 }, { model: 'x'.repeat(201) }, { model: 'a', effort: 'ultra' }, { model: 'a', effort: 3 }, { model: 'a', id: 5 }, { model: 'a', id: 'x'.repeat(65) }]) {
+    expect(P({ type: 'model', ...bad })).toHaveProperty('error');
+  }
+});
+
 test('mode accepts the four modes only', () => {
   for (const mode of ['default', 'acceptEdits', 'plan', 'auto']) expect(P({ type: 'mode', mode })).toEqual({ type: 'mode', mode });
   expect(P({ type: 'mode', mode: 'yolo' })).toHaveProperty('error');

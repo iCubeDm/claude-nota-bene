@@ -58,9 +58,11 @@ export type Comment = {
  * message only to a server that announced it. 1: `activity` and `idle-compact`; 2: `mode` ids answered with `ack`; 3: the `fire` quick label; 4: media anchors and `/marks`;
  * 5: the agent's output as `agent` events (AgentEvent) instead of raw SDK frames; `replay.earlier`; one tab per window
  * (`occupied`, `taken-over`, the client's `takeover`, close code 4001, `?tab=` and `?passive=1` on the ws url);
- * `hello.capabilities`.
+ * `hello.capabilities`;
+ * 6: the model and effort switch: the client's `model` (ids answered with `ack`), the server's `model` and `models` events,
+ * `capabilities.models`.
  */
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 
 /** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
 export const TAKEN_OVER_CODE = 4001;
@@ -68,16 +70,27 @@ export const TAKEN_OVER_CODE = 4001;
 export const MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
 export type Mode = (typeof MODES)[number];
 
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+/**
+ * A model the agent offers. `value` is what is sent back to pick it (an alias such as `sonnet`); `resolved` the full id
+ * the agent reports for it once running (`claude-…`), to match the two; `efforts` only for a model that has effort levels.
+ */
+export type ModelOption = { value: string; name: string; description: string; resolved?: string; efforts?: EffortLevel[] };
+/** a model with its effort; the model alone when the effort is the model's default */
+export type ModelChoice = { model: string; effort?: EffortLevel };
+
 /**
  * What the agent behind the server can do (R-M7-15), announced in `hello`; the UI hides a control whose capability is
  * false and the server refuses the matching client message. `modes`: the permission modes it offers (empty: no mode pill).
+ * `models`: it lists models and switches model and effort on a running session (the server refuses the `model` message otherwise).
  */
 export type Capabilities = {
-  compact: boolean; clear: boolean; modes: Mode[]; usage: boolean; fileSuggestions: boolean; fork: boolean; idleCompact: boolean;
+  compact: boolean; clear: boolean; modes: Mode[]; usage: boolean; fileSuggestions: boolean; fork: boolean; idleCompact: boolean; models: boolean;
 };
 /** Claude Code's set; the web assumes it when `hello` carries none (a server older than protocol 5). */
 export const CLAUDE_CAPABILITIES: Capabilities = {
-  compact: true, clear: true, modes: [...MODES], usage: true, fileSuggestions: true, fork: true, idleCompact: true,
+  compact: true, clear: true, modes: [...MODES], usage: true, fileSuggestions: true, fork: true, idleCompact: true, models: true,
 };
 /** percent 0..100 */
 export type Limit = { utilization: number; resets_at: string | null };
@@ -96,6 +109,8 @@ export type ClientMessage =
   | { type: 'permission'; id: string; allow: boolean; input?: Record<string, unknown> }
   /** `id`: echoed back as the `mode` event's `ack`, so the sender can tell its own echo from the others */
   | { type: 'mode'; mode: Mode; id?: string }
+  /** `model` is a `ModelOption.value`; no `effort` = the model's default. `id`: echoed as the `model` event's `ack` */
+  | { type: 'model'; model: string; effort?: EffortLevel; id?: string }
   | { type: 'command'; name: 'compact' | 'clear' }
   /** id null = a new session in dir; dir is absolute */
   | { type: 'switch'; id: string | null; dir: string }
@@ -137,6 +152,10 @@ export type ServerEvent =
   /** never stored in history */
   /** `ack`: the id of the `mode` message this answers (none when the mode changed otherwise) */
   | { kind: 'mode'; mode: Mode; ack?: string }
+  /** the model the agent runs (null until known) and its effort when set; never stored. `ack`: the id of the `model` message this answers */
+  | { kind: 'model'; model: string | null; effort?: EffortLevel; ack?: string }
+  /** the models the agent offers; never stored */
+  | { kind: 'models'; models: ModelOption[] }
   /** never stored in history */
   | { kind: 'idle-compact'; state: IdleCompact }
   /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */
@@ -239,6 +258,7 @@ function isPermission(o: Obj): boolean {
 
 const SESSION_ID = /^[0-9a-f-]{36}$/i;
 const isMode = (v: unknown): v is Mode => (MODES as readonly unknown[]).includes(v);
+const isEffort = (v: unknown): v is EffortLevel => (EFFORT_LEVELS as readonly unknown[]).includes(v);
 const isSessionId = (v: unknown): v is string => typeof v === 'string' && SESSION_ID.test(v);
 
 function toSource(s: AnchorSource): AnchorSource {
@@ -318,6 +338,11 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
       if (!isMode(m.mode)) return { error: `mode must be one of ${MODES.join(', ')}` };
       if (m.id !== undefined && (typeof m.id !== 'string' || m.id.length > 64)) return { error: 'mode id must be a short string' };
       return { type: 'mode', mode: m.mode, ...(m.id !== undefined && { id: m.id }) };
+    case 'model':
+      if (typeof m.model !== 'string' || m.model === '' || m.model.length > 200) return { error: 'model needs a model id string' };
+      if (m.effort !== undefined && !isEffort(m.effort)) return { error: `effort must be one of ${EFFORT_LEVELS.join(', ')}` };
+      if (m.id !== undefined && (typeof m.id !== 'string' || m.id.length > 64)) return { error: 'model id must be a short string' };
+      return { type: 'model', model: m.model, ...(m.effort !== undefined && { effort: m.effort }), ...(m.id !== undefined && { id: m.id }) };
     case 'command':
       if (m.name !== 'compact' && m.name !== 'clear') return { error: 'command name must be compact or clear' };
       return { type: 'command', name: m.name };

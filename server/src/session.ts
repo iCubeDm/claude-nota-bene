@@ -15,6 +15,7 @@ import { SessionIdentity } from './session/identity.ts';
 import { idleCompaction } from './session/idleWiring.ts';
 import { resolveImages } from './session/images.ts';
 import { ModeKeeper } from './session/mode.ts';
+import { ModelKeeper } from './session/model.ts';
 import type { SessionOptions } from './session/options.ts';
 import { PermissionBroker } from './session/permissions.ts';
 import { Phase, SwitchError } from './session/phase.ts';
@@ -38,7 +39,7 @@ const HISTORY_TIMEOUT_MS = 20_000; // a transcript read that hangs must not hold
  * The façade (R-M7-11): it wires the parts under ./session/ and owns the pump, the switch procedure and the command
  * hand-over. Phase: live/switching/closed. TurnLedger: every send, the turn facts. PermissionBroker: the open asks.
  * TitleTracker: the title. AgentSlot: agent, loop, generation. SessionIdentity: id, root, model, fork, `session`.
- * ModeKeeper: the mode. SendQueue: the user's sends in order. See the M7-11 report for the old-flag owners.
+ * ModeKeeper: the mode. ModelKeeper: the model and effort. SendQueue: the user's sends in order. See the M7-11 report for the old-flag owners.
  * The one cycle, titles ⇄ who: TitleTracker.onChange → who.announce() (an emit), and who's `title` option reads
  * titles.title (read-only); neither calls back into the other's state changes.
  */
@@ -54,6 +55,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
   // root changes only in a switch
   const who = new SessionIdentity({ root: o.cwd, resume: o.resume, fork: o.fork, title: () => titles.title, emit: (ev) => hub.emit(ev), report });
   const modes = new ModeKeeper({ modes: backend.capabilities.modes, dir: who.root, emit: (ev) => hub.emit(ev, { store: false }), report });
+  const models = new ModelKeeper({ dir: who.root, emit: (ev) => hub.emit(ev, { store: false }), report });
   const switchListeners: ((id: string | null, o: { restart: boolean }) => void)[] = [];
 
   const phase = new Phase();
@@ -64,7 +66,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
   });
   const permissions = new PermissionBroker({ emit: (ev) => hub.emit(ev) });
   const slot: AgentSlot = new AgentSlot({
-    start: (g) => backend.start({ ...who.startOptions(), permissionMode: modes.mode, ask: permissions.ask(() => slot.gen, g) }),
+    start: (g) => startAgent(g),
     pump,
     onError: report,
     phase: () => phase.kind,
@@ -86,6 +88,13 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     compact: () => runCommand('compact', true),
   });
 
+  /** a new agent in the current mode, model and effort; its model list is asked for once it is up */
+  function startAgent(g: number): AgentSession {
+    const a = backend.start({ ...who.startOptions(), permissionMode: modes.mode, ...models.forStart(who.root), ask: permissions.ask(() => slot.gen, g) });
+    if (backend.capabilities.models) models.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) report('models', e); });
+    return a;
+  }
+
   /** The agent's message loop: only the current agent of the current generation reaches the hub. */
   async function pump(a: AgentSession, g: number): Promise<void> {
     try {
@@ -105,6 +114,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       case 'init':
         // the CLI sends init at the start of every turn: act only when something is new
         if (e.mode) modes.adopt(e.mode, who.root);
+        if (e.model && backend.capabilities.models) models.adopt(e.model, who.root);
         who.init(e);
         return;
       case 'rate-limit':
@@ -208,10 +218,12 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       // 2. the new session's state
       const same = who.enter(id, real);
       modes.enter(who.root);
+      models.enter(who.root);
       stats.reset();
       // 3. the feed, the header, the mode, the stats; the comments come from the onSwitch listeners
       await load(id);
       modes.ack();
+      models.ack();
       hub.emit({ kind: 'idle-compact', state: idleState() }, { store: false }); // a per-project setting: the root may have changed
       hub.emit({ kind: 'stats', stats: stats.current() }, { store: false });
       for (const cb of switchListeners) {
@@ -287,6 +299,18 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
         if (g === slot.gen) report('mode', e);
       }
       modes.ack(id);
+    },
+    model: () => models.current,
+    models: () => models.models,
+    async setModel(next, id) {
+      if (phase.switching) return models.ack(id); // the switch announces the new session's model
+      const g = slot.gen;
+      try {
+        await models.change(slot.agent, next, who.root, () => g === slot.gen);
+      } catch (e) {
+        if (g === slot.gen) report('model', e);
+      }
+      models.ack(id);
     },
     info: () => { const i = who.info(); return { id: i.id, root: i.root, title: titles.title, model: i.model }; },
     archiveId: () => who.ownId,

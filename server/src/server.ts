@@ -244,6 +244,14 @@ export async function startServer(o: {
       } catch (e) {
         reportError(hub, 'mode', e);
       }
+      // a reload shows the model pill at once: the list and the current choice go with the other state
+      try {
+        const { model, effort } = manager.model();
+        ws.send(JSON.stringify({ kind: 'models', models: manager.models() }));
+        ws.send(JSON.stringify({ kind: 'model', model, ...(effort && { effort }) }));
+      } catch (e) {
+        reportError(hub, 'model', e);
+      }
       try {
         ws.send(JSON.stringify({ kind: 'idle-compact', state: manager.idleCompact() }));
       } catch (e) {
@@ -318,6 +326,16 @@ export async function startServer(o: {
               break;
             }
             void manager.setMode(msg.mode, msg.id);
+            break;
+          case 'model':
+            if (!caps.models) {
+              refuse('model');
+              // the sender still waits for its ack: answer with the model as it stands
+              const cur = manager.model();
+              hub.emit({ kind: 'model', model: cur.model, ...(cur.effort && { effort: cur.effort }), ...(msg.id && { ack: msg.id }) }, { store: false });
+              break;
+            }
+            void manager.setModel({ model: msg.model, ...(msg.effort && { effort: msg.effort }) }, msg.id);
             break;
           case 'interrupt':
             manager.interrupt();

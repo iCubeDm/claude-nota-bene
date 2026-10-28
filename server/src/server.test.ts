@@ -121,6 +121,24 @@ describe('server', () => {
     if (replay.kind === 'replay') expect(replay.events.some((e) => e.kind === 'mode')).toBe(false); // live state, not history
   });
 
+  it('every new socket gets the model list and the current model; a model message is applied, answered with its ack and broadcast', async () => {
+    const models = [{ value: 'sonnet', name: 'Sonnet', description: '', efforts: ['low', 'high'] }, { value: 'opus', name: 'Opus', description: '' }] as const;
+    const backend = fakeBackend([{ text: 'hello' }], { models: models.map((m) => ({ ...m, efforts: 'efforts' in m ? [...m.efforts] : undefined })) as never });
+    const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist, oneTab: false });
+    closers.push(s.close);
+    const a = await connect(s.url);
+    await until(() => a.events.some((e) => e.kind === 'models'));
+    expect(a.events.find((e) => e.kind === 'model')).toEqual({ kind: 'model', model: null });
+    a.ws.send(JSON.stringify({ type: 'model', model: 'sonnet', effort: 'high', id: 'm1' }));
+    await until(() => a.events.some((e) => e.kind === 'model' && e.ack === 'm1'));
+    expect(a.events.findLast((e) => e.kind === 'model')).toEqual({ kind: 'model', model: 'sonnet', effort: 'high', ack: 'm1' });
+    const b = await connect(s.url); // a reload gets the list and the choice at once
+    await until(() => b.events.some((e) => e.kind === 'model'));
+    expect(b.events.find((e) => e.kind === 'model')).toEqual({ kind: 'model', model: 'sonnet', effort: 'high' });
+    expect(b.events.find((e) => e.kind === 'models')).toMatchObject({ models: [{ value: 'sonnet' }, { value: 'opus' }] });
+    expect(backend.setModels).toEqual(['sonnet']);
+  });
+
   it('an allow that carries a modified input still runs the original input', async () => {
     const seen: unknown[] = [];
     const base = fakeBackend([{ text: 'ok', ask: { toolName: 'Bash', input: { command: 'ls' } } }]);
@@ -297,6 +315,15 @@ describe('server', () => {
       await until(() => c.events.some((e) => e.kind === 'server-error' && e.where === 'capability'));
       await until(() => c.events.some((e) => e.kind === 'mode' && e.ack === 'm1'));
       expect(backend.setModes).toEqual([]);
+    });
+
+    it('refuses a model message when the agent cannot switch models, but still answers it', async () => {
+      const { s, backend } = await bootCaps({ models: false });
+      const c = await connect(s.url);
+      c.ws.send(JSON.stringify({ type: 'model', model: 'opus', id: 'x1' }));
+      await until(() => c.events.some((e) => e.kind === 'server-error' && e.where === 'capability'));
+      await until(() => c.events.some((e) => e.kind === 'model' && e.ack === 'x1'));
+      expect(backend.setModels).toEqual([]);
     });
 
     it('--fork is dropped when the agent cannot fork, kept when it can', async () => {

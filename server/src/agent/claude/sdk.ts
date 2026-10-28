@@ -1,6 +1,6 @@
 import { getSessionInfo, getSessionMessages, listSessions, query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { CLAUDE_CAPABILITIES, type AgentEvent, type Mode } from '@nota-bene/shared';
+import type { ModelInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type ModelOption } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
@@ -12,6 +12,18 @@ You are running inside a browser-based chat window that renders GitHub-flavored 
 - To show an image or video from the project, embed it with markdown image syntax and a path relative to the project root, e.g. ![frame](part_1/frames/1.01.png) or ![clip](part_1/video/1.01.mp4). Videos and audio files render as players.
 - Refer to project files as inline code with a path relative to the project root (\`media/pilot/notes.md\`, not an absolute or ~ path): the UI makes these clickable and opens them in a tab. Paths outside the project cannot be opened, so do not present them as links.
 - The user may send batched inline comments: each item quotes a fragment from the conversation or a file, followed by their comment. Address every item.`;
+
+/** the SDK's model row as the wire's; the effort levels only where the model has any */
+export function toModelOption(m: ModelInfo): ModelOption {
+  return {
+    value: m.value, name: m.displayName, description: m.description,
+    ...(m.resolvedModel ? { resolved: m.resolvedModel } : {}),
+    ...(m.supportsEffort && m.supportedEffortLevels?.length ? { efforts: [...m.supportedEffortLevels] } : {}),
+  };
+}
+
+// 'default' is a row of the list, not a model id: it means "no model option" (the CLI's own default)
+const realModel = (m: string | null | undefined): string | undefined => (m && m !== 'default' ? m : undefined);
 
 /** A text block first, then a [label text, image block] pair per image, so the agent can tell which image is which. */
 export function toContent(text: string, images?: SendImage[]): SDKUserMessage['message']['content'] {
@@ -58,7 +70,7 @@ class SdkSession implements AgentSession {
   private readonly q: ReturnType<typeof query>;
   private readonly warmup: NodeJS.Timeout;
 
-  constructor(o: { cwd: string; resume?: string; fork?: boolean; permissionMode: Mode; ask: PermissionAsk }) {
+  constructor(o: Parameters<AgentBackend['start']>[0]) {
     this.q = query({
       prompt: this.input,
       options: {
@@ -66,6 +78,8 @@ class SdkSession implements AgentSession {
         ...(o.resume ? { resume: o.resume } : {}),
         ...(o.resume && o.fork ? { forkSession: true } : {}),
         permissionMode: o.permissionMode,
+        ...(realModel(o.model) ? { model: realModel(o.model) } : {}),
+        ...(o.effort ? { effort: o.effort } : {}),
         includePartialMessages: true,
         // predicted next prompt after each turn: the UI shows it as ghost text in the composer
         promptSuggestions: true,
@@ -121,6 +135,18 @@ class SdkSession implements AgentSession {
 
   async setPermissionMode(mode: Mode): Promise<void> {
     await this.q.setPermissionMode(mode);
+  }
+
+  async supportedModels(): Promise<ModelOption[]> {
+    return (await this.q.supportedModels()).map(toModelOption);
+  }
+
+  async setModel(model: string | null): Promise<void> {
+    await this.q.setModel(realModel(model));
+  }
+
+  async setEffort(effort: EffortLevel | null): Promise<void> {
+    await this.q.applyFlagSettings({ effortLevel: effort }); // null: back to the model's default
   }
 
   async interrupt(): Promise<void> {

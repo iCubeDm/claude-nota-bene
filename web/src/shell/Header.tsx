@@ -3,6 +3,7 @@ import { getLang, setLang, useT } from '@/i18n/index.ts';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { openSettings } from '@/tabs/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
+import { ModelPill } from '@/controls/ModelPill.tsx';
 import { SessionPicker } from '@/controls/SessionPicker.tsx';
 import { GitBranch } from './GitBranch.tsx';
 import { RestartMenu } from './RestartMenu.tsx';
@@ -31,7 +32,8 @@ export function Header() {
       <SessionPicker />
       {/* enabled while busy: the escape hatch for a stuck agent (R-M4-4); only a running switch/restart disables it */}
       <RestartMenu />
-      <span id="session" className="font-mono text-[11px]">{[session?.model, session?.id?.slice(0, 8)].filter(Boolean).join(' · ')}</span>
+      <ModelPill />
+      <span id="session" className="font-mono text-[11px]">{session?.id?.slice(0, 8) ?? ''}</span>
       <button
         type="button"
         id="settingsBtn"

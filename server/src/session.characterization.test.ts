@@ -74,6 +74,7 @@ function spy(inner: ReturnType<typeof fakeBackend>, log: string[]): AgentBackend
         send: (m) => { log.push(`send${k}:${m.uuid}:${m.priority}`); a.send(m); },
         interrupt: () => { log.push(`interrupt${k}`); return a.interrupt(); },
         setPermissionMode: (m) => a.setPermissionMode(m),
+        supportedModels: () => a.supportedModels(), setModel: (m) => a.setModel(m), setEffort: (e) => a.setEffort(e),
         fileSuggestions: (q) => a.fileSuggestions(q),
         contextUsage: () => a.contextUsage(),
         usage: () => a.usage(),
@@ -109,7 +110,7 @@ function scripted() {
           }
         })()),
         send: (m) => { sends.push({ uuid: m.uuid, text: m.text }); },
-        interrupt: async () => {}, setPermissionMode: async () => {}, fileSuggestions: async () => [],
+        interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [],
         contextUsage: async () => ({ used: 500_000, max: 1_000_000, pct: 50 }), usage: async () => ({ cost: null, limits: null }), close() {},
       };
     },
@@ -135,6 +136,7 @@ function gated(inner: ReturnType<typeof fakeBackend>) {
 function over(a: AgentSession, patch: Partial<AgentSession>): AgentSession {
   return {
     messages: a.messages, send: (m) => a.send(m), interrupt: () => a.interrupt(), setPermissionMode: (m) => a.setPermissionMode(m),
+    supportedModels: () => a.supportedModels(), setModel: (m) => a.setModel(m), setEffort: (e) => a.setEffort(e),
     fileSuggestions: (q) => a.fileSuggestions(q), contextUsage: () => a.contextUsage(), usage: () => a.usage(), close: () => a.close(), ...patch,
   };
 }

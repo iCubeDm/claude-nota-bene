@@ -240,6 +240,16 @@ export const en: Dict = {
   mode_plan_desc: 'Only reads and thinks, changes nothing; ends with a plan to approve',
   mode_auto: 'Auto',
   mode_auto_desc: 'A classifier approves safe actions itself, asks about the rest',
+  // model and effort
+  modelTip: 'Model and effort · a change applies from the next reply',
+  modelUnknown: 'Model',
+  effortLabel: 'Effort',
+  effort_low: 'Low',
+  effort_medium: 'Medium',
+  effort_high: 'High',
+  effort_xhigh: 'Extra high',
+  effort_max: 'Max',
+  modelCacheWarn: (k) => `The next reply re-reads the context: ~${k}k tokens`,
   // background tasks (M4-14)
   tasksLabel: 'Background tasks',
   // meters (M4-08)

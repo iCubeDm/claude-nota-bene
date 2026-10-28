@@ -9,7 +9,7 @@ function fakeAgent(log: string[], name: string, o: { closeThrows?: boolean } = {
   const ended = new Promise<void>((r) => { end = r; });
   const a = {
     messages: (async function* () { await ended; })(),
-    send() {}, interrupt: async () => {}, fileSuggestions: async () => [], setPermissionMode: async () => {},
+    send() {}, interrupt: async () => {}, fileSuggestions: async () => [], setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {},
     contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }),
     close() { log.push(`close ${name}`); if (o.closeThrows) throw new Error('close failed'); },
   } as AgentSession;

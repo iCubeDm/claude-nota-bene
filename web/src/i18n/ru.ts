@@ -237,6 +237,16 @@ export const ru = {
   mode_plan_desc: 'Только читает и думает, ничего не меняет; в конце покажет план на утверждение',
   mode_auto: 'Авто',
   mode_auto_desc: 'Безопасное одобряет сам классификатор, спорное спрашивает',
+  // model and effort
+  modelTip: 'Модель и усилие · смена применяется со следующего ответа',
+  modelUnknown: 'Модель',
+  effortLabel: 'Усилие',
+  effort_low: 'Низкое',
+  effort_medium: 'Среднее',
+  effort_high: 'Высокое',
+  effort_xhigh: 'Очень высокое',
+  effort_max: 'Максимум',
+  modelCacheWarn: (k: number) => `Следующий ответ перечитает контекст: ~${k} тыс. токенов`,
   // background tasks (M4-14)
   tasksLabel: 'Фоновые задачи',
   // meters (M4-08)

@@ -1,4 +1,4 @@
-import type { IdleCompact, ImageRef, Mode, Stats } from '@nota-bene/shared';
+import type { EffortLevel, IdleCompact, ImageRef, Mode, ModelOption, Stats } from '@nota-bene/shared';
 
 export type SessionManager = {
   /** Returns 'switching' for a send refused during a switch (nothing sent or emitted; the server tells the asking socket), else null. */
@@ -9,6 +9,12 @@ export type SessionManager = {
   /** Asks the agent, then persists and announces; a refusal is reported and the current mode re-announced. */
   /** answers with one `mode` event carrying `ack: id` (unless a session switch takes over, which announces its own) */
   setMode(mode: Mode, id?: string): Promise<void>;
+  /** the model the agent runs (null until known) and its effort when set */
+  model(): { model: string | null; effort?: EffortLevel };
+  /** the models the agent offers (empty until it is up) */
+  models(): ModelOption[];
+  /** Applies from the agent's next response (a running turn goes on), then persists; a refusal is reported. Answers with one `model` event carrying `ack: id`. */
+  setModel(next: { model: string; effort?: EffortLevel }, id?: string): Promise<void>;
   info(): { id: string | null; root: string; title: string | null; model: string | null };
   /** The id the conversation's archive goes under (R-M7-1); null before the first id, while a fork's id is pending, and after a /clear that named no id. */
   archiveId(): string | null;

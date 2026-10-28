@@ -64,12 +64,14 @@ it('the project name, not the app name, titles the header and the browser tab', 
   expect(document.title).toBe('my-project · Nota Bene');
 });
 
-it('document title: session title first when there is one; header shows model · id8, or id8 alone', () => {
+it('document title: session title first when there is one; header shows the model pill and id8, or id8 alone', () => {
   const { ev } = setup();
   ev({ kind: 'session', id: '5f0c2a9e-7d41', root: '/p/proj', title: 'Fix login', model: 'opus' });
   expect(document.title).toBe('Fix login · proj · Nota Bene');
-  expect(document.getElementById('session')).toHaveTextContent(/^opus · 5f0c2a9e$/);
+  expect(document.getElementById('session')).toHaveTextContent(/^5f0c2a9e$/);
+  expect(screen.getByRole('button', { name: /Model and effort|Модель и усилие/ })).toHaveTextContent('opus'); // no list yet: the name as reported
   ev({ kind: 'session', id: '5f0c2a9e-7d41', root: '/p/proj', title: null, model: null });
+  expect(screen.queryByRole('button', { name: /Model and effort|Модель и усилие/ })).toBeNull();
   expect(document.title).toBe('proj · Nota Bene');
   expect(document.getElementById('session')).toHaveTextContent(/^5f0c2a9e$/);
 });
