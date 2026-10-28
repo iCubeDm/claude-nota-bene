@@ -170,6 +170,7 @@ test('prose is 860 px and code 256 characters wide, within the room the panels l
       // measured inside the pre, so it has exactly the code's font (CSS `ch` is the width of its 0)
       const probe = document.createElement('span');
       probe.textContent = '0'.repeat(256);
+      probe.style.whiteSpace = 'pre'; // the pre may wrap its lines (↩); the probe must not
       el.append(probe);
       cap = probe.getBoundingClientRect().width + 32 + 2;
       probe.remove();
