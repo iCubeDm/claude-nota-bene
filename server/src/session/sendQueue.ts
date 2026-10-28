@@ -6,6 +6,10 @@ type QueueOptions = {
   agent: () => AgentSession;
   /** the send is handed over now */
   running: (id: string) => void;
+  /** the agent is still the slot's (an interrupt that fails on one that died is no news) */
+  isCurrent: (a: AgentSession) => boolean;
+  /** a forced send waits this long for the interrupt, no longer (a stuck CLI must not hold the queue) */
+  interruptMs: number;
   report: (where: string, e: unknown) => void;
   /** the user event is already out: answer it or the feed waits forever */
   fail: (e: unknown, id: string) => void;
@@ -31,7 +35,15 @@ export class SendQueue {
       if (g !== gen()) return;
       try {
         // a stale interrupt rejection must neither toast nor start an agent; no-op when idle
-        if (m.force) await agent().interrupt().catch((e) => { if (g === gen()) report('interrupt', e); });
+        if (m.force) {
+          const a0 = agent();
+          let raced = false; // lost the race or the agent died: the late rejection is no news
+          const stopped = a0.interrupt().catch((e) => { if (!raced && g === gen() && this.o.isCurrent(a0)) report('interrupt', e); });
+          let timer: NodeJS.Timeout | undefined;
+          await Promise.race([stopped, new Promise<void>((r) => { timer = setTimeout(r, this.o.interruptMs); timer.unref(); })]);
+          clearTimeout(timer);
+          raced = true;
+        }
         if (g !== gen()) return;
         const a = agent();
         this.o.running(m.id);

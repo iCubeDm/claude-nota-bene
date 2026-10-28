@@ -368,12 +368,17 @@ describe('SessionManager characterization', () => {
     const order: string[] = [];
     let ask!: PermissionAsk;
     let asked!: Promise<boolean>;
+    // the broker detaches its abort listener in the same synchronous step that settles the ask: a hop-free witness of "denied"
+    const signal = new AbortController().signal;
+    let settled = false;
+    const remove = signal.removeEventListener.bind(signal);
+    signal.removeEventListener = ((...args: Parameters<typeof remove>) => { settled = true; remove(...args); }) as typeof remove;
     const backend: AgentBackend = {
       ...inner,
       start: (o) => {
         const a = inner.start(o);
-        if (!ask) { ask = o.ask; asked = o.ask('Bash', { command: 'ls' }, new AbortController().signal); void asked.then(() => order.push('denied')); }
-        return over(a, { close: () => { order.push('close'); queueMicrotask(() => order.push('after-close')); a.close(); } });
+        if (!ask) { ask = o.ask; asked = o.ask('Bash', { command: 'ls' }, signal); }
+        return over(a, { close: () => { order.push(settled ? 'denied-before-close' : 'open-at-close'); a.close(); } });
       },
     };
     const { hub } = hubWithSocket();
@@ -381,8 +386,7 @@ describe('SessionManager characterization', () => {
     expect(s.busy()).toBe(true); // the ask is open
     await s.restart();
     expect(await asked).toBe(false);
-    // 'close' is logged synchronously; the ask was settled before close() ran, so its continuation is queued ahead of the one queued inside close()
-    expect(order.slice(0, 3)).toEqual(['close', 'denied', 'after-close']);
+    expect(order[0]).toBe('denied-before-close');
     s.close();
   });
 

@@ -69,7 +69,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     onError: report,
     phase: () => phase.kind,
   });
-  const queue = new SendQueue({ gen: () => slot.gen, agent: () => slot.ensure(), running: (id) => turns.running(id), report, fail: (e, id) => failTurn(e, id) });
+  const queue = new SendQueue({ gen: () => slot.gen, agent: () => slot.ensure(), running: (id) => turns.running(id), isCurrent: (a) => slot.agent === a, interruptMs: o.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS, report, fail: (e, id) => failTurn(e, id) });
   /** A send not yet answered, a waiting permission, or a switch in progress (R-M4-4); `closed` is not part of it. */
   const busy = () => phase.switching || activity(turns, permissions) !== 'idle';
   const stats = new StatsService({

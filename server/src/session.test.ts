@@ -434,6 +434,53 @@ describe('busy cannot get stuck', () => {
     expect(s.busy()).toBe(false);
   });
 
+  it('M7-18: a send kept queued across a crash is answered by its own turn-end on the new agent: busy ends, the feed too', async () => {
+    let n = 0;
+    let answer!: (uuid: string) => void;
+    const answered = new Promise<string>((r) => { answer = r; });
+    const backend: AgentBackend = {
+      ...noSessions,
+      history: async () => [],
+      start: () => {
+        const mine = n++;
+        return {
+          messages: mapFrames((async function* () {
+            yield { type: 'system', subtype: 'init', session_id: 'fake-session' } as never;
+            if (mine === 0) { await new Promise((r) => setTimeout(r, 10)); throw new Error('dead'); }
+            const uuid = await answered;
+            yield { type: 'result', subtype: 'success', is_error: false, duration_ms: 1, terminal_reason: 'completed', user_message_uuids: [uuid] } as never;
+            await new Promise(() => {});
+          })()),
+          send: (m) => { if (mine === 1) answer(m.uuid); },
+          interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
+        };
+      },
+    };
+    const { hub, events, make } = setup(backend);
+    const s = await make();
+    s.send({ id: 'A', text: 'running' });
+    s.send({ id: 'B', text: 'queued', force: true });
+    await until(() => agentOf(events, 'turn-end').length === 1);
+    expect(agentOf(events, 'turn-end')[0]!.e).toMatchObject({ stop: 'failed', answers: ['A'] });
+    const feedNow = async () => {
+      const attached: ServerEvent[] = [];
+      hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
+      return feedOf(attached);
+    };
+    const afterCrash = await feedNow();
+    expect(afterCrash.waiting).toEqual(['B']);
+    expect(afterCrash.busy).toBe(true);
+    expect(s.busy()).toBe(true);
+    await until(() => agentOf(events, 'turn-end').length === 2);
+    expect(agentOf(events, 'turn-end')[1]!.e).toMatchObject({ stop: 'done', answers: ['B'] });
+    expect(s.busy()).toBe(false);
+    const done = await feedNow();
+    expect(done.waiting).toEqual([]);
+    expect(done.busy).toBe(false);
+    s.close();
+  });
+
   it('a crash with sends handed to the dead agent leaves busy false', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });

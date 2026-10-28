@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { AgentSession } from '../agent/types.ts';
 import { SendQueue } from './sendQueue.ts';
 
-function make(o: { interrupt?: () => Promise<void>; sendThrows?: boolean } = {}) {
+function make(o: { interrupt?: () => Promise<void>; sendThrows?: boolean; interruptMs?: number } = {}) {
   const log: string[] = [];
   const errors: string[] = [];
   let gen = 0;
+  let current = true;
   const agent = {
     interrupt: () => { log.push('interrupt'); return o.interrupt ? o.interrupt() : Promise.resolve(); },
     send: (m: { uuid: string; priority: string }) => { if (o.sendThrows) throw new Error('send failed'); log.push(`send ${m.uuid}:${m.priority}`); },
@@ -14,10 +15,12 @@ function make(o: { interrupt?: () => Promise<void>; sendThrows?: boolean } = {})
     gen: () => gen,
     agent: () => agent,
     running: (id) => log.push(`running ${id}`),
+    isCurrent: () => current,
+    interruptMs: o.interruptMs ?? 2000,
     report: (w, e) => errors.push(`${w}: ${(e as Error).message}`),
     fail: (e, id) => log.push(`fail ${id}: ${(e as Error).message}`),
   });
-  return { q, log, errors, bump: () => { gen++; } };
+  return { q, log, errors, bump: () => { gen++; }, die: () => { current = false; } };
 }
 
 describe('SendQueue', () => {
@@ -35,6 +38,26 @@ describe('SendQueue', () => {
     q.push({ id: 'A', text: 'a', force: true });
     await q.idle();
     expect(errors).toEqual(['interrupt: nope']);
+    expect(log).toContain('send A:now');
+  });
+
+  it('an interrupt that never settles does not hold the queue: the forced send goes after the cap', async () => {
+    const { q, log } = make({ interrupt: () => new Promise<void>(() => {}), interruptMs: 20 });
+    q.push({ id: 'A', text: 'a', force: true });
+    q.push({ id: 'B', text: 'b' });
+    await q.idle();
+    expect(log).toEqual(['interrupt', 'running A', 'send A:now', 'running B', 'send B:next']);
+  });
+
+  it('an interrupt that fails because its agent died is not reported (the crash was); the send still goes', async () => {
+    let fail!: () => void;
+    const { q, log, errors, die } = make({ interrupt: () => new Promise<void>((_, r) => { fail = () => r(new Error('Query closed')); }) });
+    q.push({ id: 'A', text: 'a', force: true });
+    await new Promise((r) => setTimeout(r, 0));
+    die();
+    fail();
+    await q.idle();
+    expect(errors).toEqual([]);
     expect(log).toContain('send A:now');
   });
 
