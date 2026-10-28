@@ -169,7 +169,7 @@ it('every pane has the grid; media is fitted; md and code are cards with the R-M
   cleanup();
   const a = setup('s.mp3');
   expect(a.r.container.querySelector('[data-pane]')?.className).toContain('grid-pane');
-  expect(a.r.container.querySelector('audio')?.className).toContain('max-w-xl');
+  expect(a.r.container.querySelector('[data-player-bar]')?.className).toContain('max-w-');
   cleanup();
   spec.body = '# hi';
   const md = setup('n.md');
@@ -183,10 +183,11 @@ it('every pane has the grid; media is fitted; md and code are cards with the R-M
 
 it('video and audio carry data-media-tab', () => {
   const v = setup('v.mp4');
-  expect(v.r.container.querySelector('video[controls][data-media-tab="file:v.mp4"]')).not.toBeNull();
+  expect(v.r.container.querySelector('video[data-media-tab="file:v.mp4"]')).not.toBeNull();
+  expect(v.r.container.querySelector('video')!.hasAttribute('controls')).toBe(false); // our own bar
   cleanup();
   const a = setup('s.mp3');
-  expect(a.r.container.querySelector('audio[controls][data-media-tab="file:s.mp3"]')).not.toBeNull();
+  expect(a.r.container.querySelector('audio[data-media-tab="file:s.mp3"]')).not.toBeNull();
 });
 
 it('a large text file is not highlighted and says so in the toolbar', async () => {
@@ -294,15 +295,16 @@ it('audio has no markup mode', () => {
   expect(screen.queryByRole('button', { name: /mark up/i })).toBeNull();
 });
 
-it('while marking, the video has no controls; leaving restores them', () => {
+it('while marking, the video has no player bar; leaving restores it', () => {
   const { r, store } = setup('v.mp4');
   act(() => { store.dispatch(serverEvent(hello())); });
-  const v = () => r.container.querySelector('video')!;
-  expect(v().controls).toBe(true);
+  const bar = () => r.container.querySelector('[data-player-bar]');
+  expect(r.container.querySelector('video')!.hasAttribute('controls')).toBe(false);
+  expect(bar()).not.toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /mark up/i }));
-  expect(v().controls).toBe(false);
+  expect(bar()).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /leave/i }));
-  expect(v().controls).toBe(true);
+  expect(bar()).not.toBeNull();
 });
 
 const SHAPE = { kind: 'rect', color: '#ff3b30', x: 0.1, y: 0.2, w: 0.3, h: 0.4 } as const;

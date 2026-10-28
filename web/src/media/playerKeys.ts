@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { keysInScope } from '@/lib/keyScope.ts';
 import { useT } from '@/i18n/index.ts';
-import { useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { useAppDispatch, useAppSelector, type AppDispatch } from '@/store/store.ts';
 import { setMode } from './markup/slice.ts';
 
 /** YouTube's keys for a media tab (see docs: player keys). `code`, not `key`: any keyboard layout. */
@@ -21,9 +21,10 @@ const ONCE = (c: string) => !/^(Arrow|Comma|Period|Key[JL])/.test(c);
 
 /**
  * Applies `code` to `el`; returns the on-screen flash text, or null when the key does not apply here (then the event
- * stays untouched: no preventDefault). `video`: frame step and fullscreen exist only for it.
+ * stays untouched: no preventDefault). `video`: frame step and fullscreen exist only for it. Fullscreen takes `box`, the
+ * player container (video, marks, bar), so the marks and the bar stay visible; the element itself without one.
  */
-export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string): string | null {
+export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string, box?: HTMLElement | null): string | null {
   const video = el instanceof HTMLVideoElement;
   const dur = Number.isFinite(el.duration) ? el.duration : Infinity;
   const seek = (to: number) => void (el.currentTime = Math.max(0, Math.min(dur, to)));
@@ -49,7 +50,7 @@ export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string)
     case 'KeyF':
       if (!video) return null;
       if (document.fullscreenElement) void document.exitFullscreen?.()?.catch(() => {});
-      else void el.requestFullscreen?.()?.catch(() => {});
+      else void (box ?? el).requestFullscreen?.()?.catch(() => {});
       return '⛶';
     case 'Comma': case 'Period':
       if (!video || !el.paused) return null;
@@ -68,14 +69,21 @@ export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string)
 
 export type Flash = { n: number; text: string };
 
+/** N and the bar's ✎: one still frame, then the markup mode. */
+export function startAnnotate(dispatch: AppDispatch, tabId: string, m: HTMLVideoElement | HTMLImageElement): void {
+  if (m instanceof HTMLVideoElement && !m.paused) m.pause();
+  dispatch(setMode(tabId, true));
+}
+
 /**
  * The visible media tab's player keys, plus N = annotate. Off while marking up (the markup mode owns the keys then).
  * Capture phase and preventDefault+stopPropagation: a focused <video> must not also act on its own, and Space neither
  * scrolls nor presses a focused button (its keyup is swallowed too, Firefox clicks on it).
  * `image`: the element N annotates; `media`: the video/audio the rest acts on (null for an image tab).
  */
-export function usePlayerKeys({ tabId, active, marking, media, image }: {
+export function usePlayerKeys({ tabId, active, marking, media, image, box }: {
   tabId: string; active: boolean; marking: boolean; media: MutableRefObject<HTMLMediaElement | null>; image: HTMLImageElement | null;
+  box?: MutableRefObject<HTMLElement | null>;
 }): Flash | null {
   const t = useT();
   const dispatch = useAppDispatch();
@@ -97,12 +105,11 @@ export function usePlayerKeys({ tabId, active, marking, media, image }: {
         e.preventDefault();
         e.stopPropagation();
         if (e.repeat) return;
-        if (m instanceof HTMLVideoElement && !m.paused) m.pause(); // one still frame
-        dispatch(setMode(tabId, true));
+        startAnnotate(dispatch, tabId, m);
         return;
       }
       if (!media.current) return;
-      const text = e.repeat && ONCE(code) ? '' : applyPlayerKey(media.current, code, unit);
+      const text = e.repeat && ONCE(code) ? '' : applyPlayerKey(media.current, code, unit, box?.current);
       if (text === null) return;
       e.preventDefault();
       e.stopPropagation();
@@ -118,7 +125,7 @@ export function usePlayerKeys({ tabId, active, marking, media, image }: {
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('keyup', onUp, true);
     };
-  }, [active, marking, media, image, offered, dispatch, tabId, unit]);
+  }, [active, marking, media, image, box, offered, dispatch, tabId, unit]);
   return flash;
 }
 

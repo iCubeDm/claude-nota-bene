@@ -637,29 +637,36 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   };
   await seek(12.3);
 
+  // the video fills the pane, so the player bar (a bottom overlay of the container) sits over its lower part
+  await page.addStyleTag({ content: '[data-pane="file:media/a.mp4"] video.nb-fit { width: 100%; height: 100%; max-height: none; }' });
+  const bar = page.locator('[data-player-bar]');
+  const seekLine = page.getByRole('slider', { name: /^(Seek|Перемотка)$/ });
+  await expect(bar).toBeVisible();
+  const tl = (await seekLine.boundingBox())!;
+  const lineY = tl.y + tl.height / 2;
+
   await markUpBtn(page).click();
   const layer = markupLayer(page, 'media/a.mp4');
   await expect(layer).toBeVisible();
-  expect(await video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(false); // no native controls while marking
+  await expect(bar).toHaveCount(0); // no player bar while marking: the frame stays still
+  expect(await video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(false); // and never native controls
   const b = await contentBoxOf(video);
-  const vb = (await video.boundingBox())!;
-  // Chrome's native controls on this 320×240 video (measured): the progress bar is the row 10-25 px above the element's
-  // bottom, across the width; the play button sits 30-45 px above it, 16-24 px from the left. The rect's left edge runs
-  // through the play button (x = 20 px), its bottom edge along the progress bar (17 px above the bottom), both inside
-  // the bottom 48 px the marks leave to the controls.
-  const playPt = { x: vb.x + 20, y: vb.y + vb.height - 36 };
-  const barPt = { x: vb.x + vb.width / 2, y: vb.y + vb.height - 17 };
-  const [fx0, fy0] = [(playPt.x - b.x) / b.width, 0.2];
-  const [fx1, fy1] = [0.9, (barPt.y - b.y) / b.height];
+  // the rect's bottom edge runs along the bar's timeline row (so the bar must win there), its left edge a bit inside the frame
+  const [fx0, fy0] = [0.3, 0.2];
+  const [fx1, fy1] = [0.9, (lineY - b.y) / b.height];
   await drag(page, at(b, fx0, fy0), at(b, fx1, fy1));
   const text = uniq('frame');
   const id = await addMarkComment(page, text);
   await expect(layer).toBeVisible(); // the mode stays on after an Add; Esc with nothing drawn leaves it
   await page.keyboard.press('Escape');
   await expect(layer).toHaveCount(0);
-  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.controls)).toBe(true);
+  await expect(bar).toBeVisible();
   const mark = pane.locator(`[data-media-marks] [data-mark="${id}"]`);
   await expect(mark).toHaveCount(1);
+
+  // the comment is a tick on the timeline
+  const tick = page.locator(`[data-marker~="${id}"]`);
+  await expect(tick).toHaveCount(1);
 
   // a click on the stroke opens the comment's card
   const top = at(b, 0.5, fy0);
@@ -668,24 +675,24 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   await expect(popover).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(popover).toHaveCount(0);
-  // the stroke takes the click above the bottom 48 px of the element; within them the video (its controls) does
+  // the stroke takes the click above the bar; over the bar, the bar does
   const hitAt = (pt: Pt) => page.evaluate(({ x, y }) => {
     const el = document.elementFromPoint(x, y);
-    return el?.closest('[data-hit]')?.getAttribute('data-hit') ?? el?.tagName.toLowerCase() ?? null;
+    return el?.closest('[data-hit]')?.getAttribute('data-hit') ?? (el?.closest('[data-player-bar]') ? 'bar' : el?.tagName.toLowerCase() ?? null);
   }, pt);
-  expect(await hitAt({ x: playPt.x, y: vb.y + vb.height - 60 })).toBe(id);
-  expect(await hitAt(playPt)).toBe('video');
-  expect(await hitAt(barPt)).toBe('video');
+  const leftEdge = at(b, fx0, 0.5);
+  expect(await hitAt({ x: leftEdge.x, y: tl.y - 40 })).toBe(id);
+  expect(await hitAt({ x: at(b, 0.6, 0).x, y: lineY })).toBe('bar'); // the bottom edge, under the timeline
   const noCard = () => expect(page.getByRole('dialog').locator('[data-comment-id]')).toHaveCount(0);
   const state = () => video.evaluate((e: HTMLVideoElement) => ({ paused: e.paused, t: e.currentTime }));
-  // real clicks on the stroke inside the strip reach the controls: the play button plays, the progress bar seeks
+  // real clicks: the bar's play button plays, the timeline seeks, neither opens the card
   await video.evaluate((e: HTMLVideoElement) => { e.muted = true; });
-  await page.mouse.click(playPt.x, playPt.y);
+  await page.getByRole('button', { name: /^(Play|Воспроизвести) \(K\)$/ }).click();
   await expect.poll(async () => (await state()).paused).toBe(false);
   await noCard();
   await seek(12.3);
   await expect(mark).toHaveCount(1);
-  await page.mouse.click(barPt.x, barPt.y); // the middle of the bar: about 15 s of 30
+  await page.mouse.click(tl.x + tl.width / 2, lineY); // the middle of the line: about 15 s of 30
   await expect.poll(async () => Math.abs((await state()).t - 12.3)).toBeGreaterThan(1);
   await noCard();
 
@@ -705,12 +712,59 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   await expect(mark).toHaveCount(1);
   await expect(cards(page).filter({ hasText: text })).toContainText('a.mp4 @ 0:12.300');
 
+  // a click on the comment's tick on the timeline: seeks to exactly its time and pauses, so the drawing shows again
+  await seek(5);
+  await expect(mark).toHaveCount(0);
+  await tick.click();
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.paused && Math.abs(e.currentTime - 12.3) < 0.01)).toBe(true);
+  await expect(mark).toHaveCount(1);
+  await expect(page.locator('svg[data-markup-layer]')).toHaveCount(0); // a tick does not open the markup mode
+
   await sendAndSettle(page);
   await expect.poll(() => batchText(frames, text)).toBeTruthy();
   const batch = batchText(frames, text)!;
   expect(batch).toContain('[media/a.mp4 @ 0:12.300 · 320×240]');
   const [x, y, w, h] = rectOf(batch);
   for (const [got, want] of [[x, fx0], [y, fy0], [w, fx1 - fx0], [h, fy1 - fy0]]) expect(Math.abs(got - want), batch).toBeLessThanOrEqual(0.005);
+});
+
+test('player bar: the timeline seeks, Space after a bar button toggles once, F fullscreens the container @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
+  await start(page);
+  await openFromTree(page, 'media/a.mp4');
+  const pane = mediaPane(page, 'media/a.mp4');
+  const video = pane.locator('video');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  expect(await video.evaluate((e: HTMLVideoElement) => e.hasAttribute('controls'))).toBe(false);
+  await video.evaluate((e: HTMLVideoElement) => { e.muted = true; });
+  const line = page.getByRole('slider', { name: /^(Seek|Перемотка)$/ });
+  const box = (await line.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const dur = await video.evaluate((e: HTMLVideoElement) => e.duration);
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(dur / 2 - 1);
+  expect(await video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeLessThan(dur / 2 + 1);
+
+  // after clicking a bar button, Space toggles exactly once (not once for the player keys and once for the button)
+  const paused = () => video.evaluate((e: HTMLVideoElement) => e.paused);
+  await page.getByRole('button', { name: /^(Play|Воспроизвести) \(K\)$/ }).click();
+  await expect.poll(paused).toBe(false);
+  await page.keyboard.press('Space');
+  await expect.poll(paused).toBe(true);
+  await page.waitForTimeout(300);
+  expect(await paused()).toBe(true);
+  await page.keyboard.press('Space');
+  await expect.poll(paused).toBe(false);
+  await page.waitForTimeout(300);
+  expect(await paused()).toBe(false);
+
+  // F: the container is fullscreen (with the bar in it), and the keys still work there
+  await page.keyboard.press('KeyF');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.querySelector('[data-player-bar]') !== null && !!document.fullscreenElement)).toBe(true);
+  expect(await page.evaluate(() => document.fullscreenElement?.tagName.toLowerCase())).toBe('div');
+  await page.keyboard.press('Space');
+  await expect.poll(paused).toBe(true);
+  await page.keyboard.press('KeyF');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
 });
 
 test('deleting the comment removes its folder @files', async ({ page }) => {

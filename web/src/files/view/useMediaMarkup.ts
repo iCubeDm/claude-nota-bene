@@ -22,14 +22,18 @@ export function useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, me
   const mediaCtl = useMedia();
   // the image or video the markup layer draws over (state: the layer mounts once the element exists)
   const [markable, setMarkable] = useState<HTMLImageElement | HTMLVideoElement | null>(null);
+  // the video or audio the player bar controls (state: the bar mounts once the element exists)
+  const [player, setPlayer] = useState<HTMLMediaElement | null>(null);
   const mediaRef = useCallback((el: HTMLMediaElement | null) => {
     mediaEl.current = el;
     if (el instanceof HTMLVideoElement) setMarkable(el);
     if (!el) return;
+    setPlayer(el);
     const off = mediaCtl.register(tabId, el);
     return () => {
       off();
       setMarkable(null);
+      setPlayer(null);
     };
   }, [mediaCtl, tabId, mediaEl]);
   const imgRef = useCallback((el: HTMLImageElement | null) => setMarkable(el), []);
@@ -75,7 +79,7 @@ export function useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, me
     if ((!active || !marking) && !popupBusy.current) setMarkPopup(null);
   }, [active, marking]);
 
-  return { markable, mediaRef, imgRef, markPopup, onMarkAdd, closeMarkPopup, markAdded, saving, onPopupBusy };
+  return { markable, player, mediaRef, imgRef, markPopup, onMarkAdd, closeMarkPopup, markAdded, saving, onPopupBusy };
 }
 
 export type MediaMarkup = ReturnType<typeof useMediaMarkup>;

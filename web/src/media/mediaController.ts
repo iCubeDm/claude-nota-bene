@@ -72,6 +72,13 @@ export class MediaController {
     else void request();
   }
 
+  /** The PiP button's action: enter PiP with `el` (closing another window first), or leave it when `el` is the one. Our own exit is not a "back to tab". */
+  togglePip(el: HTMLVideoElement): Promise<void> {
+    if (this.pip.current() === el) return this.exitPip();
+    const request = () => this.pip.request(el).catch(() => {});
+    return this.pip.current() ? this.exitPip().then(request) : request();
+  }
+
   /** Pause the tab's medium and close PiP if it is this one. */
   onClose(tabId: string): void {
     const el = this.els.get(tabId);

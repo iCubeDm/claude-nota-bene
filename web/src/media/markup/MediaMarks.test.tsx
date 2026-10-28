@@ -125,22 +125,6 @@ it('video marks hidden while playing or away from the time, shown when paused at
   expect(ids()).toEqual([]);
 });
 
-it('the hit area leaves the bottom 48 px of a video free for its native controls', () => {
-  // content box = element box (1000×1000): the bottom 48 px are clipped out of the hit area
-  const full = video();
-  setup(full.v, [comment('c', media('v.mp4', [RED], { time: 1 }))], 'v.mp4', 'file:v.mp4');
-  full.pauseAt(1);
-  expect(pane.querySelector('clipPath rect')?.getAttribute('height')).toBe('1.952') // y -1 … 0.952;
-  expect(pane.querySelector('[data-hit]')?.getAttribute('clip-path')).toMatch(/^url\(#/);
-  cleanup();
-  pane.replaceChildren();
-  // 2000×1000 letterboxed: the controls sit in the 250 px bar under the content, nothing to clip
-  const wide = video(2000, 1000);
-  setup(wide.v, [comment('c', media('v.mp4', [RED], { time: 1 }))], 'v.mp4', 'file:v.mp4');
-  wide.pauseAt(1);
-  expect(pane.querySelector('clipPath rect')?.getAttribute('height')).toBe('2');
-});
-
 it('a mark on a file that has changed since says so', () => {
   const { store } = setup(image(), [comment('mine', media('p.png', [RED], { version: 'W/"1-1"' }))]);
   expect(pane.querySelector('[data-hit="mine"] title')).toBeNull();

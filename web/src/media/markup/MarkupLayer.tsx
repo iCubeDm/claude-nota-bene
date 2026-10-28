@@ -241,7 +241,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false, saving = f
           onPointerCancel={finish}
           onLostPointerCapture={finish}
         >
-          {/* the hit area: the svg itself takes no pointer events; while marking the video has no native controls */}
+          {/* the hit area: the svg itself takes no pointer events; while marking the player bar is gone */}
           <rect x="0" y="0" width="1" height="1" fill="transparent" stroke="none" className="pointer-events-auto" />
           {drawn}
           <path ref={liveHalo} d="" stroke={HALO} strokeWidth={HALO_PX} vectorEffect="non-scaling-stroke" />

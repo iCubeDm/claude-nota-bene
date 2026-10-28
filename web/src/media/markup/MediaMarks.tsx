@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { openCommentCard, selectMediaComments, type MediaComment } from '@/comments/slice.ts';
 import { selectFileVersion } from '@/files/slice.ts';
@@ -14,14 +14,12 @@ import { selectDraft } from './slice.ts';
  * `max(0.5 / fps, 0.04)` is 0.04 in practice.
  */
 export const TIME_TOLERANCE = 0.04;
-/** The native controls' strip at the bottom of a video element: the hit area never reaches into it. */
-export const CONTROLS_PX = 48;
 const SENT_OPACITY = 0.35;
 /** A stroke is thin: the click target is a wider invisible stroke along it (the shapes' insides stay click-through). */
 const HIT_PX = 12;
 
 /** The comment was drawn on another version of the file than the one known now (false when either is unknown). */
-const changedSince = (c: MediaComment, current: string | undefined): boolean =>
+export const changedSince = (c: MediaComment, current: string | undefined): boolean =>
   !!c.anchor.version && current !== undefined && current !== c.anchor.version;
 
 /** The video's time while paused, null while it plays; an image: always 0 (every mark shows). */
@@ -46,8 +44,8 @@ function usePausedAt(media: Media): number | null {
  * in view) but take no clicks: the pointer belongs to the drawing then.
  *
  * Clicks: the svg takes no pointer events; only an invisible wider stroke along each shape does (a click opens the
- * comment's card), so the media's own clicks (the image's zoom, the video's play) pass through a shape's inside. Over a
- * video the hit strokes are clipped out of the bottom CONTROLS_PX of the element, where its native controls are.
+ * comment's card), so the media's own clicks (the image's zoom, the video's play) pass through a shape's inside. The
+ * player bar (PlayerBar) is a later sibling above this layer, so over it the bar wins.
  *
  * Lag: the paths of a comment are built once per comment object; the overlay scrolls with the pane natively and is
  * placed only on resizes. With no mark to show, nothing is mounted or observed.
@@ -84,18 +82,9 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref }: {
   };
 
   const svg = useRef<SVGSVGElement>(null);
-  const clipRect = useRef<SVGRectElement>(null);
-  const clipId = `nb-marks-clip-${useId().replace(/:/g, '')}`;
-  // the hit area ends CONTROLS_PX above the element's bottom: in viewBox units of the content box's height
-  const clip = useCallback((b: DOMRect, el: DOMRect) => {
-    const free = video ? Math.max(0, CONTROLS_PX - (el.bottom - b.bottom)) : 0;
-    const h = b.height > 0 ? Math.max(0, 1 - free / b.height) : 1;
-    // from y = -1 (a stroke along the top edge sticks out above it) down to h
-    clipRect.current?.setAttribute('height', String(Math.round((1 + h) * 10000) / 10000));
-  }, [video]);
   const pane = media.parentElement;
   const on = shown.length > 0 && !!pane;
-  useOverlayPlacement(svg, media, fit, on, clip);
+  useOverlayPlacement(svg, media, fit, on);
 
   const open = (id: string) => (e: MouseEvent) => {
     e.stopPropagation();
@@ -117,18 +106,13 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref }: {
       strokeLinejoin="round"
       className="pointer-events-none absolute z-10 overflow-visible select-none"
     >
-      <defs>
-        <clipPath id={clipId}>
-          <rect ref={clipRect} x="-1" y="-1" width="3" height="2" />
-        </clipPath>
-      </defs>
       {shown.map((c) => (
         <g key={c.id} data-mark={c.id} opacity={c.status === 'sent' ? SENT_OPACITY : undefined}>{drawn(c).els}</g>
       ))}
       {!marking && shown.map((c) => {
         const changed = changedSince(c, current);
         return (
-          <g key={c.id} data-hit={c.id} clipPath={`url(#${clipId})`} onClick={open(c.id)} className="cursor-pointer">
+          <g key={c.id} data-hit={c.id} onClick={open(c.id)} className="cursor-pointer">
             {changed && <title>{t('fileChanged')}</title>}
             {drawn(c).ds.map((d, i) => (
               <path key={i} d={d} stroke="transparent" strokeWidth={HIT_PX} vectorEffect="non-scaling-stroke" pointerEvents="stroke" />

@@ -80,7 +80,7 @@ it('volume: ↑/↓ by 5 % clamped to 0..100, ↑ unmutes, M toggles mute', () =
   s.press('KeyM'); s.press('KeyM'); expect(s.st.muted).toBe(false);
 });
 
-it('frame step only while paused, video only; F asks for fullscreen on a video', () => {
+it('frame step only while paused, video only; F fullscreens the player container, not the video', () => {
   const s = setup();
   s.press('Period'); expect(s.st.time).toBeCloseTo(20 + 1 / 30);
   s.press('Comma'); expect(s.st.time).toBeCloseTo(20);
@@ -88,9 +88,13 @@ it('frame step only while paused, video only; F asks for fullscreen on a video',
   expect(s.press('Period')).toBe(true); // playing: not ours
   expect(s.st.time).toBeCloseTo(20);
   const fs = vi.fn(() => Promise.resolve());
-  s.el!.requestFullscreen = fs;
+  const own = vi.fn(() => Promise.resolve());
+  const box = s.el!.closest<HTMLElement>('[data-pane]')!.parentElement!; // video → pane → container
+  box.requestFullscreen = fs;
+  s.el!.requestFullscreen = own;
   s.press('KeyF');
   expect(fs).toHaveBeenCalledTimes(1);
+  expect(own).not.toHaveBeenCalled();
 });
 
 it('audio: no fullscreen, no frame step, but the rest works', () => {
