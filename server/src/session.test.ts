@@ -14,11 +14,17 @@ import { prefsKey, readPrefs, setModePref } from './prefs.ts';
 import { AttachmentStore } from './attachments.ts';
 
 let home: string;
+const extraDirs: string[] = []; // project folders a test makes besides `home`, removed even when the test fails
+const mkExtra = (prefix: string) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  extraDirs.push(d);
+  return d;
+};
 const prevHome = process.env.NOTA_BENE_HOME;
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-session-')); process.env.NOTA_BENE_HOME = home; });
 afterEach(() => {
   if (prevHome === undefined) delete process.env.NOTA_BENE_HOME; else process.env.NOTA_BENE_HOME = prevHome;
-  fs.rmSync(home, { recursive: true, force: true });
+  for (const d of [home, ...extraDirs.splice(0)]) fs.rmSync(d, { recursive: true, force: true });
 });
 
 function setup(backend: AgentBackend) {
@@ -783,7 +789,7 @@ describe('switch', () => {
   };
 
   it('a late message from the old agent after the reset is not emitted', async () => {
-    const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-b-')));
+    const dirB = fs.realpathSync(mkExtra('nb-switch-b-'));
     let release!: () => void;
     const late = new Promise<void>((r) => { release = r; });
     let oldAsk: PermissionAsk | null = null;
@@ -829,7 +835,7 @@ describe('switch', () => {
   });
 
   it('a busy restart: a forced send stuck in its interrupt neither reaches the new agent nor toasts', async () => {
-    const dirA = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-restart-')));
+    const dirA = fs.realpathSync.native(mkExtra('nb-restart-'));
     const log: string[] = [];
     const sent: string[][] = [];
     const inner = fakeBackend([{ text: 'x'.repeat(2000), chunk: 1, delayMs: 5 }]);
@@ -909,7 +915,7 @@ describe('switch', () => {
   });
 
   it('a history read that hangs times out: reported as a switch error, empty replay, switching released', async () => {
-    const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-h-')));
+    const dirB = fs.realpathSync(mkExtra('nb-switch-h-'));
     const sid = '55555555-5555-4555-8555-555555555555';
     const backend = fakeBackend([{ text: 'x' }], { sessions: [{ id: sid, cwd: dirB, history: [{ role: 'user', text: 'old' }] }] });
     backend.history = () => new Promise(() => {});

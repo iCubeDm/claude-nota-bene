@@ -14,6 +14,12 @@ let dist: string;
 let proj: string;
 const prevHome = process.env.NOTA_BENE_HOME;
 const closers: (() => Promise<void>)[] = [];
+const extraDirs: string[] = []; // the other windows' project folders, removed after each test
+const mkExtra = (prefix: string) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  extraDirs.push(d);
+  return d;
+};
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-home-'));
@@ -25,7 +31,7 @@ beforeEach(() => {
 afterEach(async () => {
   while (closers.length) await closers.pop()!();
   if (prevHome === undefined) delete process.env.NOTA_BENE_HOME; else process.env.NOTA_BENE_HOME = prevHome;
-  for (const d of [home, dist, proj]) fs.rmSync(d, { recursive: true, force: true });
+  for (const d of [home, dist, proj, ...extraDirs.splice(0)]) fs.rmSync(d, { recursive: true, force: true });
 });
 
 async function boot(cwd = proj) {
@@ -166,7 +172,7 @@ describe('storage', () => {
 describe('the row the user saw', () => {
   it('a port taken by a newer window after the list was loaded is not touched (409 window changed)', async () => {
     const a = await boot();
-    const b = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-b-')));
+    const b = await boot(mkExtra('nb-system-b-'));
     const bRoot = ((await (await fetch(`${b.url}/info`)).json()) as { root: string }).root;
     registerWindow(b.port, bRoot, process.pid);
     const seen = rowOf(b.port);
@@ -188,7 +194,7 @@ describe('defaults and about', () => {
     expect((await post(`${s.url}/system/prefs`, { defaultMode: 'plan' }, { origin: s.origin })).status).toBe(200);
     expect(readPrefs().defaultMode).toBe('plan');
     // a project with no mode of its own starts in the default
-    const fresh = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-fresh-')));
+    const fresh = await boot(mkExtra('nb-system-fresh-'));
     const ws = new WebSocket(fresh.url.replace('http', 'ws'));
     closers.push(async () => void ws.terminate());
     const mode = await new Promise<string>((res) => ws.on('message', (d) => {
@@ -210,7 +216,7 @@ describe('defaults and about', () => {
 describe('windows', () => {
   it('lists registered windows with their state; /info carries busy and clients', async () => {
     const a = await boot();
-    const b = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-b-')));
+    const b = await boot(mkExtra('nb-system-b-'));
     const bRoot = ((await (await fetch(`${b.url}/info`)).json()) as { root: string; busy: boolean; clients: number });
     expect(bRoot).toMatchObject({ busy: false, clients: 0 });
     registerWindow(a.port, ((await (await fetch(`${a.url}/info`)).json()) as { root: string }).root, process.pid);
@@ -222,7 +228,7 @@ describe('windows', () => {
 
   it('A stops B through B\'s /control with the token; A refuses to act on itself; a page never reaches /control', async () => {
     const a = await boot();
-    const b = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-b-')));
+    const b = await boot(mkExtra('nb-system-b-'));
     for (const s of [a, b]) registerWindow(s.port, ((await (await fetch(`${s.url}/info`)).json()) as { root: string }).root, process.pid);
     // a page (with an Origin, even its own) is refused at /control, with or without the token
     expect((await post(`${b.url}/control/stop`, {}, { origin: b.origin })).status).toBe(403);
@@ -257,7 +263,7 @@ describe('windows', () => {
 
   it('a registered port that answers with another root gets no token', async () => {
     const a = await boot();
-    const b = await boot(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-system-b-')));
+    const b = await boot(mkExtra('nb-system-b-'));
     registerWindow(b.port, '/some/other/root', process.pid); // the port was reused by another window/app
     const r = await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'stop' }, { origin: a.origin });
     expect(r.status).toBe(409);
