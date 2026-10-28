@@ -9,6 +9,7 @@ import { addShape, selectDraft, setTool } from '@/media/markup/slice.ts';
 import { dismissToast, getToasts } from '@/shell/toast.ts';
 import { FileView } from './FileView.tsx';
 import { jumpToFileComment, selectFileVersion } from './slice.ts';
+import { setStartAt } from './startAt.ts';
 import { wrapLines } from './wrap.ts';
 
 // like the real one: awaits the version request it was handed and returns it in the anchor patch
@@ -521,4 +522,16 @@ it('a media tab with a versioned comment publishes the file’s current ETag; on
   await waitFor(() => expect(selectFileVersion(store.getState(), 'p.png')).toBe('W/"8-8"'));
   r.unmount();
   expect(selectFileVersion(store.getState(), 'p.png')).toBeUndefined(); // the tab closed: unknown again
+});
+
+it('a start time set by the chat button is applied once the metadata is loaded, and only once', () => {
+  setStartAt('file:v.mp4', 7.5);
+  const { r } = setup('v.mp4');
+  const v = r.container.querySelector('video')!;
+  expect(v.currentTime).toBe(0);
+  fireEvent(v, new Event('loadedmetadata'));
+  expect(v.currentTime).toBe(7.5);
+  v.currentTime = 1;
+  fireEvent(v, new Event('loadedmetadata'));
+  expect(v.currentTime).toBe(1);
 });

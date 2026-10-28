@@ -43,3 +43,11 @@
 .md-open-diagram { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; border: 1px solid var(--border); background: var(--card, oklch(0.22 0.02 260)); color: var(--foreground, #ddd); font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
 .mermaid-out:hover > .md-open-diagram, .svg-out:hover > .md-open-diagram, .md-open-diagram:focus-visible { opacity: 1; }
 .md-open-diagram:hover { background: var(--muted); }
+
+/* ⤢ on a project image/video/audio in a reply: hover or keyboard focus (Markdown.tsx wraps the element after sanitizing) */
+.md-media { position: relative; display: block; width: fit-content; max-width: 100%; }
+.md-media > img, .md-media > video { margin: 8px 0; }
+.md-open-media { position: absolute; top: 14px; right: 6px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; border: 1px solid var(--border); background: var(--card, oklch(0.22 0.02 260)); color: var(--foreground, #ddd); font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.md-media:hover > .md-open-media, .md-open-media:focus-visible { opacity: 1; }
+.md-open-media:hover { background: var(--muted); }
+.md-media:has(> audio) { width: 100%; }

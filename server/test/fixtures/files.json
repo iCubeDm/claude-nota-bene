@@ -1,1 +1,1 @@
-[{"text":"ok","echoImages":true}]
+[{"text":"ok","echoImages":true},{"match":"embed media","text":"Here:\n\n![v](media/a.mp4)\n\n![p](docs/pic.png)\n\n![x](/attach/abc.png)\n"}]

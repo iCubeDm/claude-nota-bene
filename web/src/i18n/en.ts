@@ -139,6 +139,7 @@ export const en: Dict = {
   hkTitle: 'Hotkeys',
   // Diagram tab (M7-01)
   openDiagram: 'Open diagram',
+  openInTab: 'Open in a tab',
   diagramTab: 'Diagram',
   // Settings tab (M6-15)
   settings: 'Settings',

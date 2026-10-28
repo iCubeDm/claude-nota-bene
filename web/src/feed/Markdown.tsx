@@ -9,7 +9,9 @@ import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
 import { useSources } from '@/files/sources.ts';
 import { openDiagram } from '@/tabs/slice.ts';
 import { HARDEN, renderMermaid, sanitizeSvg, type DiagramLang } from '@/diagram/render.ts';
-import { markMentions, markRefs } from '@/refs/refs.ts';
+import { fileOfImage, markMentions, markRefs, openMediaFile } from '@/refs/refs.ts';
+import { fileTabId } from '@/tabs/slice.ts';
+import { setStartAt } from '@/files/startAt.ts';
 import './markdown.css';
 
 // external links in agent replies open in a new browser tab instead of replacing the app
@@ -64,7 +66,30 @@ function addOpenButton(out: HTMLElement, source: string, lang: DiagramLang) {
   out.appendChild(b);
 }
 
+/** Project media (src is a /file URL; not /attach, not http) gets an "open in a tab" button, once, in a wrapper. */
+function addMediaButtons(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>('img, video, audio').forEach((m) => {
+    if (m.parentElement?.classList.contains('md-media')) return;
+    const f = fileOfImage(m);
+    // `![](/attach/<id>)` also renders as a /file URL (an absolute path): it is a pasted image, not a project file
+    if (!f || f.path.startsWith('/attach/')) return;
+    const wrap = document.createElement('span');
+    wrap.className = 'md-media';
+    m.replaceWith(wrap);
+    wrap.appendChild(m);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'md-open-media';
+    b.textContent = '⤢';
+    b.setAttribute('data-anchor-skip', '');
+    b.setAttribute('aria-label', t('openInTab'));
+    b.title = t('openInTab');
+    wrap.appendChild(b);
+  });
+}
+
 function postProcess(root: HTMLElement, final: boolean) {
+  if (final) addMediaButtons(root);
   root.querySelectorAll<HTMLElement>('pre code').forEach((c) => {
     const lang = /language-(\w+)/.exec(c.className)?.[1];
     const pre = c.parentElement!;
@@ -133,6 +158,22 @@ export const Markdown = memo(
       if (ref.current) postProcess(ref.current, final);
     }, [html, final]);
     const onClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+      const mb = (e.target as Element).closest('button.md-open-media');
+      if (mb && e.currentTarget.contains(mb)) {
+        // inside a link or a ref, the click must not navigate or open a second time
+        e.preventDefault();
+        e.stopPropagation();
+        const m = mb.parentElement?.querySelector('img, video, audio');
+        const open = m && openMediaFile(m);
+        if (!open || !redux) return;
+        // a played video/audio opens at that time (consumed once by the file view, see files/startAt.ts)
+        if (m instanceof HTMLMediaElement && m.currentTime > 0) {
+          const f = fileOfImage(m)!;
+          setStartAt(fileTabId(f.path, f.src), m.currentTime);
+        }
+        redux.store.dispatch(open);
+        return;
+      }
       const b = (e.target as Element).closest('button.md-open-diagram');
       const d = b && e.currentTarget.contains(b) ? openers.get(b) : undefined;
       if (d) redux?.store.dispatch(openDiagram(d));

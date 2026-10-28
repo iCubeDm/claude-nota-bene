@@ -177,13 +177,19 @@ export const openRef = (path: string, el: HTMLElement, from = 'here'): AppThunk<
   el.title = t('noFile');
 };
 
-/** A rendered project image (`/file?path=…[&src=…]`, see fileUrl): its path and source, from the URL itself. */
-function fileOfImage(img: HTMLImageElement): { path: string; src: string } | null {
+/** A rendered project media element (`/file?path=…[&src=…]`, see fileUrl): its path and source, from the URL itself. */
+export function fileOfImage(img: Element): { path: string; src: string } | null {
   const raw = img.getAttribute('src') ?? '';
   if (!raw.startsWith('/file?')) return null;
   const q = new URL(raw, 'http://x').searchParams;
   const path = q.get('path');
   return path ? { path, src: q.get('src') ?? 'here' } : null;
+}
+
+/** The open action of a rendered project image/video/audio: what clicking an image does, and the media ⤢ button. */
+export function openMediaFile(el: Element): ReturnType<typeof openFile> | null {
+  const f = fileOfImage(el);
+  return f ? openFile({ ...f, ref: refOf(f.src) }) : null;
 }
 
 /**
@@ -194,8 +200,8 @@ export const refClick =
   (e: ReactMouseEvent<HTMLElement>, dispatch: (a: AppThunk<Promise<void>> | ReturnType<typeof openFile>) => unknown, from?: string): void => {
     const img = (e.target as Element).closest<HTMLImageElement>('.md img');
     if (img && e.currentTarget.contains(img)) {
-      const f = fileOfImage(img);
-      if (f && (window.getSelection()?.isCollapsed ?? true)) dispatch(openFile({ ...f, ref: refOf(f.src) }));
+      const open = openMediaFile(img);
+      if (open && (window.getSelection()?.isCollapsed ?? true)) dispatch(open);
       return;
     }
     const el = (e.target as Element).closest<HTMLElement>('.ref[data-path]');

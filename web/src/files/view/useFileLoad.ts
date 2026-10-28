@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { selectMediaComments } from '@/comments/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import type { FileKind } from '../kinds.ts';
+import { fileTabId } from '@/tabs/slice.ts';
+import { takeStartAt } from '../startAt.ts';
 import { dropFileLoad, setFileLoad, setFileVersion } from '../slice.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -103,10 +105,20 @@ export function useFileLoad({ path, src, ref, url, kind, media, markableKind, ac
     if (markingRef.current) return void (heldReload.current = true);
     reloadMedia();
   };
+  const tabId = fileTabId(path, src);
   const onMediaMeta = (e: { currentTarget: HTMLMediaElement }) => {
     if (resumeAt.current > 0) e.currentTarget.currentTime = resumeAt.current;
     resumeAt.current = 0;
+    const at = takeStartAt(tabId); // "open in a tab" from the chat: a fresh tab starts here
+    if (at !== undefined) e.currentTarget.currentTime = at;
   };
+  // the same tab already open with its media loaded: no new loadedmetadata, so apply on (re)activation
+  useEffect(() => {
+    const el = mediaEl.current;
+    if (!active || !media || !el || el.readyState < 1) return;
+    const at = takeStartAt(tabId);
+    if (at !== undefined) el.currentTime = at;
+  }, [active, media, tabId]);
 
   const loadedRev = useRef<{ path: string; rev: number } | null>(null);
   useEffect(() => {
