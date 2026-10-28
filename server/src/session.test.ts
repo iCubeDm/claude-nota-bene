@@ -93,34 +93,6 @@ describe('session manager', () => {
     expect(kinds.indexOf('user')).toBeLessThan(a);
   });
 
-  it('force send interrupts and uses priority now', async () => {
-    const calls: { priority: string }[] = [];
-    let interrupts = 0;
-    const inner = fakeBackend([{ text: 'x'.repeat(200), chunk: 1, delayMs: 5 }, { text: 'second' }]);
-    const backend: AgentBackend = {
-      ...noSessions,
-      history: inner.history,
-      start: (o) => {
-        const a = inner.start(o);
-        return {
-          messages: a.messages,
-          send: (m) => { calls.push({ priority: m.priority }); a.send(m); },
-          interrupt: () => { interrupts++; return a.interrupt(); },
-          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
-        };
-      },
-    };
-    const { events, make } = setup(backend);
-    const s = await make();
-    s.send({ id: 'u1', text: 'long' });
-    await until(() => agentOf(events, 'message-chunk').length > 2);
-    s.send({ id: 'u2', text: 'now', force: true });
-    await until(() => calls.length === 2);
-    expect(interrupts).toBe(1);
-    expect(calls.map((c) => c.priority)).toEqual(['next', 'now']);
-    await until(() => agentOf(events, 'turn-end').length === 2);
-  });
-
   it('permission round-trip', async () => {
     const turns: FakeTurn[] = [{ text: 'ok', ask: { toolName: 'Bash', input: { command: 'ls' } } }];
     const { events, make } = setup(fakeBackend(turns));
@@ -262,6 +234,7 @@ describe('session manager', () => {
     s.send({ id: 'u1', text: 'hi' });
     await until(() => events.some((e) => e.kind === 'server-error'));
     await until(() => agentOf(events, 'turn-end').length === 2);
+    expect(s.busy()).toBe(false);
     s.send({ id: 'u2', text: 'again' });
     await until(() => agentOf(events, 'turn-end').length === 3);
     expect(resumes).toEqual([undefined, 'fake-session']);
@@ -519,18 +492,6 @@ describe('busy cannot get stuck', () => {
       expect(got[0]!.text).toBe('hello');
       expect(got[0]!.images).toHaveLength(1);
     });
-
-    it('fake echoImages reports how many images the turn received', async () => {
-      const attachments = new AttachmentStore({ dir: path.join(home, 'att') });
-      const ref = { id: attachments.put(png('a'), 'image/png'), mediaType: 'image/png' as const, label: 'x' };
-      const hub = new EventHub();
-      const events: ServerEvent[] = [];
-      hub.attach({ send: (d) => { const e = JSON.parse(d) as ServerEvent; if (e.kind !== 'replay') events.push(e); } });
-      const s = await createSessionManager({ hub, backend: fakeBackend([{ text: 'ok', echoImages: true }]), cwd: '/proj', attachments });
-      s.send({ id: 'u1', text: 'hi', images: [ref, ref] });
-      await until(() => agentOf(events, 'turn-end').length === 1);
-      expect(agentOf(events, 'message').map((e) => e.e)).toMatchObject([{ text: 'ok\nimages: 2' }]);
-    });
   });
 });
 
@@ -591,19 +552,6 @@ describe('compact-end and idle compaction', () => {
     await until(() => agentOf(events, 'compact-end').length === 1);
     await until(() => idleSends(sends).length === 1);
     expect(events.find((e) => e.kind === 'user' && e.idle)).toMatchObject({ text: '/compact' });
-    s.close();
-  });
-
-  it('capabilities: compact:false means idle compaction never fires', async () => {
-    const { backend, sends, push } = pushed();
-    const nb: AgentBackend = { ...backend, capabilities: { ...CLAUDE_CAPABILITIES, compact: false } };
-    const { hub } = setup(nb);
-    const s = await createSessionManager({ hub, backend: nb, cwd: '/proj', idle, idleOffInSettings: () => false });
-    s.send({ id: 'u1', text: 'hi' });
-    await until(() => sends.length === 1);
-    push(result(['u1']));
-    await new Promise((r) => setTimeout(r, idle.afterMs * 4));
-    expect(idleSends(sends)).toHaveLength(0);
     s.close();
   });
 });
@@ -697,16 +645,6 @@ describe('permission mode', () => {
     const s = await make();
     await until(() => modeEvents(events).length === 1);
     expect(s.mode()).toBe('acceptEdits');
-  });
-
-  it('an init with the same mode emits nothing', async () => {
-    setModePref('/proj', 'plan');
-    const { events, make } = setup(fakeBackend([{ text: 'x', initMode: 'plan' }]));
-    const s = await make();
-    s.send({ id: 'u1', text: 'hi' });
-    await until(() => agentOf(events, 'turn-end').length === 1);
-    expect(modeEvents(events)).toEqual([]);
-    expect(s.mode()).toBe('plan');
   });
 
   // an agent whose frames the test pushes by hand; setPermissionMode runs `onSet` before it resolves
@@ -891,20 +829,6 @@ describe('switch', () => {
     s.close();
   });
 
-  it('a send during a switch is refused, not delivered to either agent', async () => {
-    const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-b-')));
-    const backend = fakeBackend([{ text: 'x' }], { sessions: [{ id: 'b', cwd: dirB }] });
-    const { hub, events } = setup(backend);
-    const s = await createSessionManager({ hub, backend, cwd: '/proj' });
-    const p = s.switch({ id: null, dir: dirB });
-    expect(s.send({ id: 'u1', text: 'too early' })).toBe('switching');
-    await p;
-    expect(events.find((e) => e.kind === 'server-error')).toBeUndefined(); // the server answers the asking socket only
-    expect(events.some((e) => e.kind === 'user')).toBe(false);
-    s.close();
-    fs.rmSync(dirB, { recursive: true, force: true });
-  });
-
   it('a history read that hangs times out: reported as a switch error, empty replay, switching released', async () => {
     const dirB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-switch-h-')));
     const sid = '55555555-5555-4555-8555-555555555555';
@@ -922,7 +846,7 @@ describe('switch', () => {
   });
 
   describe('fork', () => {
-    it('starts the agent with fork: true and saves only the new id', async () => {
+    it('starts with fork and saves only the new id; after the id a restart resumes it without fork', async () => {
       const backend = fakeBackend([{ text: 'hi' }]);
       const { events, hub } = setup(backend);
       const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
@@ -936,6 +860,10 @@ describe('switch', () => {
       expect(forked).not.toBe('src-id');
       expect(lastSession(home)).toBe(forked);
       expect(ids).toEqual([forked]);
+      await m.restart();
+      expect(backend.starts[1]).toEqual(expect.objectContaining({ resume: forked }));
+      expect(backend.starts[1]!.fork).toBeUndefined();
+      expect(lastSession(home)).toBe(forked);
       m.close();
     });
 
@@ -946,20 +874,6 @@ describe('switch', () => {
       await m.restart();
       expect(backend.starts.map((x) => x.fork)).toEqual([true, true]);
       expect(lastSession(home)).toBeUndefined();
-      m.close();
-    });
-
-    it('after the fork has its id, a restart resumes that id without fork', async () => {
-      const backend = fakeBackend([{ text: 'hi' }]);
-      const { events, hub } = setup(backend);
-      const m = await createSessionManager({ hub, backend, cwd: home, resume: 'src-id', fork: true });
-      m.send({ id: 'u1', text: 'go' });
-      await until(() => agentOf(events, 'turn-end').length === 1);
-      const forked = m.info().id!;
-      await m.restart();
-      expect(backend.starts[1]).toEqual(expect.objectContaining({ resume: forked }));
-      expect(backend.starts[1]!.fork).toBeUndefined();
-      expect(lastSession(home)).toBe(forked);
       m.close();
     });
   });

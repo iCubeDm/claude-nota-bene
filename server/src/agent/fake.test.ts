@@ -65,13 +65,9 @@ describe('fake backend', () => {
     });
   });
 
-  it('streams deltas then assistant then result', async () => {
+  it('streams deltas then assistant then result; the assistant text is the concatenated deltas', async () => {
     const out = await collectTurn([{ text: 'hello world', chunk: 5 }]);
     expect(out.map((m) => m.type)).toEqual(['system', 'stream_event', 'stream_event', 'stream_event', 'stream_event', 'assistant', 'result']);
-  });
-
-  it('assistant text equals concatenated deltas', async () => {
-    const out = await collectTurn([{ text: 'hello world', chunk: 5 }]);
     const deltas = out.flatMap((m) => {
       const e = (m as { event?: { type: string; delta?: { text: string } } }).event;
       return m.type === 'stream_event' && e?.type === 'content_block_delta' ? [e.delta!.text] : [];

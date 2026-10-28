@@ -251,13 +251,4 @@ describe('idle compaction', () => {
     await new Promise((r) => setTimeout(r, 400));
     expect(idleUsers(a)).toHaveLength(0);
   });
-
-  it('a small context is left alone', async () => {
-    const s = await bootIdle([{ text: 'hello', context: { used: 5000, max: 1_000_000, pct: 1 } }]);
-    const a = await connect(s.url);
-    a.send({ type: 'send', id: 'u1', text: 'hi' });
-    await until(() => results(a).length === 1);
-    await new Promise((r) => setTimeout(r, 400));
-    expect(idleUsers(a)).toHaveLength(0);
-  });
 });

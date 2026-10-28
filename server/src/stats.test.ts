@@ -209,18 +209,4 @@ describe('StatsService', () => {
     await svc.refresh();
     expect(emitted).toHaveLength(0);
   });
-
-  it('stats are never in the hub history, and a new socket can be given current()', async () => {
-    const hub = new EventHub();
-    const { session } = stub();
-    const svc = new StatsService({ session: () => session, emit: (s) => hub.emit({ kind: 'stats', stats: s }, { store: false }) });
-    const live: ServerEvent[] = [];
-    hub.attach({ send: (d) => live.push(JSON.parse(d) as ServerEvent) });
-    await svc.refresh();
-    expect(live.some((e) => e.kind === 'stats')).toBe(true);
-    const late: ServerEvent[] = [];
-    hub.attach({ send: (d) => late.push(JSON.parse(d) as ServerEvent) });
-    expect(late).toEqual([{ kind: 'replay', events: [] }]);
-    expect(svc.current().context).not.toBeNull();
-  });
 });

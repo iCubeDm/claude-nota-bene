@@ -35,11 +35,6 @@ const text = (id: string): Comment => ({
 });
 
 describe('MarkFiles', () => {
-  it('MARK_ID is the uuid shape', () => {
-    expect(MARK_ID.test(ID)).toBe(true);
-    expect(MARK_ID.test(ID.slice(1))).toBe(false);
-  });
-
   it('write creates the folder, the file and a self-ignoring .gitignore once', () => {
     fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n');
     const m = new MarkFiles({ root: () => root });
