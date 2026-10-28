@@ -166,14 +166,14 @@ export function Feed() {
       {compacting !== null && <CompactingLine since={compacting} />}
       {away && (
         // sticky inside the scrolling pane: it stays at the pane's bottom edge without taking room in the transcript
-        <div data-anchor-skip className="pointer-events-none sticky bottom-3 flex h-0 justify-end">
+        <div data-anchor-skip className="pointer-events-none sticky bottom-3 flex h-0 items-start justify-end">
           <button
             type="button"
             onClick={toLatest}
             aria-label={t('toLatest')}
             title={t('toLatest')}
             data-unread={unread || undefined}
-            className="pointer-events-auto relative -translate-y-full rounded-full border border-border-soft bg-popover/90 p-2 text-muted-foreground shadow-md backdrop-blur hover:text-foreground"
+            className="pointer-events-auto relative shrink-0 -translate-y-full rounded-full border border-border-soft bg-popover/90 p-2 text-muted-foreground shadow-md backdrop-blur hover:text-foreground"
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 5v14M5 12l7 7 7-7" /></svg>
             {unread && <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-nb-accent" />}
