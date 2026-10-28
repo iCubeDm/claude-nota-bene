@@ -39,7 +39,7 @@ test('force keeps busy across the interrupted result; the next result clears it'
   const s1 = fold([user(), user({ id: 'u2', force: true }), result({ stop: 'interrupted', answers: ['u1'] })]);
   expect(s1.busy).toBe(true);
   expect(s1.forcePending).toBe(false);
-  expect(s1.items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+  expect(s1.items.at(-1)).toEqual({ key: expect.any(String), kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
   const s2 = reduce(s1, result({ answers: ['u2'] }));
   expect(s2.busy).toBe(false);
   expect(s2.items.at(-1)).toMatchObject({ status: 'done' });
@@ -52,8 +52,30 @@ test('force keeps busy across the interrupted result; the next result clears it'
 
 test('while a forced send is pending, any turn-end shows as interrupted, with no error text (R-M7-14)', () => {
   const forced = fold([user(), user({ id: 'u2', force: true })]);
-  expect(reduce(forced, result({ stop: 'done', answers: ['u1'] })).items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
-  expect(reduce(forced, result({ stop: 'failed', error: 'boom', answers: ['u1'] })).items.at(-1)).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+  expect(reduce(forced, result({ stop: 'done', answers: ['u1'] })).items.at(-1)).toEqual({ key: expect.any(String), kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+  // a failure without a text is still the interrupt; with one it is a crash (the server's turn-end, M7-18) and keeps it
+  expect(reduce(forced, result({ stop: 'failed', answers: ['u1'] })).items.at(-1)).toEqual({ key: expect.any(String), kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+});
+
+test('a failed turn-end with an error text stays failed with it even while a forced send is pending (M7-18)', () => {
+  const forced = fold([user(), user({ id: 'u2', force: true })]);
+  const s = reduce(forced, result({ stop: 'failed', error: 'boom', answers: ['u1'] }));
+  expect(s.items.at(-1)).toEqual({ key: expect.any(String), kind: 'done', secs: 2, ts: 99, status: 'failed', error: 'boom' });
+});
+
+test('line keys: unique in the live feed and across loaded segments, and they do not change when a segment is prepended', () => {
+  const seg = (ts: number) => [agent({ t: 'compacted', preTokens: 1 }, ts), user({ id: `u${ts}` }), result()];
+  const live = fold([...seg(1), ...seg(2)]);
+  const keys = (s: FeedState) => s.items.flatMap((it) => ('key' in it ? [it.key] : []));
+  const before = keys(live);
+  expect(new Set(before).size).toBe(before.length);
+  const p = prependHistory({ ...live, earlier: 2, session: { id: 'S', root: '/', title: null, model: null } },
+    { events: seg(3), segment: 2, more: true, session: 'S', epoch: live.epoch });
+  const after = keys(p);
+  expect(after.slice(-before.length)).toEqual(before);
+  expect(new Set(after).size).toBe(after.length);
+  const p2 = prependHistory(p, { events: seg(4), segment: 1, more: false, session: 'S', epoch: live.epoch });
+  expect(new Set(keys(p2)).size).toBe(keys(p2).length);
 });
 
 test('tool_result is_error marks the tool red', () => {
@@ -108,8 +130,8 @@ test('session only sets the session; the resumed marker alone adds the notice; s
   Object.freeze(withItem); Object.freeze(withItem.items);
   // the CLI sends init (-> session) every turn: it must never add a notice
   expect(reduce(withItem, { kind: 'session', id: 'abcdefghij', root: '/r', title: null, model: null }).items).toEqual(withItem.items);
-  expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ kind: 'notice', text: 'abcdefgh' });
-  expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ kind: 'notice', text: 'abcdefgh' }]);
+  expect(reduce(withItem, { kind: 'resumed', id: 'abcdefghij' }).items.at(-1)).toEqual({ key: expect.any(String), kind: 'notice', text: 'abcdefgh' });
+  expect(reduce(frozen, { kind: 'resumed', id: 'abcdefghij' }).items).toEqual([{ key: expect.any(String), kind: 'notice', text: 'abcdefgh' }]);
   // a server error is a toast (R-M4-5): the feed is untouched
   expect(reduce(withItem, { kind: 'server-error', where: 'comments', message: 'EACCES' }).items).toEqual(withItem.items);
   expect(() => reduce(withItem, start())).not.toThrow();
@@ -163,8 +185,8 @@ const lastDone = (s: FeedState) => s.items.filter((i) => i.kind === 'done').at(-
 
 // which CLI results are interruptions (aborted terminal_reason, error_during_execution without is_error) is the mapper's (map.test.ts)
 test('the turn-end stop becomes the done line status', () => {
-  expect(lastDone(fold([user(), result({ stop: 'interrupted' })]))).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
-  expect(lastDone(fold([user(), result()]))).toEqual({ kind: 'done', secs: 2, ts: 99, status: 'done' });
+  expect(lastDone(fold([user(), result({ stop: 'interrupted' })]))).toEqual({ key: expect.any(String), kind: 'done', secs: 2, ts: 99, status: 'interrupted' });
+  expect(lastDone(fold([user(), result()]))).toEqual({ key: expect.any(String), kind: 'done', secs: 2, ts: 99, status: 'done' });
 });
 
 // where the error text comes from (result, errors[] joined) is the mapper's (map.test.ts)
@@ -252,7 +274,7 @@ test('a live reset frame empties the feed and adds the cleared line, keeping the
   const s0 = fold([{ kind: 'session', id: 'old', root: '/r', title: null, model: null }, user(), result()]);
   expect(s0.items.length).toBe(2);
   const s = fold([agent({ t: 'reset', newId: 'new' }, 7)], s0);
-  expect(s.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
+  expect(s.items).toEqual([{ key: expect.any(String), kind: 'marker', what: 'cleared', ts: 7 }]);
   expect(s.busy).toBe(false);
   expect(s.session).toEqual({ id: 'old', root: '/r', title: null, model: null }); // the session event that follows updates it
 });
@@ -263,7 +285,7 @@ test('a replay of the new session carries no cleared line', () => {
 
 test('compacted adds a compacted line, live or replayed', () => {
   const cb = agent({ t: 'compacted', preTokens: 12345 }, 9);
-  const want = [{ kind: 'marker', what: 'compacted', pre: 12345, ts: 9 }];
+  const want = [{ key: expect.any(String), kind: 'marker', what: 'compacted', pre: 12345, ts: 9 }];
   expect(fold([cb]).items).toEqual(want);
   expect(reduce(emptyFeed, { kind: 'replay', events: [cb] }).items).toEqual(want);
 });
@@ -283,7 +305,7 @@ test('a compaction shows while it runs: compacting to compact-end, then compacte
     agent({ t: 'compacted', preTokens: 900000, ms: 61000 }, 80),
   ], running);
   expect(ended.compacting).toBeNull();
-  expect(ended.items).toEqual([{ kind: 'marker', what: 'compacted', pre: 900000, ms: 61000, ts: 80 }]);
+  expect(ended.items).toEqual([{ key: expect.any(String), kind: 'marker', what: 'compacted', pre: 900000, ms: 61000, ts: 80 }]);
 });
 
 test('a reload mid-compaction keeps its start time; a failed one leaves its error line', () => {
@@ -291,7 +313,7 @@ test('a reload mid-compaction keeps its start time; a failed one leaves its erro
   expect(replayed.compacting).toBe(20);
   const failed = reduce(replayed, agent({ t: 'compact-failed', error: 'prompt too long' }, 30));
   expect(failed.compacting).toBeNull();
-  expect(failed.items.at(-1)).toEqual({ kind: 'marker', what: 'compactFailed', error: 'prompt too long', ts: 30 });
+  expect(failed.items.at(-1)).toEqual({ key: expect.any(String), kind: 'marker', what: 'compactFailed', error: 'prompt too long', ts: 30 });
 });
 
 // other status values map to nothing (map.test.ts); a mode-only status maps to `mode` alone, so it no longer ends a compaction
@@ -309,7 +331,7 @@ test('other events leave the compaction alone; a failure without one adds nothin
 test('the live result that follows a clear adds no done line; one after a new message does', () => {
   const s0 = fold([user(), result()]);
   const cleared = fold([agent({ t: 'reset', newId: 'new' }, 7), result({ secs: 0 })], s0);
-  expect(cleared.items).toEqual([{ kind: 'marker', what: 'cleared', ts: 7 }]);
+  expect(cleared.items).toEqual([{ key: expect.any(String), kind: 'marker', what: 'cleared', ts: 7 }]);
   expect(cleared.busy).toBe(false);
   const next = fold([user({ id: 'u2' }), result()], cleared);
   expect(next.items.map((i) => i.kind)).toEqual(['marker', 'user', 'done']);

@@ -3,6 +3,7 @@ import { Provider } from 'react-redux';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClientMessage } from '@nota-bene/shared';
 import { setLang } from '@/i18n/index.ts';
+import { historyPrepended } from '@/store/feed.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { Feed } from './Feed.tsx';
 import { inputText } from './ToolLine.tsx';
@@ -226,4 +227,36 @@ describe('action groups', () => {
     expect(head.querySelector('.text-destructive')).toHaveTextContent('2 ошибки');
     expect(head).toHaveAttribute('aria-expanded', 'false');
   });
+});
+
+it('prepending an earlier segment keeps the live lines (an open group, done, marker) on the same DOM nodes', () => {
+  const { store, view } = setup();
+  const turn = (n: number, ids: string[]) => [
+    { kind: 'user', id: `u${n}`, text: 'go', ts: n, historic: true },
+    ...ids.flatMap((id) => [
+      { kind: 'agent', ts: n, e: { t: 'tool-call', id, name: 'Bash', input: { command: id }, sub: false } },
+      { kind: 'agent', ts: n, e: { t: 'tool-update', id, text: 'out', isError: false } },
+    ]),
+    { kind: 'agent', ts: n, e: { t: 'turn-end', stop: 'done', secs: 1, answers: ['u' + n], queued: 0 } },
+    { kind: 'agent', ts: n, e: { t: 'compacted', preTokens: 5 } },
+  ];
+  act(() => {
+    store.dispatch(serverEvent({ kind: 'replay', earlier: 1, events: turn(2, ['live1', 'live2']) } as never));
+    store.dispatch(serverEvent({ kind: 'session', id: 's1', root: '/r', title: null, model: null } as never));
+  });
+  fireEvent.click(screen.getByRole('button', { name: '2 actions' }));
+  const group = view.container.querySelector('[data-kind="tool-group"]')!;
+  const done = view.container.querySelector('[data-kind="done"]')!;
+  const marker = view.container.querySelector('[data-kind="marker"]')!;
+  expect(group.querySelectorAll('[data-kind="tool"]')).toHaveLength(2);
+  const f = store.getState().feed;
+  act(() => {
+    store.dispatch(historyPrepended({ events: turn(1, ['old1', 'old2']) as never, segment: 1, more: false, session: 's1', epoch: f.epoch }));
+  });
+  expect(view.container.querySelectorAll('[data-kind="tool-group"]')).toHaveLength(2);
+  expect(view.container.querySelectorAll('[data-kind="done"]')).toHaveLength(2);
+  expect(view.container.querySelectorAll('[data-kind="tool-group"]')[1]).toBe(group);
+  expect(group.querySelectorAll('[data-kind="tool"]')).toHaveLength(2);
+  expect(view.container.querySelectorAll('[data-kind="done"]')[1]).toBe(done);
+  expect(view.container.querySelectorAll('[data-kind="marker"]')[1]).toBe(marker);
 });

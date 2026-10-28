@@ -35,7 +35,7 @@ export function ToolGroup({ items, live }: { items: Tool[]; live: boolean }) {
       </button>
       {open ? (
         <div className="border-l border-border-soft pl-3">
-          {items.map((it, i) => <ToolLine key={`tool:${it.id}:${i}`} item={it} />)}
+          {items.map((it) => <ToolLine key={`tool:${it.id}`} item={it} />)}
         </div>
       ) : (
         live && <div className="pl-3"><ToolLine key={`tool:${last.id}`} item={last} /></div>

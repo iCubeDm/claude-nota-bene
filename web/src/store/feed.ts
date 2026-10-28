@@ -16,11 +16,11 @@ export type FeedItem =
    * a one-line mark in the transcript: the context was compacted (pre = tokens before, ms = how long it took), a
    * compaction failed (error = the CLI's text), or the context was cleared; ts 0 = no time
    */
-  | { kind: 'marker'; what: 'compacted' | 'compactFailed' | 'cleared'; pre?: number; ms?: number; error?: string; ts: number }
-  | { kind: 'done'; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
+  | { kind: 'marker'; what: 'compacted' | 'compactFailed' | 'cleared'; pre?: number; ms?: number; error?: string; ts: number; key: string }
+  | { kind: 'done'; key: string; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean; archived?: true }
   /** `text`: the resumed session id; translated at render. (Server errors are toasts, not feed items: R-M4-5.) */
-  | { kind: 'notice'; text: string };
+  | { kind: 'notice'; key: string; text: string };
 
 export type FeedState = {
   items: FeedItem[];
@@ -32,6 +32,8 @@ export type FeedState = {
   waiting: string[];
   /** counter behind the streaming ids `stream:${n}`; kept in state so reduce stays pure and replay is deterministic. */
   streamN: number;
+  /** counter behind the `key` of done / marker / notice lines (React keys that survive a prepend); in state like streamN. */
+  lineN: number;
   /** live turn-ends seen so far; a replay does not count. Consumers (the file tree) refresh when it changes. */
   turnSeq: number;
   /** ts of the `compacting` event while a compaction (manual or auto) runs; null otherwise */
@@ -48,7 +50,7 @@ export type FeedState = {
   epoch: number;
 };
 
-export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, turnSeq: 0, compacting: null, earlier: 0, epoch: 0 };
+export const emptyFeed: FeedState = { items: [], busy: false, session: null, forcePending: false, waiting: [], streamN: 0, lineN: 0, turnSeq: 0, compacting: null, earlier: 0, epoch: 0 };
 
 /** One `GET /history` page: the archived events of segment `segment`; `more`: older segments exist. */
 export type HistoryPage = { events: ServerEvent[]; segment: number; more: boolean };
@@ -81,6 +83,7 @@ export function prependHistory(s: FeedState, p: HistoryPrepend): FeedState {
       return mine;
     }
     // an ask in the archive can no longer be answered: nobody is waiting for it
+    if ('key' in it) return { ...it, key: `h${p.segment}${it.key}` }; // segments restart the counter: the segment number keeps keys apart
     return it.kind === 'permission' ? { ...it, archived: true as const } : it;
   });
   const tail = moved.size ? s.items.filter((it) => !moved.has(it)) : s.items;
@@ -110,6 +113,11 @@ function lastOpenIndex(items: FeedItem[]): number {
   return -1;
 }
 
+/** A keyed line item's key: `l${n}` live; a loaded earlier segment prefixes its number (prependHistory), so keys never collide. */
+function lineKey(s: FeedState): { key: string; lineN: number } {
+  return { key: `l${s.lineN}`, lineN: s.lineN + 1 };
+}
+
 function replaceAt(items: FeedItem[], i: number, it: FeedItem): FeedItem[] {
   const next = items.slice();
   next[i] = it;
@@ -119,7 +127,10 @@ function replaceAt(items: FeedItem[], i: number, it: FeedItem): FeedItem[] {
 function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
   switch (e.t) {
     case 'reset': // live only (never stored): the server's replay [] came first, this adds the line
-      return { ...emptyFeed, session: s.session, turnSeq: s.turnSeq, items: [{ kind: 'marker', what: 'cleared', ts }] };
+    {
+      const { key, lineN } = lineKey(s);
+      return { ...emptyFeed, session: s.session, turnSeq: s.turnSeq, lineN, items: [{ kind: 'marker', what: 'cleared', ts, key }] };
+    }
     // a compaction: compacting, then its end (compact-failed, compact-end), then (on success) compacted
     case 'compacting': // the CLI repeats it as a keepalive (every 30 s) and at each phase: the compaction started at the first one
       return s.compacting === null ? { ...s, compacting: ts } : s;
@@ -127,15 +138,19 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
       return s.compacting === null ? s : { ...s, compacting: null };
     case 'compact-failed': {
       if (s.compacting === null) return s;
-      const failed: FeedItem = { kind: 'marker', what: 'compactFailed', ts, ...(e.error ? { error: e.error } : {}) };
-      return { ...s, compacting: null, items: [...s.items, failed] };
+      const { key, lineN } = lineKey(s);
+      const failed: FeedItem = { kind: 'marker', what: 'compactFailed', ts, key, ...(e.error ? { error: e.error } : {}) };
+      return { ...s, compacting: null, lineN, items: [...s.items, failed] };
     }
-    case 'compacted':
+    case 'compacted': {
+      const { key, lineN } = lineKey(s);
       return {
         ...s,
         compacting: null,
-        items: [...s.items, { kind: 'marker', what: 'compacted', pre: e.preTokens, ts, ...(e.ms ? { ms: e.ms } : {}) }],
+        lineN,
+        items: [...s.items, { kind: 'marker', what: 'compacted', pre: e.preTokens, ts, key, ...(e.ms ? { ms: e.ms } : {}) }],
       };
+    }
     case 'message-start': {
       const item: FeedItem = { kind: 'assistant', id: `stream:${s.streamN}`, text: '', final: false };
       return { ...s, items: [...s.items, item], streamN: s.streamN + 1 };
@@ -161,10 +176,12 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
       return { ...s, items: replaceAt(s.items, i, { ...cur, result: { text: e.text, isError: e.isError } }) };
     }
     case 'turn-end': {
-      // a forced send interrupts the running turn: whatever ends it shows as interrupted (R-M7-14)
-      const status = s.forcePending ? 'interrupted' : e.stop;
+      // a forced send interrupts the running turn: whatever ends it shows as interrupted (R-M7-14), except a failure
+      // with an error text: the CLI's interrupt is never `failed` (map.ts), so that one is a real crash (M7-18)
+      const status = s.forcePending && !(e.stop === 'failed' && e.error) ? 'interrupted' : e.stop;
+      const { key, lineN } = lineKey(s);
       const done: FeedItem = {
-        kind: 'done', secs: e.secs, ts, status,
+        kind: 'done', key, secs: e.secs, ts, status,
         ...(status === 'failed' && e.error ? { error: e.error } : {}),
       };
       // a stream still open at the turn's end was cut short: keep its partial text as final, drop it if empty
@@ -180,7 +197,7 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
       const lastCleared = closed.findLastIndex((it) => it.kind === 'marker' && it.what === 'cleared');
       const orphan = lastCleared >= 0 && !closed.slice(lastCleared).some((it) => it.kind === 'user');
       // a turn never ends mid-compaction: a turn-end with one still shown means its end event was lost (the agent died)
-      return { ...s, items: orphan ? closed : [...closed, done], busy, forcePending: false, waiting, turnSeq: s.turnSeq + 1, compacting: null };
+      return { ...s, items: orphan ? closed : [...closed, done], busy, forcePending: false, waiting, lineN: orphan ? s.lineN : lineN, turnSeq: s.turnSeq + 1, compacting: null };
     }
     case 'cancelled': {
       // a queued send that was cancelled (e.g. Stop with cancel_queued) never gets a turn-end of its own
@@ -236,7 +253,10 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'session': // sent again whenever the id changes; never a notice (the CLI inits every turn)
       return { ...s, session: { id: ev.id, root: ev.root, title: ev.title, model: ev.model } };
     case 'resumed':
-      return { ...s, items: [...s.items, { kind: 'notice', text: ev.id.slice(0, 8) }] };
+    {
+      const { key, lineN } = lineKey(s);
+      return { ...s, lineN, items: [...s.items, { kind: 'notice', key, text: ev.id.slice(0, 8) }] };
+    }
     case 'comments': // handled by the comments store, not the feed
     case 'stats': // handled by the stats store (M4)
     case 'mode':

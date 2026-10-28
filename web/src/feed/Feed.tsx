@@ -140,9 +140,9 @@ export function Feed() {
           if (items[i - 1]?.kind === 'tool') return null;
           let end = i + 1;
           while (items[end]?.kind === 'tool') end++;
-          if (end - i === 1) return <ToolLine key={`tool:${it.id}:${i}`} item={it} />;
+          if (end - i === 1) return <ToolLine key={`tool:${it.id}`} item={it} />;
           const run = items.slice(i, end) as Extract<typeof it, { kind: 'tool' }>[];
-          return <ToolGroup key={`group:${it.id}:${i}`} items={run} live={busy && end === items.length} />;
+          return <ToolGroup key={`group:${it.id}`} items={run} live={busy && end === items.length} />;
         }
         switch (it.kind) {
           case 'user':
@@ -154,13 +154,13 @@ export function Feed() {
               </div>
             );
           case 'done':
-            return <DoneLine key={`done:${i}`} item={it} />;
+            return <DoneLine key={it.key} item={it} />;
           case 'permission':
             return it.toolName === 'ExitPlanMode' && typeof it.input.plan === 'string' ? <PlanCard key={it.id} item={it} /> : <PermissionCard key={it.id} item={it} />;
           case 'marker':
-            return <MarkerLine key={`marker:${i}`} item={it} />;
+            return <MarkerLine key={it.key} item={it} />;
           case 'notice':
-            return <NoticeLine key={`notice:${i}`} item={it} />;
+            return <NoticeLine key={it.key} item={it} />;
         }
       })}
       {compacting !== null && <CompactingLine since={compacting} />}
