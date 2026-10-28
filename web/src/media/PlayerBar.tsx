@@ -8,7 +8,7 @@ import { BarButton, SpeedMenu, VolumeControl } from './PlayerControls.tsx';
 import { applyPlayerKey, startAnnotate, type Flash } from './playerKeys.ts';
 import { EnterFullscreenIcon, ExitFullscreenIcon, PauseIcon, PencilIcon, PipIcon, PlayIcon, ReplayIcon } from './playerIcons.tsx';
 import { Timeline } from './Timeline.tsx';
-import { useBarRect } from './useBarRect.ts';
+import { BAR_MIN_PX, useBarRect } from './useBarRect.ts';
 import { formatTime, type MarkerIn } from './timelineMath.ts';
 import { useMediaState } from './useMediaState.ts';
 
@@ -69,8 +69,12 @@ function useIsFullscreen(box: MutableRefObject<HTMLElement | null>): boolean {
  * speed, and for a video ✎ (annotate), picture-in-picture and fullscreen of the container `box` (video, marks and bar
  * together). A video's bar overlays the container's bottom with a gradient; an audio's sits in the layout, always shown.
  */
-export function PlayerBar({ media, box, tabId, path, refName, flash }: {
-  media: HTMLMediaElement; box: MutableRefObject<HTMLElement | null>; tabId: string; path: string; refName?: string; flash: Flash | null;
+export function PlayerBar({ media, box, tabId, path = '', refName, flash, onTick }: {
+  media: HTMLMediaElement; box: MutableRefObject<HTMLElement | null>; flash: Flash | null; path?: string; refName?: string;
+  /** Without `tabId` (a chat reply) there is no ✎. */
+  tabId?: string;
+  /** A tick's click goes here instead of seeking this element (the chat opens the file's tab at that time). */
+  onTick?: (time: number) => void;
 }) {
   const t = useT();
   const dispatch = useAppDispatch();
@@ -96,7 +100,9 @@ export function PlayerBar({ media, box, tabId, path, refName, flash }: {
 
   const label = state.ended ? 'pb_replay' : state.paused ? 'pb_play' : 'pb_pause';
   const Play = state.ended ? ReplayIcon : state.paused ? PlayIcon : PauseIcon;
-  const pip = video && typeof document !== 'undefined' && !!document.pictureInPictureEnabled;
+  // a bar narrower than BAR_MIN_PX (a small video in the chat column) drops speed and PiP so the row never wraps
+  const compact = video && !!place && place.width < BAR_MIN_PX;
+  const pip = video && !compact && typeof document !== 'undefined' && !!document.pictureInPictureEnabled;
   return (
     <div
       data-player-bar
@@ -110,14 +116,14 @@ export function PlayerBar({ media, box, tabId, path, refName, flash }: {
         : 'w-full max-w-[min(36rem,calc(100%-2rem))] rounded-lg border border-border bg-card px-3 pt-1.5 pb-1 text-foreground'}
     >
       <div className={video ? 'pointer-events-auto' : ''}>
-        <Timeline media={media} state={state} items={items} onScrub={setScrub} />
+        <Timeline media={media} state={state} items={items} onScrub={setScrub} onTick={onTick} />
         <div className="flex items-center gap-1">
           <BarButton label={t(label)} onClick={() => key('KeyK')}><Play /></BarButton>
           <VolumeControl media={media} state={state} onMute={() => key('KeyM')} />
           <span className="ml-1 text-[13px] tabular-nums opacity-90">{formatTime(state.time)} / {formatTime(state.duration)}</span>
           <span className="flex-1" />
-          <SpeedMenu media={media} rate={state.rate} onOpen={setMenu} />
-          {video && offered && <BarButton label={t('pb_annotate')} onClick={() => startAnnotate(dispatch, tabId, media)}><PencilIcon /></BarButton>}
+          {!compact && <SpeedMenu media={media} rate={state.rate} onOpen={setMenu} />}
+          {video && offered && tabId && <BarButton label={t('pb_annotate')} onClick={() => startAnnotate(dispatch, tabId, media)}><PencilIcon /></BarButton>}
           {pip && <BarButton label={t('pb_pip')} onClick={() => void ctl.togglePip(media)}><PipIcon /></BarButton>}
           {video && <BarButton label={t(fs ? 'pb_exitFullscreen' : 'pb_fullscreen')} onClick={() => key('KeyF')}>{fs ? <ExitFullscreenIcon /> : <EnterFullscreenIcon />}</BarButton>}
         </div>

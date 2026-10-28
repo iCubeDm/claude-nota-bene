@@ -2,7 +2,8 @@ import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github-dark.min.css';
 import { marked } from 'marked';
-import { memo, type MouseEvent as ReactMouseEvent, useContext, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, type MouseEvent as ReactMouseEvent, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ReactReduxContext } from 'react-redux';
 import { t } from '@/i18n/index.ts';
 import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
@@ -11,6 +12,7 @@ import { openDiagram } from '@/tabs/slice.ts';
 import { HARDEN, renderMermaid, sanitizeSvg, type DiagramLang } from '@/diagram/render.ts';
 import { fileOfImage, markMentions, markRefs, openMediaFile } from '@/refs/refs.ts';
 import { fileTabId } from '@/tabs/slice.ts';
+import { ChatPlayer } from '@/media/ChatPlayer.tsx';
 import { setStartAt } from '@/files/startAt.ts';
 import './markdown.css';
 
@@ -51,6 +53,11 @@ marked.use({
 });
 
 /** The source and language behind each ⤢ button (kept out of the DOM: sanitized content must not be able to forge one). */
+/** A stable React key per media element, so a re-collect of the same wrappers keeps their players mounted. */
+let playerSeq = 0;
+const playerIds = new WeakMap<Element, number>();
+const playerId = (m: Element) => { let n = playerIds.get(m); if (!n) playerIds.set(m, (n = ++playerSeq)); return n; };
+
 const openers = new WeakMap<Element, { source: string; lang: DiagramLang }>();
 
 /** The ⤢ button, made after sanitizing and skipped by comment anchors; shown on hover (markdown.css). */
@@ -66,17 +73,22 @@ function addOpenButton(out: HTMLElement, source: string, lang: DiagramLang) {
   out.appendChild(b);
 }
 
-/** Project media (src is a /file URL; not /attach, not http) gets an "open in a tab" button, once, in a wrapper. */
+/**
+ * Video and audio get a wrapper (the host of our player bar); project media (src is a /file URL; not /attach, not http)
+ * also gets an "open in a tab" button. Once per element.
+ */
 function addMediaButtons(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>('img, video, audio').forEach((m) => {
     if (m.parentElement?.classList.contains('md-media')) return;
     const f = fileOfImage(m);
     // `![](/attach/<id>)` also renders as a /file URL (an absolute path): it is a pasted image, not a project file
-    if (!f || f.path.startsWith('/attach/')) return;
+    const project = !!f && !f.path.startsWith('/attach/');
+    if (!project && m instanceof HTMLImageElement) return;
     const wrap = document.createElement('span');
     wrap.className = 'md-media';
     m.replaceWith(wrap);
     wrap.appendChild(m);
+    if (!project) return;
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'md-open-media';
@@ -154,9 +166,14 @@ export const Markdown = memo(
       markRefs(ref.current, baseDir);
       if (mentions) markMentions(ref.current);
     }, [html, final, baseDir, sources, mentions]);
+    // the wrappers of the reply's video/audio, each hosting our player bar (not without a store: native controls stay)
+    const [players, setPlayers] = useState<{ media: HTMLMediaElement; box: HTMLElement }[]>([]);
     useLayoutEffect(() => {
-      if (ref.current) postProcess(ref.current, final);
-    }, [html, final]);
+      if (!ref.current) return;
+      postProcess(ref.current, final);
+      if (!final || !redux) return setPlayers((p) => (p.length ? [] : p));
+      setPlayers(Array.from(ref.current.querySelectorAll<HTMLMediaElement>('.md-media > video, .md-media > audio'), (media) => ({ media, box: media.parentElement! })));
+    }, [html, final, redux]);
     const onClick = (e: ReactMouseEvent<HTMLDivElement>) => {
       const mb = (e.target as Element).closest('button.md-open-media');
       if (mb && e.currentTarget.contains(mb)) {
@@ -178,7 +195,12 @@ export const Markdown = memo(
       const d = b && e.currentTarget.contains(b) ? openers.get(b) : undefined;
       if (d) redux?.store.dispatch(openDiagram(d));
     };
-    return <div ref={ref} className="md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
+    return (
+      <>
+        <div ref={ref} className="md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+        {players.map((p) => createPortal(<ChatPlayer media={p.media} box={p.box} />, p.box, String(playerId(p.media))))}
+      </>
+    );
   },
   (a, b) => a.text === b.text && a.final === b.final && a.baseDir === b.baseDir && a.src === b.src && a.breaks === b.breaks && a.mentions === b.mentions && a.noHtml === b.noHtml,
 );

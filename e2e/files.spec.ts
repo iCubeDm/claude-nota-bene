@@ -914,6 +914,43 @@ test('a chat video opens in a file tab at the time it was played; /attach media 
   await expect.poll(() => opened.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(11);
 });
 
+// our bar on a video embedded in a chat reply (same fake turn as above)
+test('a chat video has our bar: the timeline seeks, Space plays only after a click on it, the composer keeps its Space @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
+  await start(page);
+  const text = uniq('embed media');
+  await composer(page).fill(text);
+  await composer(page).press('Enter');
+  await settled(page, text);
+  const r = reply(page, text);
+  const video = r.locator('video');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  expect(await video.evaluate((e: HTMLVideoElement) => e.hasAttribute('controls'))).toBe(false);
+  await video.evaluate((e: HTMLVideoElement) => { e.muted = true; });
+  const bar = r.locator('[data-player-bar]');
+  await expect(bar).toBeVisible();
+  const line = r.getByRole('slider', { name: /^(Seek|Перемотка)$/ });
+  const box = (await line.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const dur = await video.evaluate((e: HTMLVideoElement) => e.duration);
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(dur / 2 - 1);
+  expect(await video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeLessThan(dur / 2 + 1);
+  const paused = () => video.evaluate((e: HTMLVideoElement) => e.paused);
+  // the composer keeps its Space; the video stays put
+  await composer(page).click();
+  await page.keyboard.type('a b');
+  await expect(composer(page)).toHaveValue('a b');
+  expect(await paused()).toBe(true);
+  await composer(page).fill('');
+  // after a click on the bar's play button, Space toggles exactly once
+  await r.getByRole('button', { name: /^(Play|Воспроизвести) \(K\)$/ }).click();
+  await expect.poll(paused).toBe(false);
+  await page.keyboard.press('Space');
+  await expect.poll(paused).toBe(true);
+  await page.waitForTimeout(300);
+  expect(await paused()).toBe(true);
+});
+
 test('player keys on a video tab after a click on the tab strip: Space plays, ArrowRight +5 s, ArrowDown lowers the volume, N starts markup; the composer keeps its Space @files', async ({ page }) => {
   test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
   await start(page);

@@ -12,8 +12,8 @@ type Hover = { x: number; time: number } | { x: number; marker: number };
  * it, so pressing a tick never starts a scrub. Keys are not handled here: the player keys (usePlayerKeys) already
  * act on a focused slider, and a second handler would double every arrow.
  */
-export function Timeline({ media, state, items, onScrub }: {
-  media: HTMLMediaElement; state: MediaSnapshot; items: MarkerIn[]; onScrub: (on: boolean) => void;
+export function Timeline({ media, state, items, onScrub, onTick }: {
+  media: HTMLMediaElement; state: MediaSnapshot; items: MarkerIn[]; onScrub: (on: boolean) => void; onTick?: (time: number) => void;
 }) {
   const t = useT();
   const wrap = useRef<HTMLDivElement>(null);
@@ -112,7 +112,7 @@ export function Timeline({ media, state, items, onScrub }: {
               onPointerDown={(e) => e.stopPropagation()}
               onPointerEnter={(e) => setHover({ x: e.currentTarget.getBoundingClientRect().left + e.currentTarget.getBoundingClientRect().width / 2 - (wrap.current?.getBoundingClientRect().left ?? 0), marker: i })}
               onPointerLeave={() => setHover(null)}
-              onClick={() => seekAndPause(media, m.time)}
+              onClick={() => (onTick ? onTick(m.time) : seekAndPause(media, m.time))}
               className="pointer-events-auto absolute top-0 flex h-full w-2 -translate-x-1/2 cursor-pointer items-center justify-center"
               style={{ left: `${m.pct}%` }}
             >
