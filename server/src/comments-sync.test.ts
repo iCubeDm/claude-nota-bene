@@ -265,7 +265,8 @@ describe('sent comments keep their mark files', () => {
     const cl = await connect(s.url);
     await until(() => lastComments(cl)?.length === 2);
     cl.ws.send(JSON.stringify({ type: 'comments', sessionId: 'sess-m', items: [] }));
-    await until(() => !fs.existsSync(path.join(proj, '.nota-bene', 'marks', B))); // the pending one goes
+    await until(() => lastComments(cl)?.length === 1, 10_000); // the broadcast first: the folder removal races it under load
+    await until(() => !fs.existsSync(path.join(proj, '.nota-bene', 'marks', B)), 10_000); // the pending one goes
     expect(lastComments(cl)!.map((x) => [x.id, x.status])).toEqual([[A, 'sent']]);
     expect(fs.existsSync(path.join(proj, '.nota-bene', 'marks', A, 'frame.jpg'))).toBe(true);
     const origin = s.url.replace(/\/$/, '');
