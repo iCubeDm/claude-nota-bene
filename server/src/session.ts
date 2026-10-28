@@ -114,7 +114,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       case 'init':
         // the CLI sends init at the start of every turn: act only when something is new
         if (e.mode) modes.adopt(e.mode, who.root);
-        if (e.model && backend.capabilities.models) models.adopt(e.model, who.root);
+        if (e.model && backend.capabilities.models) models.adopt(e.model);
         who.init(e);
         return;
       case 'rate-limit':

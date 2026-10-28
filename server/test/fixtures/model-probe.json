@@ -1,0 +1,96 @@
+{
+ "note": "from the 2026-10-28 real CLI probe: supportedModels rows (subset) and the init.model of three turns",
+ "supportedModels": [
+  {
+   "value": "default",
+   "displayName": "default",
+   "description": "",
+   "resolvedModel": "claude-opus-5-5",
+   "supportsEffort": true,
+   "supportedEffortLevels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ]
+  },
+  {
+   "value": "opus",
+   "displayName": "opus",
+   "description": "",
+   "resolvedModel": "claude-opus-5-5",
+   "supportsEffort": true,
+   "supportedEffortLevels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ]
+  },
+  {
+   "value": "sonnet",
+   "displayName": "sonnet",
+   "description": "",
+   "resolvedModel": "claude-sonnet-5-5",
+   "supportsEffort": true,
+   "supportedEffortLevels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ]
+  },
+  {
+   "value": "haiku",
+   "displayName": "haiku",
+   "description": "",
+   "resolvedModel": "claude-haiku-5-5",
+   "supportsEffort": true,
+   "supportedEffortLevels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ]
+  },
+  {
+   "value": "claude-haiku-4-5-20251001",
+   "displayName": "claude-haiku-4-5-20251001",
+   "description": "",
+   "resolvedModel": "claude-haiku-4-5-20251001",
+   "supportsEffort": false
+  },
+  {
+   "value": "claude-sonnet-5",
+   "displayName": "claude-sonnet-5",
+   "description": "",
+   "resolvedModel": "claude-sonnet-5",
+   "supportsEffort": true,
+   "supportedEffortLevels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+   ]
+  }
+ ],
+ "inits": [
+  {
+   "step": "start (haiku)",
+   "model": "claude-haiku-5-5"
+  },
+  {
+   "step": "after setModel sonnet",
+   "model": "claude-sonnet-5-5"
+  },
+  {
+   "step": "after setPermissionMode plan",
+   "model": "claude-sonnet-5-5"
+  }
+ ]
+}

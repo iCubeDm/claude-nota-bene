@@ -10,13 +10,14 @@ type Agent = Pick<AgentSession, 'supportedModels' | 'setModel' | 'setEffort'>;
 /**
  * The model and its effort. Like the permission mode: the pref is the user's choice and what a new agent STARTS with
  * (dropped from the start options when the agent's list does not offer it; the pref stays); what the agent itself
- * reports (init) is the truth the pill shows. The CLI's own default is not a choice, so reporting it writes no pref;
- * only a change the CLI makes to a model it had already settled on does.
+ * reports (init) is the truth the pill shows, and never a pref: only the user's explicit change writes one.
  */
 export class ModelKeeper {
   private cur: CurrentModel;
   private opts: ModelOption[] | null = null; // kept over agent restarts, so a later start can clamp upfront
-  private settled = false; // this agent has reported a model
+  private queue: Promise<unknown> = Promise.resolve(); // user changes, one after another
+  private inflight = false; // a user change is being applied to the agent
+  private fresh = false; // a model change was just applied: the first init after it may still be of the old model
   private readonly o: ModelOptions;
 
   constructor(o: ModelOptions) {
@@ -44,7 +45,6 @@ export class ModelKeeper {
 
   /** the options for a new agent in `dir`: call once per start */
   forStart(dir: string): { model?: string; effort?: EffortLevel } {
-    this.settled = false;
     const c = this.startChoice(dir);
     return { ...(c.model && { model: c.model }), ...(c.effort && { effort: c.effort }) };
   }
@@ -85,31 +85,50 @@ export class ModelKeeper {
     }
   }
 
-  /** the model the agent reports (init, every turn): shown as it is, saved only when the CLI changed a settled model */
-  adopt(reported: string, dir: string): void {
-    const first = !this.settled;
-    this.settled = true;
+  /**
+   * the model the agent reports (init, every turn): shown as it is, never saved. During a user change it is ignored
+   * (the change sets the choice); the first one after it that differs from the choice began before setModel (the old
+   * model, or a default we never saw) and is ignored.
+   */
+  adopt(reported: string): void {
+    if (this.inflight) return;
+    const was = this.fresh;
+    this.fresh = false;
     if (this.cur.model && this.same(this.cur.model, reported)) return;
+    if (was) return;
     this.cur = { model: reported }; // its effort is unknown now
-    if (!first) {
-      try { setModelPref(dir, { model: reported }); } catch (e) { this.o.report('model', e); }
-    }
     this.announce();
   }
 
   /**
    * The user's choice (`model` is a list value): validated against the list, applied to the agent from its next
    * response on, then saved. With no agent the next one starts with it. A refusal throws (the caller reports it).
+   * Changes are serialized: each compares against what the previous one left.
    */
-  async change(a: Agent | null, next: { model: string; effort?: EffortLevel }, dir: string, still: () => boolean): Promise<void> {
+  change(a: Agent | null, next: { model: string; effort?: EffortLevel }, dir: string, still: () => boolean): Promise<void> {
+    const run = this.queue.then(() => this.apply(a, next, dir, still));
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  private async apply(a: Agent | null, next: { model: string; effort?: EffortLevel }, dir: string, still: () => boolean): Promise<void> {
     const opt = this.find(next.model);
     if (!opt) throw new Error(`model ${next.model} is not offered`);
     if (next.effort && !opt.efforts?.includes(next.effort)) throw new Error(`model ${opt.value} has no effort ${next.effort}`);
-    if (a) {
-      if (!this.cur.model || !this.same(this.cur.model, opt.value)) await a.setModel(opt.value);
-      if (next.effort !== this.cur.effort) await a.setEffort(next.effort ?? null);
+    const before = this.cur.model;
+    this.fresh = false;
+    this.inflight = true;
+    try {
+      if (a) {
+        if (!before || !this.same(before, opt.value)) await a.setModel(opt.value);
+        // (applyFlagSettings also turns ultracode off; nothing here surfaces ultracode)
+        if (next.effort !== this.cur.effort) await a.setEffort(next.effort ?? null);
+      }
+    } finally {
+      this.inflight = false;
     }
     if (!still()) return; // a switch meanwhile: this was the old session's
+    this.fresh = !!a && !(before && this.same(before, opt.value));
     this.cur = { model: opt.value, ...(next.effort && { effort: next.effort }) };
     setModelPref(dir, this.cur as { model: string; effort?: EffortLevel });
   }

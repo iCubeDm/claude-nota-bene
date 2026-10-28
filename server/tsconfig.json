@@ -1,6 +1,6 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": { "composite": true, "types": ["node"], "noEmit": false, "emitDeclarationOnly": true, "outDir": "dist" },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/fixtures/model-probe.json"],
   "references": [{ "path": "../shared" }]
 }
