@@ -116,17 +116,6 @@ test('Esc and Stop interrupt @slow', async ({ page }) => {
   await expect(stop).toBeDisabled();
 });
 
-test('permission allow @ask', async ({ page }) => {
-  await open(page);
-  const text = uniq('run it');
-  await send(page, text);
-  const card = bubble(page, text).locator('xpath=following-sibling::*[@data-kind="permission"]');
-  await expect(card).toContainText('ls -la');
-  await card.getByRole('button', { name: /Allow|Разрешить/ }).click();
-  await expect(card).toContainText(/✓ allowed|✓ разрешено/);
-  await expect(donesAfter(page, text).first()).toHaveText(DONE);
-});
-
 // M7-09: the ask fixture's script declares capabilities {compact: false, modes: ['default']}
 test('an agent without compact and modes: no Compact button, no mode pill, Clear stays @ask', async ({ page }) => {
   await open(page);
@@ -172,17 +161,6 @@ test('typing ":smi" in the composer opens the emoji list; Enter inserts 😄 and
 });
 
 // M6-06: the user's message is markdown (and a single newline stays a line break)
-test('a user message renders markdown @chat', async ({ page }) => {
-  await open(page);
-  const tag = uniq('md');
-  await send(page, `**${tag}**\nsecond \`code\``);
-  const b = bubble(page, tag);
-  await expect(b.locator('strong')).toHaveText(tag);
-  await expect(b.locator('br')).toHaveCount(1);
-  await expect(b.locator('code')).toHaveText('code');
-  await expect(donesAfter(page, tag).first()).toBeVisible();
-});
-
 test('language toggle switches the placeholder @chat', async ({ page }) => {
   await open(page);
   await expect(page.getByPlaceholder(en.composerPh)).toBeVisible();

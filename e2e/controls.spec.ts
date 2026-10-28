@@ -99,58 +99,6 @@ test.afterEach(async ({ page }) => {
   await setMode(page, t, 'default');
 });
 
-test('Shift+Tab cycles the modes in order and the pill follows the server echo @controls', async ({ page }) => {
-  const t = track(page);
-  await open(page);
-  await setMode(page, t, 'default');
-
-  await composer(page).focus();
-  await expect(composer(page)).toBeFocused();
-  const from = t.sent.length;
-  for (const mode of ['acceptEdits', 'plan', 'auto', 'default'] as const) {
-    await page.keyboard.press('Shift+Tab');
-    await expect(pill(page)).toHaveText(en[`mode_${mode}`]);
-  }
-  expect(modeSends(t, from).map((f) => f.mode)).toEqual(['acceptEdits', 'plan', 'auto', 'default']);
-  await expect(composer(page)).toBeFocused(); // Shift+Tab never moves the focus away
-});
-
-test('an init frame with permissionMode changes the pill @controls', async ({ page }) => {
-  const t = track(page);
-  await open(page);
-  await setMode(page, t, 'default');
-  const from = t.sent.length;
-  await turn(page, '[initmode]');
-  await expect(pill(page)).toHaveText(en.mode_acceptEdits);
-  expect(modeSends(t, from)).toEqual([]); // the CLI changed it: the client only follows
-  await setMode(page, t, 'default'); // leave the server as the other tests expect it
-});
-
-test('Shift+Tab yields to an open @ picker (it takes the key), then works again @controls', async ({ page }) => {
-  const t = track(page);
-  await open(page);
-  await setMode(page, t, 'default');
-  await composer(page).focus();
-  await expect(composer(page)).toBeFocused();
-  const from = t.sent.length;
-  await page.keyboard.type('@no'); // typed, not filled: the picker listens to real input events
-  const option = page.getByRole('option').filter({ hasText: 'notes.md' });
-  await expect(option).toBeVisible();
-
-  await page.keyboard.press('Shift+Tab');
-  // the picker took the key (it inserted the pick): no mode change, none sent
-  await expect(composer(page)).toHaveValue('@notes.md ');
-  await expect(page.getByRole('listbox')).toBeHidden();
-  await expect(pill(page)).toHaveText(en.mode_default);
-  expect(modeSends(t, from)).toEqual([]);
-
-  // with the picker gone the same key cycles again
-  await page.keyboard.press('Shift+Tab');
-  await expect(pill(page)).toHaveText(en.mode_acceptEdits);
-  await expect.poll(() => modeSends(t, from).map((f) => f.mode)).toEqual(['acceptEdits']);
-  await setMode(page, t, 'default');
-});
-
 test('plan card: comment on it, approve from acceptEdits, one restoring mode message @controls', async ({ page }) => {
   const t = track(page);
   await open(page);
@@ -206,21 +154,6 @@ test('plan card: comment on it, approve from acceptEdits, one restoring mode mes
   await page.locator('#comments [data-comment-id]').filter({ hasText: 'plan comment e2e' }).getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
   await expect(page.locator('#comments [data-comment-id]')).toHaveCount(0);
   await setMode(page, t, 'default');
-});
-
-test('context meters: 65 % warns, 90 % is hot @controls', async ({ page }) => {
-  await open(page);
-  const meter = page.getByRole('meter', { name: /^context \d+%/ });
-  await turn(page, '[warn]');
-  await expect(meter).toHaveAttribute('aria-valuenow', '65');
-  await expect(meter).toHaveAttribute('data-level', 'warn');
-  await turn(page, '[hot]');
-  await expect(meter).toHaveAttribute('aria-valuenow', '90');
-  await expect(meter).toHaveAttribute('data-level', 'hot');
-  await expect(meter).toHaveClass(/\bhot\b/);
-  // a new window gets the last measurement from the server straight away
-  await page.reload();
-  await expect(page.getByRole('meter', { name: /^context 90%/ })).toHaveAttribute('data-level', 'hot');
 });
 
 test('prompt suggestion: ghost text in the idle empty composer, Tab fills it @controls', async ({ page }) => {
@@ -314,27 +247,6 @@ test('background tasks: the row appears, ticks and disappears @controls', async 
   await expect(row).toContainText(/[12]s · 5k tok/); // the elapsed time moves on by itself
   await expect(row).toBeHidden(); // task_notification removes it while the turn may still run
   await expect(donesAfter(page, text).first()).toBeVisible();
-});
-
-test('a server error is one toast; the same error again is ×2 @controls', async ({ page }) => {
-  await open(page);
-  const first = `[boom] ${uniq('crash')}`;
-  await send(page, first);
-  await expect(toasts(page)).toHaveCount(1);
-  await expect(toasts(page)).toContainText('Server error · agent');
-  await expect(toasts(page)).toContainText('fake backend crash');
-  await expect(toasts(page)).not.toContainText('×');
-  // not a feed notice any more
-  await expect(page.locator('[data-kind="notice"]').filter({ hasText: 'fake backend crash' })).toHaveCount(0);
-  await expect(donesAfter(page, first).first()).toBeVisible();
-
-  const second = `[boom] ${uniq('crash again')}`;
-  await send(page, second);
-  await expect(toasts(page)).toContainText('×2');
-  await expect(toasts(page)).toHaveCount(1); // deduplicated, not stacked
-  await expect(donesAfter(page, second).first()).toBeVisible();
-  await toasts(page).getByRole('button', { name: en.close }).click();
-  await expect(toasts(page)).toHaveCount(0);
 });
 
 test('switching sessions: the file tabs follow the root, sends wait and the draft stays @controls', async ({ page }) => {

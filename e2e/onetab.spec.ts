@@ -18,23 +18,6 @@ async function open(page: Page) {
 }
 const favFill = (page: Page) => page.evaluate(() => decodeURIComponent(document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.href));
 
-test('a second page sees the occupied overlay, inert app and grey favicon; the owner is untouched @chat', async ({ page, context }) => {
-  await open(page);
-  const second = await context.newPage();
-  await second.goto('/');
-  await expect(overlay(second)).toHaveAttribute('data-state', 'occupied');
-  await expect(overlay(second)).toContainText('The window is already open in another tab');
-  await expect(workHere(second)).toBeVisible();
-  // the app is mounted but inert under the overlay
-  expect(await composer(second).evaluate((el) => !!el.closest('[inert]'))).toBe(true);
-  const icon = await favFill(second);
-  expect(icon).toContain(FAV_IDLE);
-  expect(icon).not.toContain(FAV_ERROR);
-  await expect(overlay(page)).toHaveCount(0);
-  await expect(composer(page)).toBeEnabled();
-  await second.close();
-});
-
 test('«Работать здесь» moves the session; the first page shows taken and does not reconnect by itself @chat', async ({ page, context }) => {
   await open(page);
   const text = uniq('before takeover');

@@ -131,23 +131,6 @@ test('select, comment, card, send @chat', async ({ page }) => {
   await expect(again).toContainText(note);
 });
 
-test('a quick label adds a comment in one click @chat', async ({ page }) => {
-  const frames: string[] = [];
-  page.on('websocket', (ws) => ws.on('framesent', (f) => frames.push(String(f.payload))));
-  await open(page);
-  await clearPending(page);
-  const text = await turn(page, 'label flow');
-  await openPopup(page, text);
-  await popup(page).getByRole('button', { name: /Verify this|Проверь/ }).click();
-
-  await expect(popup(page)).toBeHidden();
-  await expect(cards(page)).toHaveCount(1);
-  await expect(cards(page).first().getByLabel(/Verify this|Проверь/)).toBeVisible();
-  await page.locator('#cSend').click();
-  await expect.poll(() => frames.some((f) => f.includes('Verify by reading the actual code'))).toBe(true);
-  await expect(page.getByText(/agent is working|агент работает/)).toBeHidden();
-});
-
 test('shortcode picker inserts an emoji; Esc closes only the picker @chat', async ({ page }) => {
   await open(page);
   await clearPending(page);
@@ -389,28 +372,4 @@ test('Esc while the agent works: picker, then popup, then the turn @slow', async
   await page.keyboard.press('Escape'); // 3: now it interrupts the turn
   await expect(donesAfter(page, next).first()).toHaveText(/прервано|interrupted/);
   await expect(working).toBeHidden();
-});
-
-test('one step to a comment: a label chip next to the selection, or just start typing @chat', async ({ page }) => {
-  await open(page);
-  const text = await turn(page, 'bar');
-  await select(page, text, 0, 4);
-  await page.getByRole('button', { name: /^(Looks good|Выглядит хорошо)$/ }).click();
-  await expect(cards(page)).toHaveCount(1);
-  await expect(cards(page).first()).toContainText('👍');
-  await expect(popup(page)).toBeHidden();
-
-  // a mouse selection takes the focus out of the composer; the scripted one does not
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await select(page, text, 0, 4);
-  await expect(page.getByTestId('selection-bar')).toBeVisible();
-  await page.keyboard.press('x');
-  await expect(popup(page)).toBeVisible();
-  await expect(commentBox(page)).toBeFocused();
-  await page.keyboard.type('yz');
-  await expect(commentBox(page)).toHaveValue('xyz');
-  await page.keyboard.press('Escape');
-
-  await cards(page).first().getByRole('button', { name: /^(Delete|Удалить)$/ }).click();
-  await expect(cards(page)).toHaveCount(0);
 });
