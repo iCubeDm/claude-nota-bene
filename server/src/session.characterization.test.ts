@@ -7,11 +7,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLAUDE_CAPABILITIES, type AgentEvent, type ServerEvent } from '@nota-bene/shared';
 import { mapFrames } from './agent/claude/map.ts';
 import { fakeBackend } from './agent/fake.ts';
-import type { AgentBackend, AgentSession, SessionInfo } from './agent/types.ts';
+import type { AgentBackend, AgentSession, PermissionAsk, SessionInfo } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager, SwitchError } from './session.ts';
 import { lastSession } from './state.ts';
@@ -129,6 +129,14 @@ function gated(inner: ReturnType<typeof fakeBackend>) {
     history: async (...a) => { ask(); await gate; return inner.history(...a); },
   };
   return { backend, requested, release: open };
+}
+
+/** `a` with some members replaced; the fake agent is a class, so a spread would lose its methods */
+function over(a: AgentSession, patch: Partial<AgentSession>): AgentSession {
+  return {
+    messages: a.messages, send: (m) => a.send(m), interrupt: () => a.interrupt(), setPermissionMode: (m) => a.setPermissionMode(m),
+    fileSuggestions: (q) => a.fileSuggestions(q), contextUsage: () => a.contextUsage(), usage: () => a.usage(), close: () => a.close(), ...patch,
+  };
 }
 
 const longTurn = { text: 'x'.repeat(4000), chunk: 1, delayMs: 5 };
@@ -254,7 +262,7 @@ describe('SessionManager characterization', () => {
   });
 
   // 7. (session.test.ts:234 has one send and no busy(); :432 has a throw, not a clean end)
-  it('7. the agent loop ends without close: one error turn-end answers every waiting send; busy() is false after it', async () => {
+  it('7. the agent loop ends without close: one error turn-end answers every send the agent had; busy() is false after it', async () => {
     const { backend, sends, end } = scripted();
     const { hub, events } = hubWithSocket();
     const s = await createSessionManager({ hub, backend, cwd: '/proj' });
@@ -264,7 +272,7 @@ describe('SessionManager characterization', () => {
     expect(s.busy()).toBe(true);
     end();
     await until(() => agentOf(events, 'turn-end').length === 1);
-    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: expect.any(Number), error: 'agent session ended', answers: 'all', queued: 0 });
+    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: expect.any(Number), error: 'agent session ended', answers: ['u1', 'u2'], queued: 0 });
     expect(events.filter((e) => e.kind === 'server-error')).toEqual([{ kind: 'server-error', where: 'agent', message: 'agent session ended' }]);
     expect(s.busy()).toBe(false);
     s.close();
@@ -350,6 +358,111 @@ describe('SessionManager characterization', () => {
     await tick(30);
     expect(s.info().title).toBe('fresh');
     expect(events.filter((e) => e.kind === 'session' && e.title === 'stale')).toEqual([]);
+    s.close();
+  });
+
+  // 13-16: parked from M7-11; they pin today's behaviour across a generation change (a restart is a switch to the same id)
+
+  it('13. a switch denies the open permission asks before it closes the old agent', async () => {
+    const inner = fakeBackend([{ text: 'x' }]);
+    const order: string[] = [];
+    let ask!: PermissionAsk;
+    let asked!: Promise<boolean>;
+    const backend: AgentBackend = {
+      ...inner,
+      start: (o) => {
+        const a = inner.start(o);
+        if (!ask) { ask = o.ask; asked = o.ask('Bash', { command: 'ls' }, new AbortController().signal); void asked.then(() => order.push('denied')); }
+        return over(a, { close: () => { order.push('close'); queueMicrotask(() => order.push('after-close')); a.close(); } });
+      },
+    };
+    const { hub } = hubWithSocket();
+    const s = await createSessionManager({ hub, backend, cwd: home });
+    expect(s.busy()).toBe(true); // the ask is open
+    await s.restart();
+    expect(await asked).toBe(false);
+    // 'close' is logged synchronously; the ask was settled before close() ran, so its continuation is queued ahead of the one queued inside close()
+    expect(order.slice(0, 3)).toEqual(['close', 'denied', 'after-close']);
+    s.close();
+  });
+
+  it('14. a switch cancels a scheduled title lookup of the old session', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const inner = fakeBackend([{ text: 'x' }, { text: 'y' }]);
+      const backend: AgentBackend = { ...inner, sessionInfo: async () => { calls++; return { customTitle: 't' }; } };
+      const { hub, events } = hubWithSocket();
+      const s = await createSessionManager({ hub, backend, cwd: home });
+      const turns = () => agentOf(events, 'turn-end').length;
+      s.send({ id: 'u1', text: 'one' });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(turns()).toBe(1);
+      s.send({ id: 'u2', text: 'two' }); // within the throttle: the lookup is scheduled, not run
+      await vi.advanceTimersByTimeAsync(50);
+      expect(turns()).toBe(2);
+      const restarting = s.restart();
+      let done = false;
+      void restarting.then(() => { done = true; });
+      for (let i = 0; i < 200 && !done; i++) await vi.advanceTimersByTimeAsync(5); // file reads need real turns of the loop
+      await restarting;
+      const after = calls; // the new session's own title load
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls).toBe(after);
+      s.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('15. a setMode still waiting on the old agent when a switch happens is not applied to the new session', async () => {
+    const inner = fakeBackend([{ text: 'x' }]);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let n = 0;
+    const backend: AgentBackend = {
+      ...inner,
+      start: (o) => {
+        const a = inner.start(o);
+        return ++n === 1 ? over(a, { setPermissionMode: async () => { await gate; } }) : a;
+      },
+    };
+    const { hub, events } = hubWithSocket();
+    const s = await createSessionManager({ hub, backend, cwd: home });
+    const p = s.setMode('plan', 'ack-1');
+    await s.restart();
+    release();
+    await p;
+    expect(s.mode()).toBe('auto');
+    expect(readPrefs().modes[prefsKey(home)]).toBeUndefined();
+    expect(events.filter((e) => e.kind === 'mode' && e.mode === 'plan')).toEqual([]);
+    expect(events).toContainEqual({ kind: 'mode', mode: 'auto', ack: 'ack-1' }); // it is still answered, with the mode as it stands
+    expect(inner.startModes).toEqual(['auto', 'auto']);
+    expect(inner.setModes).toEqual([]);
+    s.close();
+  });
+
+  it('16. an interrupt that fails after a switch is not reported; one that fails in its own generation is', async () => {
+    const inner = fakeBackend([{ text: 'x' }]);
+    let fail!: (e: Error) => void;
+    let n = 0;
+    const backend: AgentBackend = {
+      ...inner,
+      start: (o) => {
+        const a = inner.start(o);
+        return ++n === 1 ? over(a, { interrupt: () => new Promise<void>((_, rej) => { fail = rej; }) }) : over(a, { interrupt: async () => { throw new Error('same gen'); } });
+      },
+    };
+    const { hub, events } = hubWithSocket();
+    const s = await createSessionManager({ hub, backend, cwd: home });
+    s.interrupt();
+    await s.restart();
+    fail(new Error('old gen'));
+    await tick(30);
+    expect(events.filter((e) => e.kind === 'server-error' && e.where === 'interrupt')).toEqual([]);
+    s.interrupt();
+    await until(() => events.some((e) => e.kind === 'server-error' && e.where === 'interrupt'));
+    expect(events.filter((e) => e.kind === 'server-error' && e.where === 'interrupt')).toEqual([{ kind: 'server-error', where: 'interrupt', message: 'same gen' }]);
     s.close();
   });
 });

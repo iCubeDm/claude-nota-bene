@@ -206,6 +206,18 @@ test('a turn-end answering all (a crash) clears every waiting send, not just the
   expect(s.busy).toBe(false);
 });
 
+test('a crash naming the running send fails it only: the queued one keeps waiting (M7-18); an empty list answers nothing', () => {
+  const two = fold([user(), user({ id: 'u2' })]);
+  const s = reduce(two, result({ stop: 'failed', secs: 0, error: 'boom', answers: ['u1'] }));
+  expect(s.waiting).toEqual(['u2']);
+  expect(s.busy).toBe(true);
+  expect(lastDone(s)).toMatchObject({ status: 'failed', error: 'boom' });
+  const none = reduce(fold([user({ id: 'u2' })]), result({ stop: 'failed', secs: 0, error: 'boom', answers: [] }));
+  expect(none.waiting).toEqual(['u2']);
+  expect(none.busy).toBe(true);
+  expect(reduce(none, result({ answers: ['u2'] })).busy).toBe(false);
+});
+
 test('a turn-end answering none (task-notification turn) keeps every send waiting; one answering all clears them', () => {
   const s = fold([user(), result()]);
   expect(s.busy).toBe(true);

@@ -169,7 +169,7 @@ describe('session manager', () => {
     s.send({ id: 'u1', text: 'hi' });
     await until(() => events.some((e) => e.kind === 'server-error'));
     await until(() => agentOf(events, 'turn-end').length === 1);
-    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: 0, error: 'fake backend crash', answers: 'all', queued: 0 });
+    expect(agentOf(events, 'turn-end')[0]!.e).toEqual({ t: 'turn-end', stop: 'failed', secs: 0, error: 'fake backend crash', answers: ['u1'], queued: 0 });
     s.send({ id: 'u2', text: 'again' });
     await until(() => agentOf(events, 'turn-end').length === 2);
     expect(resumes).toEqual([undefined, 'fake-session']);
@@ -238,7 +238,7 @@ describe('session manager', () => {
     s.send({ id: 'u2', text: 'again' });
     await until(() => agentOf(events, 'turn-end').length === 3);
     expect(resumes).toEqual([undefined, 'fake-session']);
-    expect(agentOf(events, 'turn-end')[1]).toMatchObject({ e: { stop: 'failed', error: 'agent session ended', answers: 'all' } });
+    expect(agentOf(events, 'turn-end')[1]).toMatchObject({ e: { stop: 'failed', error: 'agent session ended', answers: [] } }); // u1 was answered already: nothing left running
   });
 
   it('crash with a pending permission denies it and closes the agent', async () => {
@@ -318,6 +318,38 @@ describe('session manager', () => {
     await until(() => delivered.length === 1);
     expect(delivered).toEqual(['1:queued']);
     expect(resumes).toEqual([undefined, 'fake-session']);
+  });
+
+  it('M7-18: a crash fails the send the dead agent had, not the one still queued behind a forced interrupt', async () => {
+    const delivered: string[] = [];
+    let n = 0;
+    const backend: AgentBackend = {
+      ...noSessions,
+      history: async () => [],
+      start: () => {
+        const mine = n++;
+        return {
+          messages: mapFrames((async function* () {
+            yield { type: 'system', subtype: 'init', session_id: 'fake-session' } as never;
+            if (mine === 0) { await new Promise((r) => setTimeout(r, 10)); throw new Error('dead'); }
+            await new Promise(() => {});
+          })()),
+          send: (m) => { delivered.push(`${mine}:${m.uuid}`); },
+          interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
+          setPermissionMode: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
+        };
+      },
+    };
+    const { events, make } = setup(backend);
+    const s = await make();
+    s.send({ id: 'A', text: 'running' });
+    s.send({ id: 'B', text: 'queued', force: true }); // waits in the SendQueue for the interrupt
+    await until(() => agentOf(events, 'turn-end').length === 1);
+    expect(agentOf(events, 'turn-end')[0]!.e).toMatchObject({ stop: 'failed', error: 'dead', answers: ['A'] });
+    expect(s.busy()).toBe(true); // B is still waiting
+    await until(() => delivered.length === 2);
+    expect(delivered).toEqual(['0:A', '1:B']);
+    expect(s.busy()).toBe(true); // until B's own turn-end
   });
 
   it('a failing transcript read on resume is reported and starts with empty history', async () => {
@@ -402,7 +434,7 @@ describe('busy cannot get stuck', () => {
     expect(s.busy()).toBe(false);
   });
 
-  it('a crash with a queued send leaves busy false', async () => {
+  it('a crash with sends handed to the dead agent leaves busy false', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     let sent = 0;
@@ -429,7 +461,7 @@ describe('busy cannot get stuck', () => {
     await until(() => agentOf(events, 'turn-end').length === 1);
     const attached: ServerEvent[] = [];
     hub.attach({ send: (d) => attached.push(...(JSON.parse(d) as { events: ServerEvent[] }).events) });
-    expect(agentOf(events, 'turn-end')[0]!.e).toMatchObject({ stop: 'failed', error: 'dead', answers: 'all' });
+    expect(agentOf(events, 'turn-end')[0]!.e).toMatchObject({ stop: 'failed', error: 'dead', answers: ['A', 'B'] }); // both were handed to the dead agent
     const f = await feedOf(attached);
     expect(f.waiting).toEqual([]);
     expect(f.busy).toBe(false);

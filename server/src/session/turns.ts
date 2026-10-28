@@ -17,7 +17,8 @@ const waits = (s: SendState) => s === 'queued' || s === 'running';
  * running a send twice throws. Tolerant where the CLI drives it, because a real CLI does all of these (see the
  * M7-11 report, T1–T4): a turn-end, `cancelled` or failure naming an unknown id or an already settled send is
  * ignored (the first settlement stands), and running a send that was settled while it waited behind another one
- * returns false.
+ * (an error result or a reset answered all) returns false. A crash does not settle queued sends: they are still
+ * waiting in the SendQueue and run on the next agent.
  */
 export class TurnLedger {
   private sends = new Map<string, Entry>();
@@ -44,8 +45,8 @@ export class TurnLedger {
 
   /**
    * queued → running (handed to the agent). Throws for an id never registered and for a running send. A send
-   * already settled while it waited (the agent died, an error result answered all, a reset) returns false and stays
-   * settled (T3); the caller still hands it over, as before M7-11.
+   * already settled while it waited (an error result answered all, a reset; not a crash, M7-18) returns false and
+   * stays settled (T3); the caller still hands it over, as before M7-11.
    */
   running(id: string): boolean {
     const s = this.sends.get(id);
@@ -85,10 +86,21 @@ export class TurnLedger {
   }
 
   /** failed(id), and the failed turn-end that says so, as the mapper makes of an SDKResultError */
-  failure(e: unknown, id?: string): TurnEnd {
+  failure(e: unknown, id?: string | string[]): TurnEnd {
     const message = e instanceof Error ? e.message : String(e);
-    this.failed(id);
-    return { t: 'turn-end', stop: 'failed', secs: 0, ...(message ? { error: message } : {}), answers: id ? [id] : 'all', queued: 0 };
+    const ids = typeof id === 'string' ? [id] : id;
+    if (ids) this.settle(ids, 'failed'); else this.failed();
+    return { t: 'turn-end', stop: 'failed', secs: 0, ...(message ? { error: message } : {}), answers: ids ?? 'all', queued: 0 };
+  }
+
+  /**
+   * The agent died: fails the sends it had (running); queued ones were never handed over and stay queued for the
+   * next agent. The event names exactly those ids; `answers: []` when none ran, which answers nothing (a reducer
+   * filters the waiting list by it, `turnEnd` settles nothing), the failed line still shows the error.
+   */
+  crashed(e: unknown): TurnEnd {
+    const ids = [...this.sends].filter(([, s]) => s.state === 'running').map(([id]) => id);
+    return this.failure(e, ids);
   }
 
   /** a queued send the CLI cancelled: it never gets a result of its own */

@@ -162,11 +162,11 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     report('agent', e);
     slot.died(a);
     permissions.denyAll();
-    failTurn(e);
+    hub.emit({ kind: 'agent', e: turns.crashed(e) }); // only the sends the agent had; the queued ones run on the next
   }
 
-  /** the server answers for the agent: the send `id` it could not hand over, or (no id) every waiting send */
-  function failTurn(e: unknown, id?: string): void {
+  /** the server answers for the agent: the send `id` it could not hand over */
+  function failTurn(e: unknown, id: string): void {
     hub.emit({ kind: 'agent', e: turns.failure(e, id) });
   }
 

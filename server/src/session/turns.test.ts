@@ -121,13 +121,36 @@ describe('TurnLedger: what a real CLI does is tolerated, never thrown', () => {
     expect(t.state('e')).toBe('answered');
   });
 
-  it('T3: running a send that was settled while it waited for its turn (agent died, "all", reset) is tolerated: false, it stays settled', () => {
+  it('T3: running a send that was settled while it waited for its turn ("all", reset) is tolerated: false, it stays settled', () => {
     const t = new TurnLedger();
     t.sent('a');
-    t.failed(); // the agent died while 'a' waited behind a forced send's interrupt
+    t.failed(); // an error result answered all while 'a' waited behind a forced send's interrupt
     expect(t.running('a')).toBe(false);
     expect(t.state('a')).toBe('failed');
     expect(t.waiting()).toBe(0);
+  });
+
+  it('M7-18: a crash fails the running sends only; a queued one stays queued, waiting, and runs later', () => {
+    const t = new TurnLedger();
+    t.sent('a'); t.running('a');
+    t.sent('b');
+    const e = t.crashed(new Error('boom'));
+    expect(e).toMatchObject({ stop: 'failed', error: 'boom', answers: ['a'] });
+    expect([t.state('a'), t.state('b')]).toEqual(['failed', 'queued']);
+    expect(t.waiting()).toBe(1);
+    expect(t.running('b')).toBe(true);
+    t.turnEnd(end(['b']));
+    expect(t.state('b')).toBe('answered');
+    expect(t.waiting()).toBe(0);
+  });
+
+  it('M7-18: a crash with nothing running names no ids ([], not "all") and settles nothing', () => {
+    const t = new TurnLedger();
+    t.sent('b');
+    const e = t.crashed('x');
+    expect(e.answers).toEqual([]);
+    t.turnEnd(e);
+    expect(t.state('b')).toBe('queued');
   });
 
   it('T4: cancelled / failed naming an unknown or a settled id is ignored', () => {
