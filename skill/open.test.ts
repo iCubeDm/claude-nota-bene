@@ -166,7 +166,7 @@ function binDir(name: string, tools: [string, string][]): string {
 }
 const which = (tool: string) => execFileSync('/bin/sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim();
 
-/** A window (rebuild or prototype) on `port` whose /info says `root`. */
+/** A window on `port` whose /info says `root`. */
 async function fakeWindow(port: number, root: string): Promise<void> {
   const s = http.createServer((req, res) => {
     if (req.url === '/info') res.setHeader('content-type', 'application/json').end(JSON.stringify({ root, session: null }));
@@ -316,7 +316,7 @@ describe('an existing window', () => {
     expect(opened()).toEqual(['http://127.0.0.1:4792']);
   });
 
-  it('an unregistered window (a prototype one, or a lost registry write) is found by the /info scan', async () => {
+  it('an unregistered window (a lost registry write) is found by the /info scan', async () => {
     await fakeWindow(4791, path.join(tmp, 'elsewhere'));
     await fakeWindow(4793, project);
     const r = await nb('new');

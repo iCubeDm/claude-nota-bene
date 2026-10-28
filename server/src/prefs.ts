@@ -111,12 +111,3 @@ export function updateRawPrefs(fn: (raw: Record<string, unknown>) => void): void
 export function setDefaultModePref(mode: Mode): void {
   updateRawPrefs((raw) => void (raw.defaultMode = mode));
 }
-
-export function prototypeImported(): boolean {
-  try {
-    const data = JSON.parse(fs.readFileSync(file(), 'utf8')) as { importedPrototype?: unknown } | null;
-    return data?.importedPrototype === true;
-  } catch {
-    return false;
-  }
-}

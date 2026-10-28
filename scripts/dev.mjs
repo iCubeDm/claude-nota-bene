@@ -3,12 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** The env for the dev processes: an existing NOTA_BENE_HOME / NOTA_BENE_PROTOTYPE_SESSIONS wins; empty counts as unset. */
+/** The env for the dev processes: an existing NOTA_BENE_HOME wins; empty counts as unset. */
 export function devEnv(env, home) {
   return {
     ...env,
     NOTA_BENE_HOME: env.NOTA_BENE_HOME || path.join(home, '.nota-bene-dev'),
-    NOTA_BENE_PROTOTYPE_SESSIONS: env.NOTA_BENE_PROTOTYPE_SESSIONS || 'off',
   };
 }
 

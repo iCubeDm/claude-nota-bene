@@ -59,7 +59,7 @@ case "$ARG" in
   *) echo "NB: unknown argument '$1'. Use /nb (resume the last window session here), /nb new, or /nb fork (carry this conversation over)."; exit 0 ;;
 esac
 
-# inside a Nota Bene window (the rebuild's launcher, or the prototype's ide.sh)
+# inside a Nota Bene window (the launcher)
 if [ -n "${NOTA_BENE_SUPERVISED:-}" ] || [ -n "${AI_IDE_SUPERVISED:-}" ]; then
   echo "NB: already running inside Nota Bene — nothing to open."; exit 0
 fi
@@ -85,7 +85,7 @@ bring() { # $1 = port of a window found here: bring it to front ourselves
 
 # a window already serving this folder: the registry (verified by /info, stale entries pruned) ...
 PORT="$(node "$BIN" --find "$DIR" 2>/dev/null)" && [ -n "$PORT" ] && bring "$PORT"
-# ... or any port of the range whose /info has this root: prototype windows, or a lost registry write.
+# ... or any port of the range whose /info has this root: a lost registry write.
 # 4780 is the dev server (npm run dev), never a window. Without curl the bin's own re-check still finds them.
 if command -v curl >/dev/null; then
   FROM=4777 TO=4799 SKIP=4780

@@ -91,7 +91,7 @@ sequenceDiagram
 | `marks.ts` | Единственная запись в папку проекта: `<root>/.nota-bene/marks/<commentId>/{frame.jpg,layer.png}`. Проверка magic bytes, запрет симлинков. |
 | `fileRoutes.ts`, `files.ts`, `git.ts` | `/tree`, `/file` (Range, sandbox-заголовки), `/complete`, `/sources`, `/git-status`. Источники: текущий checkout, другие worktree (с диска) и ветки (через git blobs). |
 | `system.ts` | Settings: about, prefs, storage (включая `history/`) и очистка в корзину (в том числе устаревших архивов), окна, контрольный токен. |
-| `prefs.ts`, `state.ts`, `windows.ts`, `migrate.ts` | JSON-файлы состояния (запись через tmp + rename) и разовый импорт состояния прототипа. |
+| `prefs.ts`, `state.ts`, `windows.ts` | JSON-файлы состояния (запись через tmp + rename). |
 | `stats.ts`, `idle.ts` | Контекст, лимиты и стоимость (опрос SDK). Автокомпакция после простоя: 50 мин после хода, 15 мин без активности, контекст от 200k токенов. |
 
 ### 3.2 SessionManager: как устроен

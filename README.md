@@ -19,7 +19,7 @@ npm install
 ln -sfn "$PWD/skill" ~/.claude/skills/nb
 ```
 
-This replaces an existing `~/.claude/skills/nb` link (for example one pointing at the prototype).
+This replaces an existing `~/.claude/skills/nb` link.
 
 ## Usage
 
@@ -60,5 +60,3 @@ npm run e2e      # Playwright, ports 4791-4795 (tests only ever use 4790-4795)
 ## State
 
 `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo: `sessions.json`, `prefs.json`, `comments/`, `attachments/`, `windows/`, `locks/`.
-
-`prototype/` is the retired first version, kept as an archive and reference.

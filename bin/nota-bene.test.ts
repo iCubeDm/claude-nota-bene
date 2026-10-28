@@ -78,7 +78,6 @@ function windows(): Record<string, Win> {
 const env = (extra: Record<string, string> = {}) => ({
   ...process.env,
   NOTA_BENE_HOME: home,
-  NOTA_BENE_PROTOTYPE_SESSIONS: path.join(tmp, 'no-prototype.json'), // independent of the developer's machine
   NOTA_BENE_BUILD_CMD: 'true', // never run the real vite build from a test
   CLAUDE_CONFIG_DIR: path.join(tmp, 'claude'),
   NOTA_BENE_PORT_RANGE: '4791-4795', // a picked port never lands on a live window's or the dev server's
@@ -404,7 +403,7 @@ describe('nota-bene launcher', () => {
     expect(await d2.exited, d2.err()).toBe(0);
     expect(d2.out()).toBe('already-open http://127.0.0.1:4793\n');
     expect(Object.keys(windows())).toEqual(['4793']);
-    // a window missing from the registry (a failed registry write, a prototype window) is found by /info
+    // a window missing from the registry (a failed registry write) is found by /info
     const other = path.join(tmp, 'project-b');
     fs.mkdirSync(other);
     const s2 = http.createServer((_, res) => res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: other })));
@@ -494,23 +493,12 @@ describe('nota-bene launcher', () => {
     expect(candidatePorts({ NOTA_BENE_PORT_RANGE: '4791-4795' })).toEqual([4791, 4792, 4793, 4794, 4795]);
   });
 
-  it('refuses $HOME and / with the prototype message', () => {
+  it('refuses $HOME and /', () => {
     for (const dir of [tmp, '/']) {
       const r = bin([dir, '--no-open'], { HOME: tmp });
       expect(r.status).toBe(1);
       expect(r.stderr).toMatch(/refusing to open the whole .* as a project — cd into a project first/);
     }
-  });
-
-  it('--last imports the prototype state first, and stdout stays the bare id', () => {
-    const id = '0123abcd-0000-4000-8000-000000000001';
-    const proto = path.join(tmp, 'proto-sessions.json');
-    fs.writeFileSync(proto, JSON.stringify({ [project]: id }));
-    fs.mkdirSync(path.join(tmp, 'claude/projects/x'), { recursive: true });
-    fs.writeFileSync(path.join(tmp, 'claude/projects/x', `${id}.jsonl`), '');
-    const r = bin(['--last', project], { NOTA_BENE_PROTOTYPE_SESSIONS: proto });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stdout).toBe(`${id}\n`);
   });
 
   it('--last prints the saved session only while its transcript exists', () => {

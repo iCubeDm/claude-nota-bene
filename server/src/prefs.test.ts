@@ -16,6 +16,13 @@ afterEach(() => {
 });
 
 describe('prefs', () => {
+  it('ignores the retired importedPrototype key and keeps it on write', () => {
+    fs.writeFileSync(path.join(home, 'prefs.json'), JSON.stringify({ importedPrototype: true, modes: { [prefsKey('/a')]: 'plan' } }));
+    expect(readPrefs().modes[prefsKey('/a')]).toBe('plan');
+    setIdleCompactPref('/b', true);
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'prefs.json'), 'utf8')).importedPrototype).toBe(true);
+  });
+
   it('defaults when the file is missing', () => {
     expect(readPrefs()).toEqual({ modes: {}, idleCompact: {} });
   });

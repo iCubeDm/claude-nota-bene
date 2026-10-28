@@ -3,7 +3,7 @@
 // a supervised server itself when its root changes (a folder switch); read by `nota-bene --find`. One file per port
 // keeps writers of different ports from ever touching each other's entries; each file is replaced atomically.
 // An entry is only a hint: every reader verifies it (pid alive + /info.root), because a window can be killed
-// without unregistering, and its port reused by another app or a prototype window.
+// without unregistering, and its port reused by another app.
 import fs from 'node:fs';
 import path from 'node:path';
 import { stateDir } from './state.ts';

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// nota-bene — open a Nota Bene window on a folder and supervise its server (the prototype's ide.sh + open.sh).
+// nota-bene — open a Nota Bene window on a folder and supervise its server.
 // Plain Node ESM, no dependencies; imports the server's .ts helpers directly (Node >= 23.6 strips the types).
 //
 //   nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
@@ -10,7 +10,7 @@
 // One window per folder: a launch takes the folder's lock, then gives way to a window already serving it.
 // A picked port avoids 4780 (dev) and 4790-4795 (smoke, tests) unless NOTA_BENE_PORT_RANGE is set.
 //
-// Server exit codes (as prototype/ide.sh): 75 relaunches at once with --continue (more than 10 within 60 s give up);
+// Server exit codes 75 relaunches at once with --continue (more than 10 within 60 s give up);
 // 0, 130, 143 exit; 98 (listen failed) on the first start retries once on another port when the port was picked
 // automatically; anything else (a signal too) is a crash: relaunch after 1 s, give up at 5 crashes within 60 s.
 // A relaunch keeps the port, so the open tab reconnects by itself, reopens the folder the window has now (it may have
@@ -25,7 +25,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
-import { importPrototypeStateSafely } from '../server/src/migrate.ts';
 import {
   liveWindows, pidAlive, probeInfo, readWindows, registerWindow, restartingWindows, unregisterWindow,
 } from '../server/src/windows.ts';
@@ -575,8 +574,6 @@ async function main(argv) {
   }
   try {
     if (o.find !== undefined) return await find(o.find);
-    // the prototype's state first (idempotent; the server runs it too), so the first --last after the switch sees it
-    importPrototypeStateSafely(process.env, (msg) => say(msg));
     if (o.last !== undefined) return last(o.last);
     o.dir = realDir(o.dir ?? '.');
   } catch (e) {

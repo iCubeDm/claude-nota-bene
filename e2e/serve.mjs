@@ -79,7 +79,7 @@ function seedFiles(dir) {
 const child = spawn(
   process.execPath,
   [path.join(root, 'server/src/main.ts'), project, '--port', port, '--fake', path.join(root, 'server/test/fixtures', `${fixture}.json`)],
-  { cwd: root, env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_PROTOTYPE_SESSIONS: 'off' }, stdio: 'inherit' },
+  { cwd: root, env: { ...process.env, NOTA_BENE_HOME: home }, stdio: 'inherit' },
 );
 
 let done = false;
