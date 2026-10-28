@@ -859,3 +859,37 @@ test('a chat video opens in a file tab at the time it was played; /attach media 
   const opened = page.locator('video[data-media-tab="file:media/a.mp4"]');
   await expect.poll(() => opened.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(11);
 });
+
+test('player keys on a video tab after a click on the tab strip: Space plays, ArrowRight +5 s, ArrowDown lowers the volume, N starts markup; the composer keeps its Space @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
+  await start(page);
+  await openFromTree(page, 'media/a.mp4');
+  const video = mediaPane(page, 'media/a.mp4').locator('video');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  await tabOf(page, 'media/a.mp4').click(); // focus leaves the video: the old behaviour lost the keys here
+  await page.keyboard.press('Space');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => !e.paused)).toBe(true);
+  await page.keyboard.press('Space');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.paused)).toBe(true);
+  const t0 = await video.evaluate((e: HTMLVideoElement) => e.currentTime);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(t0 + 4.5);
+  expect(await video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeLessThan(t0 + 5.5);
+  await expect(page.locator('[data-player-flash]')).toHaveCount(1);
+  const v0 = await video.evaluate((e: HTMLVideoElement) => e.volume);
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.volume)).toBeLessThan(v0);
+
+  // the same Space in the composer types a space, and the video stays put
+  await composer(page).click();
+  await page.keyboard.type('a b');
+  await expect(composer(page)).toHaveValue('a b');
+  expect(await video.evaluate((e: HTMLVideoElement) => e.paused)).toBe(true);
+  await composer(page).fill('');
+
+  await tabOf(page, 'media/a.mp4').click();
+  await page.keyboard.press('KeyN');
+  await expect(markupLayer(page, 'media/a.mp4')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(markupLayer(page, 'media/a.mp4')).toHaveCount(0);
+});

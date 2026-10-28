@@ -79,7 +79,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const large = data?.s === 'text' && kind === 'text' && data.text.length > HIGHLIGHT_MAX;
 
   return (
-    <div hidden={!active} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
+    <div data-file-view hidden={!active} className="min-h-0 flex-1 flex-col [&:not([hidden])]:flex">
       <div data-anchor-skip className="flex h-8 flex-none items-center gap-2 border-b border-border-soft bg-chrome px-3 font-mono text-[11.5px] text-muted-foreground">
         <span className="min-w-0 flex-1 truncate" title={ref ? `${path} @ ${ref}` : path}>{path}</span>
         {ref && <SourceChip name={ref} />}
@@ -95,7 +95,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <MediaBody
           kind={kind} path={path} fileRef={ref} tabId={tabId} active={active} marking={marking} natural={natural}
           onToggleNatural={() => setNatural((v) => !v)} mediaUrl={mediaUrl} failed={failed} srcGone={srcGone}
-          onError={load.onError} onMediaMeta={load.onMediaMeta} markup={markup}
+          onError={load.onError} onMediaMeta={load.onMediaMeta} markup={markup} mediaEl={load.mediaEl}
         />
       ) : (
         <TextBody data={data} kind={kind} path={path} src={src} fileRef={ref} tabId={tabId} active={active} url={url} paneRef={pane} />

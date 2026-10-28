@@ -88,6 +88,7 @@
 }
 
 /* brief highlight on the source item after "jump to source" in a comment card */
+@keyframes nb-player-flash { 0% { opacity: 0.95; transform: scale(0.9); } 15% { transform: scale(1); } 100% { opacity: 0; } }
 @keyframes nb-flash { from { background-color: oklch(0.88 0.18 95 / 0.35); } to { background-color: transparent; } }
 .nb-flash { animation: nb-flash 1.2s ease-out; }
 

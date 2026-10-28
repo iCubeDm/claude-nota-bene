@@ -1,21 +1,24 @@
-import type { SyntheticEvent } from 'react';
+import type { MutableRefObject, SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { isMediaAnchor } from '@nota-bene/shared';
 import { CommentPopup } from '@/comments/CommentPopup.tsx';
 import { useT } from '@/i18n/index.ts';
+import { PlayerFlash } from '@/media/PlayerFlash.tsx';
+import { usePlayerKeys } from '@/media/playerKeys.ts';
 import { MarkupLayer } from '@/media/markup/MarkupLayer.tsx';
 import { MediaMarks } from '@/media/markup/MediaMarks.tsx';
 import type { FileKind } from '../kinds.ts';
 import type { MediaMarkup } from './useMediaMarkup.ts';
 
 /** The pane of an image, video or audio file (or its "gone" note), with the markup layers over an image or video. */
-export function MediaBody({ kind, path, fileRef, tabId, active, marking, natural, onToggleNatural, mediaUrl, failed, srcGone, onError, onMediaMeta, markup }: {
+export function MediaBody({ kind, path, fileRef, tabId, active, marking, natural, onToggleNatural, mediaUrl, failed, srcGone, onError, onMediaMeta, markup, mediaEl }: {
   kind: FileKind; path: string; fileRef: string | undefined; tabId: string; active: boolean; marking: boolean; natural: boolean;
   onToggleNatural: () => void; mediaUrl: string; failed: boolean; srcGone: boolean; onError: () => void;
-  onMediaMeta: (e: SyntheticEvent<HTMLMediaElement>) => void; markup: MediaMarkup;
+  onMediaMeta: (e: SyntheticEvent<HTMLMediaElement>) => void; markup: MediaMarkup; mediaEl: MutableRefObject<HTMLMediaElement | null>;
 }) {
   const t = useT();
   const { markable, mediaRef, imgRef, markPopup } = markup;
+  const flash = usePlayerKeys({ tabId, active, marking, media: mediaEl, image: kind === 'image' ? markable as HTMLImageElement | null : null });
   let body;
   if (failed || srcGone) {
     body = (
@@ -51,12 +54,15 @@ export function MediaBody({ kind, path, fileRef, tabId, active, marking, natural
       </div>
     );
   }
-  if (!((kind === 'image' || kind === 'video') && !failed && !srcGone)) return body;
+  if (!((kind === 'image' || kind === 'video') && !failed && !srcGone)) {
+    return kind === 'audio' && !failed && !srcGone ? <div className="relative flex min-h-0 flex-1 flex-col">{body}<PlayerFlash flash={flash} /></div> : body;
+  }
   const fit = kind === 'image' && natural ? 'natural' : 'contain';
   return (
     // the toolbar sits over the pane but outside its scroll, so it stays in the corner in natural size
     <div className="relative flex min-h-0 flex-1 flex-col">
       {body}
+      <PlayerFlash flash={flash} />
       {markable && <MediaMarks tabId={tabId} media={markable} fit={fit} path={path} refName={fileRef} />}
       {markable && <MarkupLayer tabId={tabId} media={markable} fit={fit} onAdd={markup.onMarkAdd} held={!!markPopup} saving={markup.saving} />}
       {/* portalled with its own layer: above the markup toolbar, which it may open next to */}

@@ -8,7 +8,7 @@ import { box as rectBox, rectFrom, shapePath, shapesBounds, simplify, toRel } fr
 import { MarkupToolbar } from './MarkupToolbar.tsx';
 import { HALO, HALO_PX, shapeEls, STROKE_PX, useNatSize, useOverlayPlacement, type Media } from './overlay.tsx';
 import { addShape, clear, selectDraft, setColor, setMode, setTool, undo, type MarkTool } from './slice.ts';
-import { editable } from '@/lib/editable.ts';
+import { keysInScope } from '@/lib/keyScope.ts';
 
 type Pt = { x: number; y: number };
 
@@ -177,9 +177,7 @@ export function MarkupLayer({ tabId, media, fit, onAdd, held = false, saving = f
   useEffect(() => {
     if (!on || asking || held || saving) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || editable(e.target) || media.closest('[hidden]')) return;
-      const f = document.activeElement;
-      if (f && f !== document.body && !pane?.contains(f) && !toolbar.current?.contains(f)) return;
+      if (!keysInScope(e, media, (f) => !!pane?.contains(f) || !!toolbar.current?.contains(f))) return;
       const mod = e.metaKey || e.ctrlKey;
       // e.code, not e.key: R/E/P/A and the digits work on any keyboard layout
       if (mod && !e.altKey && !e.shiftKey && e.code === 'KeyZ') {
