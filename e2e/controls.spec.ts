@@ -115,7 +115,7 @@ test('model pill: pick another model and an effort; a reload keeps them @control
   await page.getByRole('menuitem', { name: /^Opus 5/ }).click();
   await expect(modelPill).toHaveText('Opus 5');
   await modelPill.click();
-  await page.getByRole('group', { name: 'Opus 5' }).getByRole('menuitem', { name: en.effort_max }).click();
+  await page.getByRole('group', { name: en.effortLabel }).getByRole('menuitem', { name: en.effort_max }).click();
   await expect(modelPill).toHaveText(`Opus 5 · ${en.effort_max}`);
   await page.reload();
   await expect(modelPill).toHaveText(`Opus 5 · ${en.effort_max}`);

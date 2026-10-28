@@ -243,7 +243,7 @@ export const en: Dict = {
   // model and effort
   modelTip: 'Model and effort · a change applies from the next reply',
   modelOthers: 'Other versions',
-  modelUnknown: 'Model',
+  modelUnknown: 'Default',
   effortLabel: 'Effort',
   effort_low: 'Low',
   effort_medium: 'Medium',

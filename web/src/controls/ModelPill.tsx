@@ -19,9 +19,9 @@ const isAlias = (o: ModelOption) => !o.value.startsWith('claude-');
 const resolvedOf = (o: ModelOption) => o.resolved ?? o.value;
 
 /**
- * The model in the header. The list comes from the agent; a model with effort levels shows them right under it.
- * Choosing applies from the next reply. A model change drops the prompt cache, so the other models say what the next
- * reply will re-read (the context meter's tokens); an effort change keeps the cache and says nothing.
+ * The model in the header. One compact row per model, one effort row for the current model below the list. Choosing
+ * applies from the next reply. A model change drops the prompt cache, so one line at the bottom says what the next
+ * reply will re-read (the context meter's tokens), once the session has had a turn; an effort change keeps the cache.
  */
 export function ModelPill() {
   const t = useT();
@@ -35,6 +35,8 @@ export function ModelPill() {
   const id = cur?.model ?? sessionModel;
   const current = rowFor(models, id);
   const [more, setMore] = useState(false);
+  const [hover, setHover] = useState<ModelOption | null>(null);
+  const hadTurn = useAppSelector((st) => st.feed.earlier > 0 || st.feed.items.some((it) => it.kind === 'user'));
   if (!id && !switchable) return null; // nothing known yet
   const label = (current?.name ?? id ?? t('modelUnknown')) + (cur?.effort ? ` · ${t(`effort_${cur.effort}`)}` : '');
   const trigger = (
@@ -55,36 +57,24 @@ export function ModelPill() {
   };
   const others = models.filter((o) => !isAlias(o));
   const showMore = more || (!!current && !isAlias(current));
+  // a model change drops the cache; the same resolved id keeps it. Nothing to re-read before the first turn.
+  const differs = (o: ModelOption) => (current ? resolvedOf(o) !== resolvedOf(current) : true);
+  const warn = hadTurn && used > 0 && (hover ? differs(hover) : models.some(differs));
   const row = (o: ModelOption) => {
     const here = o === current;
-    const warn = used > 0 && (current ? resolvedOf(o) !== resolvedOf(current) : true); // the same resolved id keeps the cache
     return (
-      <div key={o.value} role="group" aria-label={o.name} className="py-0.5">
-        <DropdownMenuItem
-          aria-current={here || undefined}
-          onSelect={() => pick(o, here ? cur?.effort : cur?.effort && o.efforts?.includes(cur.effort) ? cur.effort : undefined)}
-          className={`block px-2.5 py-[7px] ${here ? 'bg-muted' : ''}`}
-        >
-          <b className="block text-[13px] font-medium">{o.name}</b>
-          <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">{o.description}</span>
-          {warn && <span data-testid="cache-warn" className="mt-0.5 block text-[11.5px] leading-snug text-warn">{t('modelCacheWarn', kTokens)}</span>}
-        </DropdownMenuItem>
-        {o.efforts && (
-          <div role="group" aria-label={t('effortLabel')} className="flex flex-wrap items-center gap-1 px-2.5 pb-1 pt-0.5">
-            <span className="mr-1 text-[11px] text-muted-foreground">{t('effortLabel')}</span>
-            {o.efforts.map((e) => (
-              <DropdownMenuItem
-                key={e}
-                aria-current={(here && cur?.effort === e) || undefined}
-                onSelect={() => pick(o, e)}
-                className={`inline-flex h-[22px] w-auto items-center rounded-full border border-border-soft px-2 py-0 text-[11px] ${here && cur?.effort === e ? 'bg-muted font-medium' : ''}`}
-              >
-                {t(`effort_${e}`)}
-              </DropdownMenuItem>
-            ))}
-          </div>
-        )}
-      </div>
+      <DropdownMenuItem
+        key={o.value}
+        aria-current={here || undefined}
+        onFocus={() => setHover(o)}
+        onPointerEnter={() => setHover(o)}
+        onSelect={() => pick(o, here ? cur?.effort : cur?.effort && o.efforts?.includes(cur.effort) ? cur.effort : undefined)}
+        className={`flex items-baseline gap-2 px-2.5 py-1.5 ${here ? 'bg-muted' : ''}`}
+      >
+        <b className="shrink-0 text-[13px] font-medium">{o.name}</b>
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground">{o.description}</span>
+        <span aria-hidden className="w-3 shrink-0 text-[12px]">{here ? '✓' : ''}</span>
+      </DropdownMenuItem>
     );
   };
   return (
@@ -97,7 +87,7 @@ export function ModelPill() {
         </TooltipTrigger>
         <TooltipContent>{t('modelTip')}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent side="bottom" align="end" className="w-[320px]">
+      <DropdownMenuContent side="bottom" align="end" className="w-[320px]" onPointerLeave={() => setHover(null)}>
         {models.filter(isAlias).map(row)}
         {others.length > 0 && (
           <>
@@ -111,6 +101,23 @@ export function ModelPill() {
             {showMore && others.map(row)}
           </>
         )}
+        {current?.efforts && (
+          <div role="group" aria-label={t('effortLabel')} className="flex flex-wrap items-center gap-1 border-t border-border-soft px-2.5 pb-1 pt-1.5">
+            <span className="mr-1 text-[11px] text-muted-foreground">{t('effortLabel')}</span>
+            {current.efforts.map((e) => (
+              <DropdownMenuItem
+                key={e}
+                aria-current={cur?.effort === e || undefined}
+                onFocus={() => setHover(null)}
+                onSelect={() => pick(current, e)}
+                className={`inline-flex h-[22px] w-auto items-center rounded-full border border-border-soft px-2 py-0 text-[11px] ${cur?.effort === e ? 'bg-muted font-medium' : ''}`}
+              >
+                {t(`effort_${e}`)}
+              </DropdownMenuItem>
+            ))}
+          </div>
+        )}
+        {warn && <p data-testid="cache-warn" className="m-0 border-t border-border-soft px-2.5 pb-1.5 pt-1.5 text-[11.5px] leading-snug text-warn">{t('modelCacheWarn', kTokens)}</p>}
       </DropdownMenuContent>
     </DropdownMenu>
   );

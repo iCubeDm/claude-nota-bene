@@ -240,7 +240,7 @@ export const ru = {
   // model and effort
   modelTip: 'Модель и усилие · смена применяется со следующего ответа',
   modelOthers: 'Другие версии',
-  modelUnknown: 'Модель',
+  modelUnknown: 'По умолчанию',
   effortLabel: 'Усилие',
   effort_low: 'Низкое',
   effort_medium: 'Среднее',

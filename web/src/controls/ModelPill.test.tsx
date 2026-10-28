@@ -30,9 +30,10 @@ function setup() {
   const store = makeStore({ url: 'ws://x', connect: connect as never });
   render(<Provider store={store}><TooltipProvider><ModelPill /></TooltipProvider></Provider>);
   const emit = (...es: ServerEvent[]) => act(() => es.forEach(ev));
-  const ready = (used = 120_000) => emit(
+  const ready = (used = 120_000, turns = true) => emit(
     { kind: 'hello', protocol: 6 }, { kind: 'models', models: MODELS }, { kind: 'model', model: 'claude-sonnet-5', effort: 'medium' },
     { kind: 'stats', stats: { context: { used, max: 200_000, pct: 60 }, limits: null, cost: null } },
+    ...(turns ? [{ kind: 'user', id: 'u1', text: 'hi', ts: 1 } as ServerEvent] : []),
   );
   return { sent, emit, ready, store };
 }
@@ -57,16 +58,24 @@ it('without a list (an older server) it shows the reported name and is disabled'
   expect(pill()).toBeDisabled();
 });
 
-it('lists the models; effort levels only under a model that has them', async () => {
+it('lists the models compactly: one row each with a check on the current one, and ONE effort row for the current model', async () => {
   const { ready } = setup();
   ready();
   const menu = await open();
-  expect(within(menu).getByText('Sonnet 5')).toBeInTheDocument();
-  expect(within(menu).getByText('Opus 5')).toBeInTheDocument();
-  expect(within(menu).getByText('Haiku 5')).toBeInTheDocument();
-  expect(within(within(menu).getByRole('group', { name: 'Sonnet 5' })).getAllByRole('menuitem').map((e) => e.textContent)).toContain('Medium');
-  expect(within(within(menu).getByRole('group', { name: 'Opus 5' })).getByRole('group', { name: 'Effort' })).toBeInTheDocument();
-  expect(within(within(menu).getByRole('group', { name: 'Haiku 5' })).queryByRole('group', { name: 'Effort' })).toBeNull();
+  const rows = within(menu).getAllByRole('menuitem').filter((e) => !e.closest('[role="group"]'));
+  expect(rows).toHaveLength(3);
+  expect(rows[0]).toHaveAttribute('aria-current', 'true');
+  expect(rows[0]).toHaveTextContent('Sonnet 5Everyday✓');
+  expect(rows[1]).not.toHaveAttribute('aria-current');
+  expect(within(menu).getAllByRole('group', { name: 'Effort' })).toHaveLength(1);
+  expect(within(within(menu).getByRole('group', { name: 'Effort' })).getAllByRole('menuitem').map((e) => e.textContent)).toEqual(['Low', 'Medium', 'High']);
+});
+
+it('no effort row when the current model has no levels', async () => {
+  const { emit } = setup();
+  emit({ kind: 'hello', protocol: 6 }, { kind: 'models', models: MODELS }, { kind: 'model', model: 'claude-haiku-5' });
+  const menu = await open();
+  expect(within(menu).queryByRole('group', { name: 'Effort' })).toBeNull();
 });
 
 it('picking another model sends it (keeping the effort when the model has it); the pill waits for the echo', async () => {
@@ -99,21 +108,31 @@ it('picking an effort of the current model sends model + effort; the current cho
   ready();
   const menu = await open();
   const n = sent.length;
-  await userEvent.click(within(within(menu).getByRole('group', { name: 'Sonnet 5' })).getByRole('menuitem', { name: 'Medium' }));
+  await userEvent.click(within(within(menu).getByRole('group', { name: 'Effort' })).getByRole('menuitem', { name: 'Medium' }));
   expect(sent).toHaveLength(n);
   const m2 = await open();
-  await userEvent.click(within(within(m2).getByRole('group', { name: 'Sonnet 5' })).getByRole('menuitem', { name: 'High' }));
+  await userEvent.click(within(within(m2).getByRole('group', { name: 'Effort' })).getByRole('menuitem', { name: 'High' }));
   expect(sent.at(-1)).toMatchObject({ type: 'model', model: 'sonnet', effort: 'high' });
 });
 
-it('the cache warning: on another model with a non-empty context, in tokens/1000; never on the current model\'s own efforts', async () => {
+it('the cache warning: ONE line at the bottom, in tokens/1000, once the session has had a turn', async () => {
   const { ready } = setup();
   ready(123_400);
   const menu = await open();
-  const warns = within(menu).getAllByTestId('cache-warn');
-  expect(warns).toHaveLength(2); // Opus and Haiku, not Sonnet (the current one)
-  expect(warns[0]).toHaveTextContent('The next reply re-reads the context: ~123k tokens');
-  expect(within(within(menu).getByRole('group', { name: 'Sonnet 5' })).queryByTestId('cache-warn')).toBeNull();
+  expect(within(menu).getAllByTestId('cache-warn')).toHaveLength(1);
+  expect(within(menu).getByTestId('cache-warn')).toHaveTextContent('The next reply re-reads the context: ~123k tokens');
+  expect(within(menu).getByTestId('cache-warn').closest('[role="group"]')).toBeNull();
+});
+
+it('no warning before the first turn, even with a context baseline (the meter shows the system prompt)', async () => {
+  const { ready, emit } = setup();
+  ready(28_000, false);
+  let menu = await open();
+  expect(within(menu).queryByTestId('cache-warn')).toBeNull();
+  await userEvent.keyboard('{Escape}');
+  emit({ kind: 'user', id: 'u1', text: 'hi', ts: 1 });
+  menu = await open();
+  expect(within(menu).getByTestId('cache-warn')).toHaveTextContent('~28k');
 });
 
 it('no warning with an empty context; the Russian text', async () => {
@@ -126,7 +145,18 @@ it('no warning with an empty context; the Russian text', async () => {
   ready(120_000);
   await userEvent.click(screen.getByRole('button', { name: /Модель и усилие/ }));
   menu = await screen.findByRole('menu');
-  expect(within(menu).getAllByTestId('cache-warn')[0]).toHaveTextContent('Следующий ответ перечитает контекст: ~120 тыс. токенов');
+  expect(within(menu).getByTestId('cache-warn')).toHaveTextContent('Следующий ответ перечитает контекст: ~120 тыс. токенов');
+});
+
+it('the pill before the CLI reported a model: the pref\'s model, else "Default" (never the bare "Model")', () => {
+  const { emit } = setup();
+  emit({ kind: 'hello', protocol: 6 }, { kind: 'models', models: MODELS }, { kind: 'model', model: null });
+  expect(pill()).toHaveTextContent(/^Default$/);
+  emit({ kind: 'model', model: 'opus', effort: 'max' });
+  expect(pill()).toHaveTextContent('Opus 5 · Max');
+  act(() => setLang('ru'));
+  emit({ kind: 'model', model: null });
+  expect(screen.getByRole('button', { name: /Модель и усилие/ })).toHaveTextContent(/^По умолчанию$/);
 });
 
 it('is disabled and sends nothing for a server older than protocol 6', async () => {
@@ -136,17 +166,21 @@ it('is disabled and sends nothing for a server older than protocol 6', async () 
   expect(sent).toEqual([]);
 });
 
-it('M3: no warning on a row that resolves to the model in use (default and opus); every row warns when the model is unmatched', async () => {
+it('M3: no warning when hovering a row that resolves to the model in use (default and opus); an unmatched model warns for any', async () => {
   const { emit } = setup();
   const twin: ModelOption[] = [{ value: 'default', name: 'Default', description: 'd', resolved: 'claude-opus-5' }, { value: 'opus', name: 'Opus 5', description: 'o', resolved: 'claude-opus-5' }, { value: 'haiku', name: 'Haiku 5', description: 'h', resolved: 'claude-haiku-5' }];
-  emit({ kind: 'hello', protocol: 6 }, { kind: 'models', models: twin }, { kind: 'model', model: 'claude-opus-5' }, { kind: 'stats', stats: { context: { used: 50_000, max: 200_000, pct: 25 }, limits: null, cost: null } });
+  emit({ kind: 'hello', protocol: 6 }, { kind: 'models', models: twin }, { kind: 'model', model: 'claude-opus-5' }, { kind: 'stats', stats: { context: { used: 50_000, max: 200_000, pct: 25 }, limits: null, cost: null } }, { kind: 'user', id: 'u1', text: 'hi', ts: 1 });
   let menu = await open();
-  expect(within(menu).getAllByTestId('cache-warn')).toHaveLength(1); // Haiku only
-  expect(within(within(menu).getByRole('group', { name: 'Opus 5' })).queryByTestId('cache-warn')).toBeNull();
+  expect(within(menu).getByTestId('cache-warn')).toBeInTheDocument(); // neutral hint: Haiku would re-read
+  await userEvent.hover(within(menu).getByText('Opus 5'));
+  expect(within(menu).queryByTestId('cache-warn')).toBeNull();
+  await userEvent.hover(within(menu).getByText('Haiku 5'));
+  expect(within(menu).getByTestId('cache-warn')).toBeInTheDocument();
   await userEvent.keyboard('{Escape}');
   emit({ kind: 'model', model: 'claude-mystery' });
   menu = await open();
-  expect(within(menu).getAllByTestId('cache-warn')).toHaveLength(3);
+  await userEvent.hover(within(menu).getByText('Opus 5'));
+  expect(within(menu).getByTestId('cache-warn')).toBeInTheDocument();
 });
 
 it('13 rows are too long: aliases first, explicit ids under a collapsed "Other versions"; open when the current model is one of them', async () => {
