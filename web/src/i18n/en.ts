@@ -134,6 +134,7 @@ export const en: Dict = {
   hk_files: 'Files panel',
   hk_comments: 'Comments panel',
   hk_reveal: 'reveal the current file in the tree',
+  hk_wrap: 'wrap lines in a text file',
   hk_composer: 'focus the message box (outside text fields)',
   hkTitle: 'Hotkeys',
   // Diagram tab (M7-01)
@@ -211,6 +212,7 @@ export const en: Dict = {
   noFile: 'no such file in the project',
   openRaw: 'Open raw',
   noHighlight: 'not highlighted: large file',
+  wrapLines: 'Wrap lines',
   reload: 'Reload',
   // image attachments (M3-12)
   attach: 'Attach an image\nor paste from the clipboard ⌘V / drop into the window',

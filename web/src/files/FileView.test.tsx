@@ -9,6 +9,7 @@ import { addShape, selectDraft, setTool } from '@/media/markup/slice.ts';
 import { dismissToast, getToasts } from '@/shell/toast.ts';
 import { FileView } from './FileView.tsx';
 import { jumpToFileComment, selectFileVersion } from './slice.ts';
+import { wrapLines } from './wrap.ts';
 
 // like the real one: awaits the version request it was handed and returns it in the anchor patch
 const prepareMediaComment = vi.fn(async (_id: string, _el: unknown, _a: unknown, o?: { version?: Promise<string | undefined> }) => {
@@ -61,6 +62,32 @@ it('renders a text file in a data-file-path root, toolbar outside it', async () 
   expect(root.contains(bar)).toBe(false);
   expect(bar.querySelector('a[target="_blank"]')?.getAttribute('href')).toBe('/file?path=src%2Fa.ts');
   expect(calls.map((c) => c.method + (c.range ? ':range' : ''))).toEqual(['HEAD', 'GET:range', 'GET']);
+});
+
+it('long lines wrap by default; the header switch (and Alt+Z) turns it off for every view, remembered', async () => {
+  localStorage.removeItem('nb.wrap');
+  wrapLines.reload();
+  spec.body = 'x'.repeat(500) + '\n';
+  const { r } = setup('notes.txt');
+  const pre = await waitFor(() => { const p = r.container.querySelector('[data-file-path] pre'); expect(p?.textContent).toContain('xxx'); return p!; });
+  expect(pre.className).toContain('whitespace-pre-wrap');
+  const sw = screen.getByRole('button', { name: 'Wrap lines' });
+  expect(sw.getAttribute('aria-pressed')).toBe('true');
+  fireEvent.click(sw);
+  expect(pre.className).not.toContain('whitespace-pre-wrap');
+  expect(pre.className).toContain('overflow-x-auto');
+  expect(localStorage.getItem('nb.wrap')).toBe('0');
+  wrapLines.reload();
+  expect(wrapLines.get()).toBe(false);
+  act(() => wrapLines.toggle());
+  expect(pre.className).toContain('whitespace-pre-wrap');
+});
+
+it('a markdown view has no wrap switch: prose always wraps', async () => {
+  spec.body = '# hi\n';
+  const { r } = setup('a.md');
+  await waitFor(() => expect(r.container.querySelector('.nb-prose')).not.toBeNull());
+  expect(screen.queryByRole('button', { name: 'Wrap lines' })).toBeNull();
 });
 
 it('a 3 MB file shows the too-large note and fetches no body', async () => {

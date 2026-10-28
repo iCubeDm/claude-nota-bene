@@ -17,6 +17,7 @@ import { HIGHLIGHT_MAX } from './view/CodeText.tsx';
 import { MediaBody } from './view/MediaBody.tsx';
 import { TextBody } from './view/TextBody.tsx';
 import { useFileLoad } from './view/useFileLoad.ts';
+import { useWrapLines, wrapLines } from './wrap.ts';
 import { useMediaMarkup } from './view/useMediaMarkup.ts';
 
 /**
@@ -44,6 +45,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const { data, rev, loadedRev, failed, mediaUrl, resumeAt } = load;
   const markup = useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, mediaEl: load.mediaEl });
   const { markable } = markup;
+  const wrap = useWrapLines();
 
   // "jump to source" (CommentCard): once this view shows fresh text and is visible, scroll to the fragment and flash it
   const jump = useAppSelector(selectJump);
@@ -82,6 +84,10 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <span className="min-w-0 flex-1 truncate" title={ref ? `${path} @ ${ref}` : path}>{path}</span>
         {ref && <SourceChip name={ref} />}
         {large && <span>{t('noHighlight')}</span>}
+        {kind === 'text' && (
+          <button type="button" aria-label={t('wrapLines')} aria-pressed={wrap} title={`${t('wrapLines')} (Alt+Z)`} onClick={wrapLines.toggle}
+            className={`rounded px-1.5 hover:bg-muted hover:text-foreground ${wrap ? 'text-foreground' : ''}`}>↩</button>
+        )}
         <button type="button" aria-label={t('reload')} title={t('reload')} onClick={load.reloadClick} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>

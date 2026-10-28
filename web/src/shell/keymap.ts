@@ -1,5 +1,6 @@
 import { setPanelOpen } from '@/comments/slice.ts';
 import { recentModal } from '@/files/recent.ts';
+import { wrapLines } from '@/files/wrap.ts';
 import type { ru } from '@/i18n/ru.ts';
 import { selectConn, type AppStore } from '@/store/store.ts';
 import { activate, closeTab, reopenClosed } from '@/tabs/slice.ts';
@@ -65,6 +66,7 @@ export const BINDINGS: Binding[] = [
   { id: 'hk_files', codes: ['KeyF'], mods: { mod: true, shift: true }, inFields: true, run: ({ store }) => void store.dispatch(setTreeOpen(!store.getState().tree.open)) },
   { id: 'hk_comments', codes: ['KeyC'], mods: { mod: true, shift: true }, inFields: true,
     run: ({ store }) => void store.dispatch(setPanelOpen(!store.getState().comments.ui.panelOpen)) },
+  { id: 'hk_wrap', codes: ['KeyZ'], mods: { alt: true }, inFields: 'notMac', run: () => wrapLines.toggle() },
   { id: 'hk_reveal', codes: ['F1'], mods: { alt: true }, inFields: true,
     run: ({ store }) => {
       const st = store.getState();

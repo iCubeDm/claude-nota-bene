@@ -6,6 +6,7 @@ import { useT } from '@/i18n/index.ts';
 import { useAppDispatch } from '@/store/store.ts';
 import type { FileKind } from '../kinds.ts';
 import { CodeText } from './CodeText.tsx';
+import { useWrapLines } from '../wrap.ts';
 import type { Loaded } from './useFileLoad.ts';
 
 /** The pane of a text or markdown file: the text, or a note (too big, binary, gone, an error). */
@@ -15,6 +16,7 @@ export function TextBody({ data, kind, path, src, fileRef, tabId, active, url, p
 }) {
   const t = useT();
   const dispatch = useAppDispatch();
+  const wrap = useWrapLines();
   const note = (key: 'tooLarge' | 'binary' | 'fileGone') => (
     <p className="p-4 text-sm text-muted-foreground">
       {t(key)}
@@ -28,7 +30,7 @@ export function TextBody({ data, kind, path, src, fileRef, tabId, active, url, p
     data == null ? null
     : data.s === 'text' ? (
       kind === 'md' ? <div className="nb-card nb-prose px-10 pt-5 pb-7" onClick={(e) => refClick(e, dispatch, src)}><Markdown text={data.text} final src={src} baseDir={path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : undefined} /></div>
-      : <pre className="nb-card nb-code overflow-x-auto p-4 font-mono text-xs leading-relaxed whitespace-pre"><CodeText text={data.text} path={path} /></pre>
+      : <pre className={`nb-card nb-code p-4 font-mono text-xs leading-relaxed ${wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'overflow-x-auto whitespace-pre'}`}><CodeText text={data.text} path={path} /></pre>
     )
     : data.s === 'error' ? <p className="p-4 text-sm text-destructive">{data.message}</p>
     : data.s === 'sourceGone' ? goneSrc
