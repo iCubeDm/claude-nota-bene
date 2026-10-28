@@ -1,14 +1,14 @@
 # Архитектура Nota Bene
 
-Состояние на 2026-10-27, `main` @ 386f4da (M6 влит). Около 15 тыс. строк исходников без тестов, 103 тестовых файла.
+Состояние на 2026-10-28, `main` (M7 влит). Около 15 тыс. строк исходников без тестов.
 
 ## 1. Общая картина
 
-Nota Bene — локальное веб-приложение. Одно **окно** — это один процесс сервера, одна папка проекта, один порт из 4777–4799 и одна сессия Claude Code. В окно может смотреть сколько угодно вкладок браузера.
+Nota Bene — локальное веб-приложение. Одно **окно** — это один процесс сервера, одна папка проекта, один порт из 4777–4799 и одна сессия Claude Code. С окном работает одна вкладка браузера (владелец); остальные видят «окно занято» и могут перехватить окно.
 
 ```mermaid
 flowchart LR
-  subgraph Browser["Браузер (вкладки окна)"]
+  subgraph Browser["Браузер (вкладка-владелец окна)"]
     UI["React UI"] --> RS["Redux store"]
     RS <--> WSC["net/socket.ts"]
     UI -- fetch --> HTTPC["HTTP-клиенты в компонентах"]
@@ -17,6 +17,7 @@ flowchart LR
     HTTP["http.ts: Host/Origin-фильтр и роутер"]
     WSS["WebSocketServer /ws"]
     HUB["EventHub: история и рассылка"]
+    ARC["HistoryArchive: история до сжатий"]
     SM["SessionManager"]
     STORES["CommentStore · AttachmentStore · MarkFiles · prefs · state"]
     FR["fileRoutes · git · system"]
@@ -28,6 +29,7 @@ flowchart LR
   HTTPC --> HTTP
   WSS --> SM
   SM --> HUB --> WSS
+  SM --> ARC
   SM --> SDK --> CLI
   HTTP --> FR
   HTTP --> STORES
@@ -38,7 +40,7 @@ flowchart LR
 
 | Пакет | Что внутри |
 |---|---|
-| `shared/` | Один файл, `shared/src/protocol.ts`: типы протокола (`ClientMessage`, `ServerEvent`, `Comment`, `Anchor`, `MediaShape`), валидатор `parseClientMessage` и версия `PROTOCOL`. Общий контракт web и server. |
+| `shared/` | Один файл, `shared/src/protocol.ts`: типы протокола (`ClientMessage`, `ServerEvent`, `AgentEvent`, `Comment`, `Anchor`, `MediaShape`), валидатор `parseClientMessage` и версия `PROTOCOL`. Общий контракт web и server. |
 | `server/` | Node ≥ 23.6 исполняет `.ts` напрямую, без сборки. Зависимости: `@anthropic-ai/claude-agent-sdk` и `ws`, больше ничего (HTTP-фреймворка нет). |
 | `web/` | React 19, Redux Toolkit 2, Radix UI, Tailwind 4, Vite 8. Markdown на `marked` + `dompurify` + `highlight.js` + `mermaid`. |
 | `bin/nota-bene.mjs` | Лаунчер: выбор порта, блокировка папки, сборка устаревшего `web/dist`, супервизия. |
@@ -73,36 +75,41 @@ sequenceDiagram
 | Модуль | Ответственность |
 |---|---|
 | `main.ts` | Разбор аргументов, выбор цели resume, код 98 при занятом порту, сторож лаунчера. |
-| `server.ts` | Композиция: создаёт хранилища, `SessionManager`, HTTP-роутер и WSS. Здесь же диспетчер WS-сообщений и связка «комментарии ↔ сессия». |
+| `server.ts` | Композиция: создаёт хранилища, `SessionManager`, HTTP-роутер и WSS. Здесь же диспетчер WS-сообщений и связка «комментарии ↔ сессия». Одна вкладка на окно: владелец-сокет, перезагрузка владельца в пределах 700 мс (grace) не считается второй вкладкой, пинг владельца раз в 30 с (нет pong — `terminate`), `takeover` (старому владельцу `taken-over` и закрытие кодом 4001), пассивное переподключение `?passive=1`. Сообщения, которые запрещают `capabilities` агента, отвергаются как `server-error`. |
 | `http.ts` | Без фреймворка. Порядок: Host allowlist → `/control/` (токен, без Origin) или Origin для не-GET → prefix-роуты (`/attach/`, `/marks/`, `/control/`) → точные роуты → `/info` → статика `web/dist` с SPA-фолбэком. |
-| `hub.ts` | `EventHub`: in-memory история событий текущей сессии. При подключении сокет получает `replay`, затем живые события. `reset()` подменяет историю (switch, `/clear`, restart). |
-| `session.ts` | `SessionManager`, ядро (669 строк): агент, очередь отправок, разрешения, режим, switch/restart, `/compact`/`/clear`, заголовок, статистика, idle-компакция. |
-| `agent/types.ts` | Интерфейсы `AgentBackend` / `AgentSession`, шов для подмены агента. |
+| `hub.ts` | `EventHub`: in-memory история событий текущей сессии. При подключении сокет получает `replay` (с `earlier` — числом архивных сегментов), затем живые события. `reset()` подменяет историю (switch, `/clear`, restart); `cut()` отрезает всё до границы компакции в архив, часть событий (ещё не завершённые отправки) остаётся и в истории, и в архиве. |
+| `archive.ts` | `HistoryArchive`: `history/<sid>.jsonl`, по строке на сегмент (разговор до очередного сжатия), fsync при записи, битая строка пропускается. Роут `/history?session=&before=`. |
+| `session.ts` | `SessionManager`, фасад (316 строк): `pump()` и склейка частей, публичные методы (`send`, `switchTo`, `restart`, `setMode`, …). |
+| `session/` | Части менеджера: `phase` (фаза `live / switching / closed`), `turns` (`TurnLedger`: учёт отправок), `permissions` (`PermissionBroker`), `title`, `agentSlot` (агент и поколение `gen`), `identity` (id, корень, модель, форк), `mode`, `sendQueue`, `target` (проверка цели switch), `archiveCut` (отрез по `compacted`), `history` (загрузка ленты), `idleWiring`, `images`, `options`, `types`. |
+| `agent/types.ts` | Интерфейсы `AgentBackend` / `AgentSession`, шов для подмены агента. Агент отдаёт `AgentEvent`; `capabilities` объявляют, что он умеет (режимы, команды, fork, idle-compact). |
 | `agent/claude/sdk.ts` | Реальный backend: `query()` со streaming input (`InputQueue`), `canUseTool` → `PermissionAsk`, preset-промпт `claude_code` + `APPEND` (mermaid, пути к файлам, батчи комментариев). |
+| `agent/claude/map.ts` | Перевод SDK-кадров в `AgentEvent`: единственное место, где ключи SDK попадают в поток. |
 | `agent/fake.ts` | Скриптуемый backend для e2e. |
 | `agent/claude/transcript.ts` | Транскрипт → `ServerEvent[]` для replay; картинки уходят в `AttachmentStore`. |
 | `comments.ts` | `CommentStore`: `comments/<sessionId>.json`. Сессия без id живёт в памяти, `adopt()` переносит её под настоящий id. |
 | `attachments.ts` | Content-addressed картинки (`sha256.ext`) до 3.75 МБ. `POST /attach`, `GET /attach/<id>`, восстановление из корзины. |
 | `marks.ts` | Единственная запись в папку проекта: `<root>/.nota-bene/marks/<commentId>/{frame.jpg,layer.png}`. Проверка magic bytes, запрет симлинков. |
 | `fileRoutes.ts`, `files.ts`, `git.ts` | `/tree`, `/file` (Range, sandbox-заголовки), `/complete`, `/sources`, `/git-status`. Источники: текущий checkout, другие worktree (с диска) и ветки (через git blobs). |
-| `system.ts` | Settings: about, prefs, storage и очистка в корзину, окна, контрольный токен. |
+| `system.ts` | Settings: about, prefs, storage (включая `history/`) и очистка в корзину (в том числе устаревших архивов), окна, контрольный токен. |
 | `prefs.ts`, `state.ts`, `windows.ts`, `migrate.ts` | JSON-файлы состояния (запись через tmp + rename) и разовый импорт состояния прототипа. |
 | `stats.ts`, `idle.ts` | Контекст, лимиты и стоимость (опрос SDK). Автокомпакция после простоя: 50 мин после хода, 15 мин без активности, контекст от 200k токенов. |
 
 ### 3.2 SessionManager: как устроен
 
-`createSessionManager` — замыкание с изменяемым состоянием. Объект с методами (`send`, `switch`, `restart`, `setMode`, …) отдаётся в `server.ts`.
+`createSessionManager` — фасад в `session.ts`: он владеет `pump()` и связывает части из `session/`. Каждая часть владеет своим состоянием, строгость — там, где переход делает сам сервер.
 
-Ключевые механизмы:
-
-- **Поколение `gen`.** Растёт при каждом teardown (switch, close). Всё, что старый агент может прислать позже (сообщения, запросы разрешений, ответы на mode и title, отложенный send), несёт своё `g` и отбрасывается при `g !== gen`. Это главная защита от утечки событий старой сессии в новую.
+- **Фаза окна (`Phase`).** `live → switching → live` и необратимый `closed`. Закрытие посреди switch делает фазу `closed` сразу, но `switching` держится до `endSwitch()`; новый агент не стартует.
+- **Учёт отправок (`TurnLedger`).** Каждая отправка: `queued → running → answered | cancelled | failed`. Флаги `/clear` и `/compact` (`commandDue`, сброс, компакция внутри хода) живут здесь же. Строго там, где шаг делает сервер; терпимо там, где его делает CLI (turn-end по неизвестному или уже закрытому id игнорируется).
+- **Агент и поколение (`AgentSlot`).** Поколение `gen` растёт при каждом teardown (switch, close). Всё, что старый агент может прислать позже (сообщения, запросы разрешений, ответы на mode и title, отложенный send), несёт своё `g` и отбрасывается при `g !== gen`. Это главная защита от утечки событий старой сессии в новую.
+- **`SendQueue`** заменила `chain`: отправки уходят агенту по одной, так что interrupt `force`-отправки приходит после предыдущих отправок и до неё; отправка из прошлого поколения тихо отбрасывается.
+- **`PermissionBroker`**: запрос `open → answered | aborted`; ответ на неизвестный или закрытый запрос игнорируется (второй сокет, клик после отзыва).
 - **`pump()`** читает `a.messages` — поток `AgentEvent` (SDK-кадры переводит `agent/claude/map.ts`):
   - сводит `waiting` с `turn-end` по `answers` и с `cancelled`;
   - перехватывает `reset` (`/clear`);
   - следит за `init` (id сессии, модель, режим, запись в `sessions.json`) и `compacted`;
   - всё, кроме `init` и `rate-limit` (они внутренние), отдаёт в hub как `{kind:'agent', e}` (протокол 5).
-- **`chain`** — promise-цепочка, сохраняющая порядок «interrupt → send» для `force`-отправок.
-- **`switchTo`**: проверка цели → teardown (`gen++`, close агента, ожидание конца loop не дольше 5 с) → новое состояние → `load()` (`hub.reset` + replay транскрипта + `resumed`) → mode/idle/stats → `onSwitch`-слушатели → `ensureAgent()`. Новую сессию можно открыть только в текущем корне или в папке, где сессии уже есть: локальный клиент не должен переукоренить `/file` на `/` или `~`.
+- **Отрез по компакции (`archiveCut`).** После события `compacted`, в том же синхронном шаге, где проверено поколение, `hub.cut()` пишет в архив разговор до границы; в replay остаётся то, что после неё, плюс ещё не завершённые отправки (в том числе сам `/compact`). Ошибка записи сообщается и ничего не режет. У разговора без собственного id (новая сессия до `init`, форк до нового id, сессия после `/clear`) отреза нет, и **форк никогда не предлагает архив родителя**: `SessionIdentity.ownId` для него `null`, `earlier` в replay равен 0, `/history` отвечает 409.
+- **`switchTo`**: проверка цели (`target`) → teardown (`gen++`, close агента, ожидание конца loop не дольше 5 с) → новое состояние → `load()` (`hub.reset` + replay транскрипта + `resumed`) → mode/idle/stats → `onSwitch`-слушатели → `ensureAgent()`. Новую сессию можно открыть только в текущем корне или в папке, где сессии уже есть: локальный клиент не должен переукоренить `/file` на `/` или `~`.
 - **`restart`** — `switchTo(sessionId, root, restart=true)`. Это аварийный выход: он разрешён и при занятом агенте (interrupt не дольше 2 с).
 
 ### 3.3 Протокол
@@ -111,14 +118,14 @@ sequenceDiagram
 
 | Канал | Что идёт | Почему так |
 |---|---|---|
-| **WebSocket `/ws`** | Живое состояние сессии: `sdk`, `user`, `permission*`, `session`, `mode`, `stats`, `comments`, `idle-compact`, `hello`, `send-refused`, `server-error` | Нужен push и общий порядок событий для всех вкладок. |
-| **HTTP** | Файлы, дерево, поиск, вложения, разметка медиа, список сессий, Settings, `/info`, `/restart-server` | Запрос–ответ, кешируемо, Range для видео. |
+| **WebSocket `/ws`** | Живое состояние сессии: `agent` (`AgentEvent`), `user`, `permission*`, `session`, `mode`, `stats`, `comments`, `idle-compact`, `hello{capabilities}`, `replay{earlier}`, `send-refused`, `server-error`; владение окном: `occupied`, `taken-over`, от клиента `takeover`, закрытие кодом 4001 | Нужен push и порядок событий; приёмник один — вкладка-владелец. |
+| **HTTP** | Файлы, дерево, поиск, вложения, разметка медиа, список сессий, `/history` (архив до сжатий), Settings, `/info`, `/restart-server` | Запрос–ответ, кешируемо, Range для видео. |
 
 Правила протокола:
 
 - `parseClientMessage` строго валидирует входящие сообщения и **пересобирает их только из известных полей** (`toComment`, `toAnchor`), так что посторонние ключи не попадают ни в хранилище, ни в рассылку.
 - **Эпизодические события** не хранятся в истории (`store:false`): `comments`, `stats`, `mode`, `idle-compact`. При подключении сокет получает их отдельными кадрами после replay, последним идёт `hello{protocol}`.
-- **Версионирование.** Все окна раздают один общий `web/dist`, поэтому перезагруженная страница может оказаться новее своего сервера. Клиент шлёт новые типы сообщений только серверу, который объявил нужный `PROTOCOL` (сейчас 5).
+- **Версионирование.** Все окна раздают один общий `web/dist`, поэтому перезагруженная страница может оказаться новее своего сервера. Клиент шлёт новые типы сообщений только серверу, который объявил нужный `PROTOCOL` (сейчас 5). Протокол 5: поток `agent` вместо сырых SDK-кадров, `replay.earlier`, одна вкладка на окно (`occupied`, `taken-over`, `takeover`, код 4001, `?tab=` и `?passive=1` в url сокета), `hello.capabilities`. Обратный перекос (страница новее сервера) защищён тем, что `default`-ветки редьюсеров возвращают state для неизвестного `kind` и `t`, а не падают; порядок при выкладке — сначала рестарт сервера, потом перезагрузка страницы.
 
 ### 3.4 Хранилища (сервер)
 
@@ -128,13 +135,14 @@ sequenceDiagram
 ├── prefs.json             modes[root], idleCompact[root], defaultMode, lang
 ├── comments/<sid>.json    комментарии сессии (pending + sent)
 ├── attachments/<sha>.<ext>, trash/attachments/<stamp>/
+├── history/<sid>.jsonl    архив разговора до каждого сжатия, trash/history/<stamp>/
 ├── windows/<port>.json    реестр окон
 ├── locks/<hash>           блокировки запуска
 └── control-token          межоконный токен (600)
 <project>/.nota-bene/marks/<commentId>/{frame.jpg,layer.png}
 ```
 
-Источником истины для ленты служит **транскрипт Claude Code** (`~/.claude/projects/...`): сервер своей копии ленты не хранит. После рестарта лента восстанавливается из транскрипта через `backend.history()`.
+Источник ленты — **транскрипт Claude Code** (`~/.claude/projects/...`), но SDK воспроизводит сессию только с последней компакции. Разговор до каждой компакции сервер хранит сам в `history/<sid>.jsonl` (`HistoryArchive`, потоковые кадры не пишутся); после последней компакции источник по-прежнему транскрипт. После рестарта лента восстанавливается из транскрипта через `backend.history()`, а число архивных сегментов приходит в `replay.earlier`.
 
 ## 4. Веб-клиент
 
@@ -144,32 +152,33 @@ sequenceDiagram
 
 | Каталог | Содержимое |
 |---|---|
-| `store/` | `store.ts` (сборка store, socket, middleware, persistence-подписчик) и `feed.ts` (чистый редьюсер ленты из SDK-кадров). |
-| `net/socket.ts` | WebSocket с автопереподключением через 1 с. В Redux не попадает. |
-| `feed/` | Рендер ленты: Markdown, ToolLine, PermissionCard, PlanCard, DoneLine. |
+| `store/` | `store.ts` (сборка store, socket, middleware), `persist.ts` (listener middleware: сохранение UI-состояния, вместо `store.subscribe`) и `feed.ts` (чистый редьюсер ленты из `AgentEvent`, плюс `prependHistory`). |
+| `net/socket.ts` | WebSocket с автопереподключением через 1 с; `open` значит «подключён» (пришёл replay), а не открытие сокета; после 4001 переподключения нет, есть `reconnect()` по клику. В Redux не попадает. |
+| `feed/` | Рендер ленты: Markdown, ToolLine, PermissionCard, PlanCard, DoneLine; `EarlierButton` «Показать до сжатия» и `history.ts` (`GET /history`). |
+| `diagram/` | Вкладка с диаграммой (mermaid): рендер, зум. |
 | `composer/` | Поле ввода, `@`-упоминания (`/complete`), откат отклонённой отправки (`refused.ts`). |
 | `comments/` | Выделение → popup → карточка, панель, `HighlightLayer`, сборка батча (`compose.ts`, `send.ts`), метки, эмодзи. |
 | `anchors/` | Якоря как текстовые смещения плюс `quote/prefix/suffix` по 32 символа, повторная привязка при изменении текста (`resolve.ts`). |
-| `files/`, `tree/`, `tabs/` | Дерево, просмотр файлов, иконки, недавние (Alt+E), источники (ветки и worktree), вкладки и меню ▾. |
+| `files/`, `tree/`, `tabs/` | Дерево, просмотр файлов, иконки, недавние (Alt+E), источники (ветки и worktree), вкладки и меню ▾. Подпапки: `files/tree` (`TreeRow`, `useTreeEntries`), `files/view` (`TextBody`, `MediaBody`, `useFileLoad`), `comments/card` (`CardActions`, `useCommentSource`). |
 | `media/` | `MediaController` (пауза и PiP между вкладками), разметка `markup/` (геометрия 0..1, рендер в `frame.jpg` + `layer.png`). |
 | `controls/` | Режим, переключатель сессий, compact/clear, restart, idle-компакция. |
-| `settings/`, `shell/`, `stats/`, `tasks/` | Вкладка Settings; шапка, футер, полосы, keymap, тосты, favicon; метры; фоновые задачи. |
+| `settings/`, `shell/`, `stats/`, `tasks/` | Вкладка Settings; шапка, футер, полосы, keymap, тосты, favicon, `OneTab` (оверлей «окно занято» / «открыто в другой вкладке»); метры; фоновые задачи. |
 | `refs/` | Распознавание путей в тексте и переход в файл (`src/a.ts:42`). |
 | `components/ui/` | Обёртки над Radix (shadcn-стиль). |
 | `i18n/` | `ru` / `en`, без библиотеки. |
 
 ### 4.2 Store
 
-11 слайсов: `feed`, `conn`, `comments`, `composer`, `tabs`, `tree`, `files`, `controls`, `stats`, `tasks`, `markup`.
+12 слайсов: `feed`, `conn`, `comments`, `composer`, `tabs`, `tree`, `files`, `controls`, `stats`, `tasks`, `markup`, `feedUi`.
 
 ```mermaid
 flowchart TB
   WS["socket.onmessage"] -->|"serverEvent(ev) — единственный вход серверных данных"| MW
   subgraph MW["middleware"]
-    CL["controlsListener (prepend)"] --> TH["thunk {extra: send}"] --> TO["toast"] --> CT["compactTiming"] --> RF["refused"] --> MD["media"]
+    CL["controlsListener · persist (prepend)"] --> TH["thunk {extra: send, takeOver}"] --> TO["toast"] --> CT["compactTiming"] --> RF["refused"] --> MD["media"]
   end
   MW --> R["reducers: feed · comments · controls · stats · tasks · …"]
-  R --> SUB["store.subscribe: localStorage<br/>panel:*, tabs:root, tree:root, recent:root; enterRoot при смене корня"]
+  R --> SUB["persist (listener middleware): localStorage<br/>panel:*, tabs:root, tree:root, recent:root; enterRoot при смене корня"]
   UI["компоненты"] -->|"thunks: sendMessage, sendBatch, pickMode…"| TH
   TH -->|"send(ClientMessage)"| WS2["socket.send"]
 ```
@@ -177,9 +186,9 @@ flowchart TB
 Принципы:
 
 - **Один вход.** Серверные данные приходят только как action `serverEvent(ev)`. Его обрабатывают сразу несколько слайсов через `extraReducers`. Редьюсер ленты `reduce()` — чистая функция, поэтому replay детерминирован.
-- **Несериализуемое вне state.** Сокет живёт в замыкании `makeStore` и доступен thunk'ам через `extraArgument.send`. `MediaController` (держит DOM-элементы) лежит в `WeakMap` и достаётся хуком `useMedia`.
+- **Несериализуемое вне state.** Сокет живёт в замыкании `makeStore` и доступен thunk'ам через `extraArgument` (`send`, `takeOver`). `MediaController` (держит DOM-элементы) лежит в `WeakMap` и достаётся хуком `useMedia`.
 - **Побочные эффекты — в middleware, а не в редьюсерах**: тосты, отслеживание PiP и паузы, откат черновика при `send-refused`.
-- **Persistence UI** сосредоточена в одном `store.subscribe` в `store.ts`. Он же при смене корня (`feed.session.root`) читает сохранённые вкладки и дерево этого корня и диспатчит `enterRoot`.
+- **Persistence UI** сосредоточена в `store/persist.ts`: по listener'у на каждую заботу, каждый сравнивает state до и после action. При смене корня (`feed.session.root`) первый listener читает сохранённые вкладки и дерево этого корня и диспатчит `enterRoot`; он зарегистрирован первым, поэтому остальные видят уже восстановленное.
 - **Pending-состояние отправки** без оптимистичных обновлений: комментарий становится `sent` только по эхо сервера, до этого его id лежат в `sendingIds`.
 
 ### 4.3 Композиция UI
@@ -188,11 +197,12 @@ flowchart TB
 App
 ├── Header (сессия, режим, ⚙, язык, ↻ + ▾ RestartMenu)
 ├── LeftStrip · FileTree (key=rootGen) │ TabStrip + TabsMenu │ CommentsPanel · RightStrip
-│                                       Panes: chat (Feed + HighlightLayer) | FileView×N | Settings
+│                                       Panes: chat (Feed + HighlightLayer) | FileView×N | DiagramView | Settings
 │                                       Footer (Composer, метры, задачи)
-└── оверлеи: SelectionButton, CommentPopup, CommentCardPopover, Toasts, RecentFiles
+└── оверлеи: SelectionButton, CommentPopup, CommentCardPopover, Toasts, RecentFiles, OneTab
 ```
 
+- **Крупные компоненты разнесены на композицию:** `FileTree` = `TreeHeader` + `TreeRow` + хуки `useTreeEntries`/`useExpandAll`; `FileView` = `TextBody`/`MediaBody` + `useFileLoad`/`useMediaMarkup`; `CommentCard` = `CardActions` + `useCommentSource`.
 - **Панели закреплены** (R-M6-3): открытая панель сужает среднюю колонку, а не перекрывает её.
 - **Все панели вкладок остаются смонтированными**, неактивные просто `hidden`. На стабильный DOM чата опираются якоря, `HighlightLayer` и автоскролл.
 - **Подсветка** рисуется прямоугольниками `Range.getClientRects()` в слое поверх контента, DOM текста не трогается.
@@ -202,8 +212,9 @@ App
 
 | Клиент | Сервер | Назначение |
 |---|---|---|
-| `store.ts` → `net/socket.ts` | `/ws` | Всё живое состояние сессии. |
-| `comments/slice.ts` (`resyncComments`, add/edit/remove) | WS `comments` (полный набор) | Синхронизация комментариев; сервер делает `merge`, защищая `sent`. |
+| `store.ts` → `net/socket.ts` | `/ws?tab=<id>` (`&passive=1` у занятой или перехваченной вкладки) | Всё живое состояние сессии. |
+| `feed/history.ts`, `feed/EarlierButton.tsx` | `GET /history?session&before` | Архивный сегмент до сжатия; 409 для не текущей сессии, 404 если сегмента нет. |
+| `comments/slice.ts` (`resyncComments`, add/edit/remove) | WS `comments` (полный набор) | Синхронизация комментариев; сервер делает `merge`, защищая `sent`. Пишет только вкладка-владелец. |
 | `comments/send.ts` → `sendMessage` | WS `send{commentIds, images}` | Батч: черновик + все pending-комментарии одним сообщением. |
 | `attachments/image.ts` | `POST /attach`, `GET /attach/<id>` | Загрузка картинок; по сокету ходят только id. |
 | `media/markup/createMediaComment.ts` | `POST/DELETE /marks/<id>/<name>` | Кадр и слой разметки медиа. |
@@ -232,21 +243,41 @@ sequenceDiagram
   S->>SV: WS send{id, text, commentIds, images}
   S->>S: draftSent, markSending(ids), активировать чат
   SV->>CS: markSent(ids) до вызова агента
-  SV-->>S: comments (все вкладки)
+  SV-->>S: comments (владельцу)
   SV->>SM: send()
   SM-->>S: user (эхо в ленту)
   SM->>A: SDKUserMessage (текст + пары [метка, картинка])
   A-->>SM: stream_event / assistant / result
-  SM-->>S: sdk-кадры → reduce() → лента
+  SM-->>S: agent-события → reduce() → лента
 ```
 
 **Смена сессии или папки:**
 
 1. Клиент шлёт `switch{id, dir}`.
 2. `checkTarget` проверяет цель, затем teardown с `gen++`.
-3. `hub.reset(transcript)` перерисовывает ленту во всех вкладках.
-4. Сервер шлёт `session{root}`, и `store.subscribe` видит новый корень: `enterRoot` (вкладки и дерево этого корня), `rootGen++` (перемонтирование `FileTree` и `FileView`), сброс кешей.
+3. `hub.reset(transcript)` перерисовывает ленту у владельца.
+4. Сервер шлёт `session{root}`, и listener в `persist` видит новый корень: `enterRoot` (вкладки и дерево этого корня), `rootGen++` (перемонтирование `FileTree` и `FileView`), сброс кешей.
 5. `onSwitch` присылает комментарии новой сессии.
+
+**Компакция и «Показать до сжатия»:**
+
+1. Агент присылает `compacted`; `pump()` отдаёт его в hub, затем `archiveCut.cut()` (в том же синхронном шаге, где проверено поколение).
+2. `hub.cut()` пишет в `history/<sid>.jsonl` всё до границы (сегмент `n`), оставляя в истории то, что после неё и ещё не завершённые отправки. Ни один живой сокет об отрезе не слышит: у них лента уже полная.
+3. Перезагруженная страница получает короткий `replay` с `earlier = n`, лента показывает кнопку «Показать до сжатия».
+4. Клик: `GET /history?session=<id>&before=earlier+1` → `prependHistory` вставляет сегмент перед лентой, `earlier` уменьшается; пустой 404 убирает кнопку, 409 (разговор уже другой) показывает ошибку.
+
+**Перехват окна (takeover):**
+
+1. Вторая вкладка подключается, владелец есть: через 700 мс она получает `occupied` и показывает оверлей «Окно уже открыто в другой вкладке».
+2. «Работать здесь» шлёт `takeover`. Сервер шлёт старому владельцу `taken-over`, отцепляет его и закрывает кодом 4001; новая вкладка прикрепляется как при обычном подключении и получает `replay`.
+3. Старая вкладка показывает «Открыто в другой вкладке» с той же кнопкой «Работать здесь» и не переподключается сама; её несинхронизированные правки комментариев отбрасываются.
+
+**Перезагрузка владельца в пределах grace:**
+
+1. Новая страница получает новый `?tab=<id>`, а сокет старой ещё не закрыт: сервер держит новый сокет в ожидании (`pending`), оверлея нет.
+2. Старый сокет закрывается в пределах 700 мс (`owner` пуст) — новичок становится владельцем и получает `replay`. Не закрылся — новичок получает `occupied`.
+3. Тот же `tab` у владельца значит переподключение той же страницы после обрыва (старый сокет — зомби): его закрывают сразу, без ожидания.
+4. После рестарта сервера обе вкладки переподключаются пассивно (`&passive=1`): пассивный сокет не может занять пустое окно первым, он получает `occupied` и работает дальше только по клику «Работать здесь».
 
 ## 6. Безопасность (локальная модель угроз)
 
@@ -261,8 +292,8 @@ sequenceDiagram
 
 ## 7. Тестирование
 
-- **Unit (vitest, 1187).** Сервер тестируется через `startServer` на порту 0 с фейковым backend. Web — через `makeStore` с подменой `connect` и `pip`.
-- **E2E (Playwright, 54, порты 4791–4795)** на `--fake`-скриптах, медиа-фикстуры генерируются через ffmpeg.
+- **Unit (vitest, 1450).** Сервер тестируется через `startServer` на порту 0 с фейковым backend. Web — через `makeStore` с подменой `connect` и `pip`.
+- **E2E (Playwright, 48, порты 4791–4795)** на `--fake`-скриптах, медиа-фикстуры генерируются через ffmpeg.
 - **Шов `AgentBackend`** — главная причина, по которой почти всё тестируется без настоящего CLI.
 
 ## 8. Критическая оценка
@@ -276,29 +307,17 @@ sequenceDiagram
 - отсутствие лишних зависимостей на сервере;
 - хорошая тестируемость через шов backend.
 
-Слабые места по убыванию риска:
+Слабые места (оценка до M7; сделанное отмечено):
 
-1. **Web зависит от формы SDK-сообщений.**
-   - **Проблема.** Сервер пробрасывает сырые `SDKMessage` (`{kind:'sdk', m}`), а `web/src/store/feed.ts` разбирает их по «свободному» типу `Sdk`. Вдобавок `agent/claude/sdk.ts` использует непубличные API: `q.request({subtype:'file_suggestions'})` и `usage_EXPERIMENTAL_...`.
-   - **Риск.** Обновление SDK может сломать ленту в браузере без единой ошибки компиляции.
-   - **Что бы я сделал.** Нормализовать кадры на сервере в собственный узкий `FeedEvent` (text delta, tool start/result, done, marker) и закрепить версию SDK, прогоняя `server/test/fixtures/real-frames.json` при каждом обновлении. Переписывать редьюсер ленты при этом не нужно: он переедет на сервер почти целиком, и replay останется детерминированным.
-   - **Когда это не нужно.** Если обновлять SDK только вручную и с фикстурами, хватит pin + контрактного теста на фикстурах. Это дешевле и закрывает ~80% риска. Начал бы с этого.
-2. **`SessionManager` — неявная машина состояний.**
-   - **Проблема.** 669 строк в одном замыкании с флагами `switching`, `clearSent`, `clearResultDue`, `forkPending`, `compactedInTurn`, `closed` и множествами `waiting`, `pending`, `commandIds`. Корректность держится на комментариях и тестах, а не на структуре.
-   - **Что бы я сделал.** Вынести явное состояние `idle | turn | switching | closed` и выделить `/clear`/`/compact`-учёт в отдельный модуль.
-   - **Стоимость и риск.** Средняя стоимость, высокий риск регрессий. Делать только вместе с новыми фичами сессии (например, M2), а не отдельным рефакторингом.
-3. **Persistence-подписчик в `store.ts` реентерабелен.**
-   - **Проблема.** Он диспатчит `enterRoot` изнутри `subscribe`, а дальше вынужден перечитывать state («`st` is stale now»). Этот хрупкий узел уже был источником багов.
-   - **Что бы я сделал.** Перенести в `createListenerMiddleware` (он уже используется для controls): по одному listener'у на ключ и `enterRoot` как реакция на `serverEvent(session)`.
-   - **Стоимость.** Дёшево, низкий риск, хорошо покрыто тестами. Это первый кандидат на ближайшую уборку.
+1. **Web зависел от формы SDK-сообщений. Сделано (M7).** Сервер отдаёт собственный поток `AgentEvent` (`agent/claude/map.ts` — единственный мост), `web/src/store/feed.ts` разбирает его, а не сырые `SDKMessage`; возможности агента объявляет `capabilities`. Остаётся: `agent/claude/sdk.ts` использует непубличные API (`q.request({subtype:'file_suggestions'})`, `usage_EXPERIMENTAL_...`), поэтому SDK обновлять вручную и с прогоном `server/test/fixtures/real-frames.json`.
+2. **`SessionManager` — неявная машина состояний. Сделано (M7).** Фасад в 316 строк и части `session/`: `Phase`, `TurnLedger`, `AgentSlot`, `SendQueue`, `PermissionBroker`; строгие переходы там, где шаг делает сервер.
+3. **Persistence-подписчик в `store.ts` был реентерабелен. Сделано (M7).** Перенесён в listener middleware (`store/persist.ts`).
 4. **Комментарии синхронизируются полным набором.**
-   - **Проблема.** Каждое изменение отправляет весь массив. Сервер защищает только `sent`; для `pending` действует last-writer-wins между вкладками.
-   - **Когда станет проблемой.** Для одного пользователя с одной-двумя вкладками это приемлемо. Проблема появится при долгих сессиях с сотнями комментариев или при активной работе из двух вкладок сразу. Тогда стоит перейти на операции `add / edit / remove` с id.
-5. **История `EventHub` растёт без ограничений** в течение сессии и целиком уходит каждому новому сокету. После `/compact` старые кадры остаются. Сейчас это незаметно; если перезагрузка в длинной сессии станет медленной, первое лекарство — отдавать replay только с последнего `compact_boundary` и подгружать остальное по запросу.
-6. **Крупные компоненты.** `FileView.tsx` (372 строки), `CommentCard.tsx` (325), `FileTree.tsx` (313) смешивают загрузку данных и рендер. Выносить хуки (`useFileProbe`, `useTreeLoader`) стоит, когда в них в следующий раз придётся вносить изменения.
-7. **Общий `web/dist` на все окна** порождает рассинхрон версий страницы и сервера, отсюда механизм `PROTOCOL`. Это осознанный компромисс (одна сборка, мгновенное обновление через reload). Цена — каждое новое сообщение протокола требует проверки версии на клиенте.
-
-**Если делать одно:** пункт 3 (дёшево, убирает известный источник багов), затем pin SDK с контрактным тестом на фикстурах из пункта 1. Пункт 2 — только вместе с M2.
+   - **Проблема.** Каждое изменение отправляет весь массив. Сервер защищает только `sent`; для `pending` действует last-writer-wins.
+   - **Что изменила M7.** Одна вкладка на окно: пишет только владелец, гонка между вкладками возможна лишь в зазоре перехвата (несинхронизированные правки занятой и перехваченной вкладки отбрасываются при `occupied`/`taken`). Операции `add / edit / remove` с id нужны, если появится другой источник правок или сотни комментариев.
+5. **История `EventHub` росла без ограничений. Сделано (M7).** Replay начинается с последней компакции, остальное лежит в `history/<sid>.jsonl` и догружается по запросу («Показать до сжатия»). Остаётся рост истории внутри одного периода между компакциями — незаметен.
+6. **Крупные компоненты. Сделано (M7).** `FileView`, `CommentCard`, `FileTree` разнесены на композицию (`files/view`, `comments/card`, `files/tree`): хуки загрузки отдельно от рендера.
+7. **Общий `web/dist` на все окна** порождает рассинхрон версий страницы и сервера, отсюда механизм `PROTOCOL`. Это осознанный компромисс (одна сборка, мгновенное обновление через reload). Цена — каждое новое сообщение протокола требует проверки версии на клиенте. Обратный перекос (новая страница, старый сервер): неизвестные `kind` и `t` не должны ронять редьюсеры (`default` возвращает state), а при выкладке сначала перезапускают сервер, потом перезагружают страницу.
 
 ## 9. Решения по итогам ревью (2026-10-27)
 

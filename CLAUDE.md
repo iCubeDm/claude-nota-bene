@@ -32,14 +32,18 @@ State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the re
 - `attachments/<sha256>.<ext>` — pasted images, content-addressed; only ids travel over the socket
 - `windows/<port>.json` — the window registry (`root`, `pid`, `launcherPid`, `startedAt`)
 - `locks/<hash>` — per-folder launch locks
+- `history/<sessionId>.jsonl` — the archive of the conversation before each compaction, one line per segment (the SDK replays a session only from its last compaction)
+- `trash/` — `attachments/` and `history/` subfolders: what Settings → Storage "clean" moved (never deleted)
 
-Server routes besides the app: `/info`, `/ws`, `/tree`, `/file` (Range; sandboxed headers), `/complete` (`@` search), `/attach` (POST image, GET `/attach/<id>`), `/sources` (this checkout, other worktrees and branches; read-only, `src=` on `/tree` `/file` `/complete`), `/sessions` (all Claude Code sessions with their cwd, for the picker).
+Server routes besides the app: `/info`, `/ws`, `/tree`, `/file` (Range; sandboxed headers), `/complete` (`@` search), `/attach` (POST image, GET `/attach/<id>`), `/sources` (this checkout, other worktrees and branches; read-only, `src=` on `/tree` `/file` `/complete`), `/sessions` (all Claude Code sessions with their cwd, for the picker), `/history?session=&before=` (one archived segment; 409 for a session that is not the current conversation, 404 when there is none).
+
+One tab per window: the first socket owns the session; a second tab gets "Окно уже открыто в другой вкладке" and can take over ("Работать здесь"), after which the old tab gets close code 4001 and shows the overlay too. A reload of the owner within 700 ms is not a second tab. Tests that need several sockets pass `oneTab: false` to `startServer`.
 
 Session switch and ↻ are in-process: the server closes the SDK query and resumes (another) session, possibly re-rooting to another project folder; a new session may only start in the current root or in a folder that already has sessions.
 
 Restart semantics: ↻ restarts the agent, not the server process; it stays available while the agent is busy (escape hatch). The ↻ menu also has "Restart the server", shown only when `/info.supervised` is true (the window runs under the launcher): the server exits with code 75 and the launcher relaunches it with `--continue`, so the session resumes. Under `npm start` / `npm run dev` there is no such item.
 
-Smoke hygiene (manual run with the real agent): use a temp `NOTA_BENE_HOME`, a temp `CLAUDE_JOURNAL_VAULT` (or the agent in the temp project follows the global journal protocol and writes into the real vault) and `NOTA_BENE_PROTOTYPE_SESSIONS=off`, on port 4790. Afterwards move the temp projects' transcripts (`~/.claude/projects/-private-tmp-nb-*`) to the Trash, or they clutter the session picker.
+Smoke hygiene (manual run with the real agent): restart the server before reloading the page (a new page against an old server is the reverse version skew); use a temp `NOTA_BENE_HOME`, a temp `CLAUDE_JOURNAL_VAULT` (or the agent in the temp project follows the global journal protocol and writes into the real vault) and `NOTA_BENE_PROTOTYPE_SESSIONS=off`, on port 4790. Afterwards move the temp projects' transcripts (`~/.claude/projects/-private-tmp-nb-*`) to the Trash, or they clutter the session picker.
 
 ## You may be running inside this tool
 
@@ -50,6 +54,7 @@ Rebuild window:
 - Changes to `web/` take effect after `npm run build -w web` and a page reload (tell the user to reload). "Restart the server" (exit 75) does NOT rebuild `web/dist`; only a new launcher run does (it rebuilds a stale one).
 - Changes to `server/` (or `shared/`) need a server restart: ask the user to open the ▾ menu next to "↻ Agent" and pick "Restart the server"; the session resumes automatically. **Do not kill, restart or curl your own window's server** — that kills your own turn. Finish the turn first.
 - Before asking for "Restart the server", check the edit: run `npx tsc -b`, then start the server once on 4790 with a temp project and temp `NOTA_BENE_HOME` (`node server/src/main.ts <tmpdir> --port 4790`), see it answer `/info`, and stop it. A broken server edit crash-loops under the launcher, which gives up after 5 crashes — the window does not come back and the user has to relaunch it.
+- Opening a second browser tab on your own window (a manual check, say) is parked behind the "already open" overlay, and clicking "Работать здесь" there parks the user's tab (4001); check on a separate 4790 window instead.
 - Test server changes on a separate port (4790) with a temp project dir and temp `NOTA_BENE_HOME`, never on a live window's port.
 
 Prototype window (only while some are still running during the transition; the prototype is not changed any more):
