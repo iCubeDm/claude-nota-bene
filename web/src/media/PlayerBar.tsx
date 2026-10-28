@@ -4,9 +4,10 @@ import { selectFileVersion } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector, useMedia } from '@/store/store.ts';
 import { changedSince } from './markup/MediaMarks.tsx';
-import { BarButton, SpeedMenu, VolumeControl } from './PlayerControls.tsx';
+import { BarButton, ChoiceMenu, SPEEDS, VolumeControl } from './PlayerControls.tsx';
 import { applyPlayerKey, startAnnotate, type Flash } from './playerKeys.ts';
 import { EnterFullscreenIcon, ExitFullscreenIcon, PauseIcon, PencilIcon, PipIcon, PlayIcon, ReplayIcon } from './playerIcons.tsx';
+import { SEEK_STEPS, seekStep, useSeekStep, type SeekStepValue } from './seekStep.ts';
 import { Timeline } from './Timeline.tsx';
 import { BAR_MIN_PX, useBarRect } from './useBarRect.ts';
 import { formatTime, type MarkerIn } from './timelineMath.ts';
@@ -96,6 +97,7 @@ export function PlayerBar({ media, box, tabId, path = '', refName, flash, onTick
   const visible = useBarVisible(box, state.paused, menu || scrub || hover, flash);
   const show = !video || visible;
   const unit = t('unitSec');
+  const step = useSeekStep();
   const key = (code: string) => void applyPlayerKey(media, code, unit, box.current);
 
   const label = state.ended ? 'pb_replay' : state.paused ? 'pb_play' : 'pb_pause';
@@ -122,7 +124,8 @@ export function PlayerBar({ media, box, tabId, path = '', refName, flash, onTick
           <VolumeControl media={media} state={state} onMute={() => key('KeyM')} />
           <span className="ml-1 text-[13px] tabular-nums opacity-90">{formatTime(state.time)} / {formatTime(state.duration)}</span>
           <span className="flex-1" />
-          {!compact && <SpeedMenu media={media} rate={state.rate} onOpen={setMenu} />}
+          {!compact && <ChoiceMenu label={t('pb_seekStep')} options={SEEK_STEPS} value={step} text={(v) => `±${v} ${unit}`} item={(v) => `${v} ${unit}`} onPick={(v) => seekStep.set(v as SeekStepValue)} onOpen={setMenu} />}
+          {!compact && <ChoiceMenu label={t('pb_speed')} options={SPEEDS} value={state.rate} text={(r) => `${r}×`} onPick={(r) => void (media.playbackRate = r)} onOpen={setMenu} />}
           {video && offered && tabId && <BarButton label={t('pb_annotate')} onClick={() => startAnnotate(dispatch, tabId, media)}><PencilIcon /></BarButton>}
           {pip && <BarButton label={t('pb_pip')} onClick={() => void ctl.togglePip(media)}><PipIcon /></BarButton>}
           {video && <BarButton label={t(fs ? 'pb_exitFullscreen' : 'pb_fullscreen')} onClick={() => key('KeyF')}>{fs ? <ExitFullscreenIcon /> : <EnterFullscreenIcon />}</BarButton>}

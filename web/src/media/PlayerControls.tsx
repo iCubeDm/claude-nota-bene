@@ -74,9 +74,14 @@ export function VolumeControl({ media, state, onMute }: { media: HTMLMediaElemen
 
 export const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 
-/** The speed button ("1×") and its menu. `onOpen` tells the bar to stay visible while the menu is open. */
-export function SpeedMenu({ media, rate, onOpen }: { media: HTMLMediaElement; rate: number; onOpen: (open: boolean) => void }) {
-  const t = useT();
+/**
+ * A bar chip with a menu of choices (radio items, the current one checked and focused on open); speed and the seek step
+ * use it. `onOpen` tells the bar to stay visible while the menu is open. Esc and an outside press close it.
+ */
+export function ChoiceMenu({ label, options, value, text, item = text, onPick, onOpen }: {
+  /** `text`: the chip; `item`: a menu row (the chip's text unless given). */
+  label: string; options: readonly number[]; value: number; text: (v: number) => string; item?: (v: number) => string; onPick: (v: number) => void; onOpen: (open: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -106,27 +111,27 @@ export function SpeedMenu({ media, rate, onOpen }: { media: HTMLMediaElement; ra
       <button
         ref={btn}
         type="button"
-        aria-label={t('pb_speed')}
-        title={t('pb_speed')}
+        aria-label={label}
+        title={label}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => toggle(!open)}
         className="h-8 min-w-9 cursor-pointer rounded-full px-2 text-[13px] font-medium text-white/90 tabular-nums outline-none hover:bg-white/15 hover:text-white focus-visible:ring-2 focus-visible:ring-primary"
       >
-        {rate}×
+        {text(value)}
       </button>
       {open && (
-        <div role="menu" aria-label={t('pb_speed')} className="absolute right-0 bottom-full z-10 mb-2 min-w-20 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md">
-          {SPEEDS.map((r) => (
+        <div role="menu" aria-label={label} className="absolute right-0 bottom-full z-10 mb-2 min-w-20 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-md">
+          {options.map((o) => (
             <button
-              key={r}
+              key={o}
               type="button"
               role="menuitemradio"
-              aria-checked={r === rate}
-              onClick={() => { media.playbackRate = r; toggle(false); btn.current?.focus(); }}
-              className={`flex w-full cursor-pointer items-center rounded-md px-2 py-1 text-xs outline-none hover:bg-muted focus-visible:bg-muted ${r === rate ? 'font-semibold text-primary' : ''}`}
+              aria-checked={o === value}
+              onClick={() => { onPick(o); toggle(false); btn.current?.focus(); }}
+              className={`flex w-full cursor-pointer items-center rounded-md px-2 py-1 text-xs outline-none hover:bg-muted focus-visible:bg-muted ${o === value ? 'font-semibold text-primary' : ''}`}
             >
-              {r}×
+              {item(o)}
             </button>
           ))}
         </div>

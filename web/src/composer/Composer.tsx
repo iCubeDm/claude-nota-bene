@@ -16,9 +16,11 @@ import { addImage, removeImage, selectDraft, selectImages, selectUploading, setD
 import { interrupt, selectBusy, selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { BINDINGS, keysLabel } from '@/shell/keymap.ts';
 import { PLAYER_HELP } from '@/media/playerKeys.ts';
+import { useSeekStep } from '@/media/seekStep.ts';
 
 export function Composer() {
   const t = useT();
+  const seekStep = useSeekStep();
   const dispatch = useAppDispatch();
   const busy = useAppSelector(selectBusy);
   const conn = useAppSelector(selectConn);
@@ -226,7 +228,7 @@ export function Composer() {
               </svg>
             </Button>
           </TooltipTrigger>
-          <TooltipContent className="whitespace-pre-line">{`${t('keysTip')}\n\n${t('hkTitle')}\n${BINDINGS.map((b) => `${keysLabel(b)} — ${t(b.id)}`).join('\n')}\n\n${t('pkTitle')}\n${PLAYER_HELP.map(([k, id]) => `${k} — ${t(id)}`).join('\n')}`}</TooltipContent>
+          <TooltipContent className="whitespace-pre-line">{`${t('keysTip')}\n\n${t('hkTitle')}\n${BINDINGS.map((b) => `${keysLabel(b)} — ${t(b.id)}`).join('\n')}\n\n${t('pkTitle')}\n${PLAYER_HELP.map(([k, id]) => `${k} — ${t(id, seekStep)}`).join('\n')}`}</TooltipContent>
         </Tooltip>
         <ModePill />
         <Tooltip>

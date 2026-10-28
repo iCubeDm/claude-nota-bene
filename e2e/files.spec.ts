@@ -951,6 +951,26 @@ test('a chat video has our bar: the timeline seeks, Space plays only after a cli
   expect(await paused()).toBe(true);
 });
 
+test('the seek step chip: pick 0.5 s, then ArrowRight on a video tab seeks by 0.5; Space after the pick toggles once @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
+  await start(page);
+  await openFromTree(page, 'media/a.mp4');
+  const video = mediaPane(page, 'media/a.mp4').locator('video');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  const chip = page.locator('[data-player-bar]').getByRole('button', { name: /^(Seek step|Шаг перемотки)/ });
+  await chip.click();
+  await page.getByRole('menuitemradio', { name: /^0\.5 / }).click();
+  await expect(chip).toHaveText(/^±0\.5 /);
+  const t0 = await video.evaluate((e: HTMLVideoElement) => e.currentTime);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeCloseTo(t0 + 0.5, 2);
+  // Space right after the pick plays exactly once
+  await page.keyboard.press('Space');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => !e.paused)).toBe(true);
+  await page.keyboard.press('Space');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.paused)).toBe(true);
+});
+
 test('player keys on a video tab after a click on the tab strip: Space plays, ArrowRight +5 s, ArrowDown lowers the volume, N starts markup; the composer keeps its Space @files', async ({ page }) => {
   test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
   await start(page);

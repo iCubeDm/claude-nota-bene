@@ -7,6 +7,7 @@ import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import type { PipApi } from './mediaController.ts';
 import { PlayerBar } from './PlayerBar.tsx';
+import { seekStep } from './seekStep.ts';
 import { selectDraft } from './markup/slice.ts';
 
 const rect = (w: number) => ({ x: 0, y: 0, width: w, height: 20, left: 0, top: 0, right: w, bottom: 20, toJSON() { return this; } }) as DOMRect;
@@ -14,6 +15,8 @@ const PATH = 'v.mp4';
 const TAB = `file:${PATH}`;
 
 beforeEach(() => {
+  localStorage.clear();
+  seekStep.reload();
   setLang('en');
   // every element is 1000 px wide: the timeline's track too
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect(1000));
@@ -237,4 +240,40 @@ it('a video bar sits on the picture: its width and bottom edge, centred; a narro
   const b = mk(100, 400);
   act(() => void b.el.dispatchEvent(new Event('loadedmetadata')));
   expect([bar().style.left, bar().style.width, bar().style.bottom]).toEqual(['320px', '360px', '0px']);
+});
+
+it('the seek-step chip shows the step, the menu sets it for every player and the arrows follow', () => {
+  const a = setup();
+  const chip = () => screen.getByRole('button', { name: 'Seek step ← →' });
+  expect(chip().textContent).toBe('±5 s');
+  fireEvent.click(chip());
+  expect(screen.getByRole('menuitemradio', { name: '5 s' }).getAttribute('aria-checked')).toBe('true');
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '0.5 s' }));
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(seekStep.get()).toBe(0.5);
+  expect(chip().textContent).toBe('±0.5 s');
+  // a second bar follows at once
+  const b = setup();
+  expect(screen.getAllByRole('button', { name: 'Seek step ← →' }).map((x) => x.textContent)).toEqual(['±0.5 s', '±0.5 s']);
+  act(() => seekStep.set(1));
+  expect(screen.getAllByRole('button', { name: 'Seek step ← →' }).map((x) => x.textContent)).toEqual(['±1 s', '±1 s']);
+  expect(a.st.time).toBe(20);
+  expect(b.st.time).toBe(20);
+});
+
+it('a bar narrower than 360 px drops the step chip with speed and PiP', () => {
+  const rects = new Map<Element, DOMRect>();
+  const R = (x: number, y: number, w: number, h: number) => ({ x, y, width: w, height: h, left: x, top: y, right: x + w, bottom: y + h, toJSON() { return this; } }) as DOMRect;
+  vi.restoreAllMocks();
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) { return rects.get(this) ?? R(0, 0, 1000, 20); });
+  const s = setup();
+  expect(screen.queryByRole('button', { name: 'Seek step ← →' })).not.toBeNull();
+  Object.defineProperty(s.el, 'videoWidth', { value: 100, configurable: true });
+  Object.defineProperty(s.el, 'videoHeight', { value: 400, configurable: true });
+  rects.set(s.box.current!, R(0, 0, 300, 800));
+  rects.set(s.el, R(0, 0, 300, 800));
+  act(() => void s.el.dispatchEvent(new Event('loadedmetadata')));
+  // box 300 wide: the picture is 200 wide, below the minimum
+  expect(screen.queryByRole('button', { name: 'Seek step ← →' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Playback speed' })).toBeNull();
 });

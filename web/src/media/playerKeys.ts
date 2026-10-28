@@ -3,6 +3,7 @@ import { keysInScope } from '@/lib/keyScope.ts';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector, type AppDispatch } from '@/store/store.ts';
 import { setMode } from './markup/slice.ts';
+import { seekStep } from './seekStep.ts';
 
 /** YouTube's keys for a media tab (see docs: player keys). `code`, not `key`: any keyboard layout. */
 
@@ -27,7 +28,8 @@ export const ONCE = (c: string) => !/^(Arrow|Comma|Period|Key[JL])/.test(c);
 export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string, box?: HTMLElement | null): string | null {
   const video = el instanceof HTMLVideoElement;
   const dur = Number.isFinite(el.duration) ? el.duration : Infinity;
-  const seek = (to: number) => void (el.currentTime = Math.max(0, Math.min(dur, to)));
+  // milliseconds: 0.1 s steps must not pile up float noise in currentTime
+  const seek = (to: number) => void (el.currentTime = Math.max(0, Math.min(dur, Math.round(to * 1000) / 1000)));
   const by = (d: number) => (seek(el.currentTime + d), sec(d, unit));
   const vol = (d: number) => {
     if (d > 0 && el.muted) el.muted = false;
@@ -40,8 +42,8 @@ export function applyPlayerKey(el: HTMLMediaElement, code: string, unit: string,
       if (el.paused) { void el.play()?.catch(() => {}); return '▶'; }
       el.pause();
       return '❚❚';
-    case 'ArrowLeft': return by(-5);
-    case 'ArrowRight': return by(5);
+    case 'ArrowLeft': return by(-seekStep.get());
+    case 'ArrowRight': return by(seekStep.get());
     case 'KeyJ': return by(-10);
     case 'KeyL': return by(10);
     case 'ArrowUp': return vol(0.05);
@@ -131,6 +133,6 @@ export function usePlayerKeys({ tabId, active, marking, media, image, box }: {
 
 /** The player's help rows: [keys, i18n id], shown as one group in the hotkey tooltip. */
 export const PLAYER_HELP = [
-  ['Space, K', 'pk_toggle'], ['← / →', 'pk_seek5'], ['J / L', 'pk_seek10'], ['↑ / ↓', 'pk_volume'], ['M', 'pk_mute'],
+  ['Space, K', 'pk_toggle'], ['← / →', 'pk_seek'], ['J / L', 'pk_seek10'], ['↑ / ↓', 'pk_volume'], ['M', 'pk_mute'],
   ['F', 'pk_fullscreen'], ['0…9', 'pk_percent'], [', / .', 'pk_frame'], ['Home / End', 'pk_ends'], ['N', 'pk_annotate'],
 ] as const;

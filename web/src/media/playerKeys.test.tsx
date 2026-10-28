@@ -7,10 +7,15 @@ import { FileView } from '@/files/FileView.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { selectDraft } from './markup/slice.ts';
+import { PLAYER_HELP } from './playerKeys.ts';
+import { seekStep } from './seekStep.ts';
+import { t } from '@/i18n/index.ts';
 
 vi.mock('mermaid', () => ({ default: { initialize: vi.fn(), render: vi.fn(async () => ({ svg: '<svg></svg>' })) } }));
 
 beforeEach(() => {
+  localStorage.clear();
+  seekStep.reload();
   setLang('en');
   vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 200 })));
 });
@@ -221,4 +226,37 @@ it('scope: a text field inside our own areas still keeps its keys; a hidden pane
   s.r.container.querySelector('[data-file-view]')!.setAttribute('hidden', ''); // active in the store, hidden in the DOM
   expect(s.press('Space')).toBe(true);
   expect(s.play).not.toHaveBeenCalled();
+});
+
+it('arrows seek by the chosen step: 0.1 s without float drift, the flash says so; J/L stay +-10 s', () => {
+  const s = setup();
+  seekStep.set(0.1);
+  s.st.time = 1;
+  s.press('ArrowRight'); expect(s.st.time).toBe(1.1);
+  s.press('ArrowRight'); s.press('ArrowRight'); expect(s.st.time).toBe(1.3);
+  s.press('ArrowLeft'); expect(s.st.time).toBe(1.2);
+  s.press('KeyL'); expect(s.st.time).toBe(11.2);
+  s.press('KeyJ'); expect(s.st.time).toBe(1.2);
+  seekStep.set(0.5);
+  s.press('ArrowRight'); expect(s.st.time).toBe(1.7);
+  seekStep.set(1);
+  s.press('ArrowLeft'); expect(s.st.time).toBe(0.7);
+});
+
+it('the flash text shows the step: +0.1 s, -0.5 s', async () => {
+  const s = setup();
+  seekStep.set(0.1);
+  s.press('ArrowRight');
+  await vi.waitFor(() => expect(document.querySelector('[data-player-flash]')?.textContent).toBe('+0.1 s'));
+  seekStep.set(0.5);
+  s.press('ArrowLeft');
+  await vi.waitFor(() => expect(document.querySelector('[data-player-flash]')?.textContent).toBe('−0.5 s'));
+});
+
+it('the help line for the arrows shows the current step', () => {
+  const id = PLAYER_HELP.find(([k]) => k === '← / →')![1];
+  expect(t(id, 5)).toBe('−5 / +5 s (step is set on the bar)');
+  expect(t(id, 0.5)).toBe('−0.5 / +0.5 s (step is set on the bar)');
+  setLang('ru');
+  expect(t(id, 1)).toBe('−1 / +1 с (шаг выбирается на панели)');
 });
