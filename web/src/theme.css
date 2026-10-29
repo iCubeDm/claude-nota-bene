@@ -92,6 +92,11 @@
 @keyframes nb-flash { from { background-color: oklch(0.88 0.18 95 / 0.35); } to { background-color: transparent; } }
 .nb-flash { animation: nb-flash 1.2s ease-out; }
 
+/* the context reminder above the input (CtxNudge): blinks until pressed or dismissed; a soft glow without motion */
+@keyframes nb-blink { 50% { background-color: color-mix(in oklch, var(--nb-blink) 32%, transparent); box-shadow: 0 0 0 4px color-mix(in oklch, var(--nb-blink) 30%, transparent); } }
+.nb-blink { box-shadow: 0 0 0 0 color-mix(in oklch, var(--nb-blink) 30%, transparent); animation: nb-blink 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .nb-blink { animation: none; box-shadow: 0 0 0 2px color-mix(in oklch, var(--nb-blink) 40%, transparent); } }
+
 /* Prose (chat card, md files) keeps the prototype's 860 px; code is wider. Both are centred paper cards. */
 /* 3rem: a narrow column (docked panels) still leaves a margin around the card */
 .nb-prose { width: min(100% - 3rem, 860px); }

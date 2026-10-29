@@ -287,6 +287,8 @@ export const ru = {
   // meters (M4-08)
   ctx: 'контекст',
   ctxTip: (u: string, m: string) => `${u} из ${m} токенов — дальше авто-сжатие`,
+  ctxNudge: (p: number) => `Контекст ${p}% · сжать`,
+  ctxNudgeLater: 'Напомнить на следующем пороге',
   h5: '5ч',
   h5Tip: 'лимит плана за 5 часов',
   week: 'неделя',

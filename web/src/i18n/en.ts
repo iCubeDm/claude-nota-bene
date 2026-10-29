@@ -290,6 +290,8 @@ export const en: Dict = {
   // meters (M4-08)
   ctx: 'context',
   ctxTip: (u: string, m: string) => `${u} of ${m} tokens — auto-compact after that`,
+  ctxNudge: (p: number) => `Context ${p}% · compact`,
+  ctxNudgeLater: 'Remind me at the next step',
   h5: '5h',
   h5Tip: '5-hour plan limit',
   week: 'week',

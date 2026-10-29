@@ -10,6 +10,7 @@ import { nextMode, pickMode, selectCapabilities, selectMode, selectSuggestion, s
 import { ShortcodePicker } from '@/comments/ShortcodePicker.tsx';
 import { MentionPicker } from './MentionPicker.tsx';
 import { Meters } from '@/stats/Meters.tsx';
+import { CtxNudge } from '@/stats/CtxNudge.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
 import { addImage, removeImage, selectDraft, selectBuilding, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from './slice.ts';
@@ -150,6 +151,7 @@ export function Composer() {
         )}
         {failed && conn !== 'open' && <span className="text-warn">{t('offline')}</span>}
         {note && <span className="text-warn">{note}</span>}
+        <CtxNudge />
       </div>
       <Attachments
         data-testid="composer-thumbs"
