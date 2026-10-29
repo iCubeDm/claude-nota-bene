@@ -783,10 +783,14 @@ test('player bar: the timeline seeks, Space after a bar button toggles once, F f
   expect(await video.evaluate((e: HTMLVideoElement) => e.hasAttribute('controls'))).toBe(false);
   await video.evaluate((e: HTMLVideoElement) => { e.muted = true; });
   const line = page.getByRole('slider', { name: /^(Seek|Перемотка)$/ });
-  const box = (await line.boundingBox())!;
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   const dur = await video.evaluate((e: HTMLVideoElement) => e.duration);
-  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(dur / 2 - 1);
+  // under a loaded full run the bar can still move after the first measure (it follows the picture on a ResizeObserver
+  // tick): measure and click again until the click lands where it was aimed
+  await expect(async () => {
+    const box = (await line.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    expect(await video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(dur / 2 - 1);
+  }).toPass({ timeout: 10_000 });
   expect(await video.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeLessThan(dur / 2 + 1);
 
   // after clicking a bar button, Space toggles exactly once (not once for the player keys and once for the button)
