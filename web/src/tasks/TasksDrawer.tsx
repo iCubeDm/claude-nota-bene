@@ -13,7 +13,7 @@ export const INDICATOR_ID = 'tasks-indicator';
 
 const ICON: Record<Task['status'], { glyph: string; cls: string; key: 'taskRunning' | 'taskDone' | 'taskFailed' | 'taskStopped' }> = {
   running: { glyph: '●', cls: 'animate-pulse text-nb-accent', key: 'taskRunning' },
-  done: { glyph: '✓', cls: 'text-muted-foreground', key: 'taskDone' },
+  done: { glyph: '✓', cls: 'text-success', key: 'taskDone' },
   failed: { glyph: '✕', cls: 'text-destructive', key: 'taskFailed' },
   stopped: { glyph: '■', cls: 'text-muted-foreground', key: 'taskStopped' },
 };

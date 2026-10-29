@@ -7,7 +7,7 @@
 .md li > p { margin: 0.2em 0; }
 /* task-list box: drawn in CSS, so the text comment anchors read has no glyph (Markdown.tsx renders no <input>) */
 .md .task-box::before { content: '☐'; }
-.md .task-box.checked::before { content: '☑'; color: var(--primary); }
+.md .task-box.checked::before { content: '☑'; color: var(--success); }
 .md h1 { font-size: 1.5em; }
 .md h2 { font-size: 1.25em; }
 .md h3 { font-size: 1.1em; }

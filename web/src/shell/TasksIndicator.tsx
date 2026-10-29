@@ -39,7 +39,7 @@ export function TasksIndicator() {
           </>
         ) : finished > 0 ? (
           <>
-            <span aria-hidden>✓</span>
+            <span aria-hidden className="text-success">✓</span>
             <span data-tasks-count>{finished}</span>
           </>
         ) : (
