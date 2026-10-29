@@ -8,7 +8,7 @@ import { whereOf } from '@/comments/send.ts';
 import { Feed } from '@/feed/Feed.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
-import { openAgent, restoreTabs, serializeTabs } from '@/tabs/slice.ts';
+import { activate, openAgent, restoreTabs, serializeTabs } from '@/tabs/slice.ts';
 import { AgentView, POLL_MS } from './AgentView.tsx';
 
 const SESSION = 'S-1';
@@ -335,6 +335,41 @@ describe('comments in the subagent tab', () => {
     const missing = renderHook(() => useCommentSource(mk('a1:0', 'toolu_other')), { wrapper: wrap });
     expect(missing.result.current.orphan).toBe(true);
     expect(missing.result.current.beforeCompact).toBe(false);
+  });
+});
+
+describe('after a reload, with the tab closed or a poll failing', () => {
+  it('the batch names the subagent by the Agent call in the chat, and an action by the chat\'s forwarded copy', () => {
+    const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+    act(() => {
+      store.dispatch(serverEvent({ kind: 'session', id: SESSION, root: '/r', title: null, model: null }));
+      store.dispatch(serverEvent(ev({ t: 'tool-call', id: TOOL, name: 'Agent', input: { description: 'Re-review batch send' }, sub: false })));
+      store.dispatch(serverEvent(ev({ t: 'tool-call', id: 'toolu_in', name: 'Bash', input: { command: 'npm test' }, sub: true })));
+    });
+    const c = (id: string): Comment => ({ id: 'c', text: 'x', status: 'pending', createdAt: 1, anchor: { source: { kind: 'message', id, agent: TOOL }, start: 0, end: 1, quote: 'a', prefix: '', suffix: '' } });
+    expect(whereOf(c('a1:0'), store.getState())).toBe('subagent reply «Re-review batch send»');
+    expect(whereOf(c('tool:toolu_in'), store.getState())).toBe('Bash command (npm test) · subagent «Re-review batch send»');
+  });
+
+  it('one failed poll leaves the comment card\'s source findable (no orphan flicker)', async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    answer = () => (++n === 1 ? json(view({ running: true })) : new Response('x', { status: 500 }));
+    const { store } = setup();
+    await flush(0);
+    await flush(POLL_MS);
+    const { itemsOf } = await import('./slice.ts');
+    expect(store.getState().subagents.byTool[TOOL]!.status).toBe('error');
+    expect(itemsOf(store.getState(), TOOL)?.length).toBeGreaterThan(0);
+  });
+
+  it('the main composer says its message goes to the main agent while an agent tab is active', async () => {
+    const { store } = setup();
+    const { Composer } = await import('@/composer/Composer.tsx');
+    render(<Provider store={store}><TooltipProvider><Composer /></TooltipProvider></Provider>);
+    expect(document.querySelector('#composer-input')).toHaveAttribute('placeholder', 'Message the main agent… comments on the subagent’s replies go to it too');
+    act(() => void store.dispatch(activate('chat')));
+    expect(document.querySelector('#composer-input')).toHaveAttribute('placeholder', expect.stringMatching(/^Message the agent/));
   });
 });
 

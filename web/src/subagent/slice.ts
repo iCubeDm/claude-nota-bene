@@ -47,7 +47,7 @@ export const subagentsSlice = createSlice({
       const { tool, session, status, error } = a.payload;
       const cur = s.byTool[tool];
       if (!cur || cur.session !== session) return;
-      s.byTool[tool] = { ...cur, status, sig: '', ...(error ? { error } : {}) };
+      s.byTool[tool] = { ...cur, status, ...(error ? { error } : {}) }; // sig kept: the same answer later is no change
     },
   },
 });
@@ -99,7 +99,8 @@ export const selectSubagent = (s: RootState, tool: string): SubagentEntry | unde
 export const itemsOf = (s: RootState, agent?: string): FeedItem[] | null => {
   if (!agent) return s.feed.items;
   const e = selectSubagent(s, agent);
-  return e && e.status === 'ok' ? e.feed.items : null;
+  // a failed poll keeps what was read: its comment cards must not turn into orphans for a network blip
+  return e && (e.status === 'ok' || (e.status === 'error' && e.feed.items.length > 0)) ? e.feed.items : null;
 };
 
 /** The first protocol whose server keeps `source.agent` on a comment's anchor (older ones drop it): below it, no comments in a subagent's tab. */
@@ -119,7 +120,11 @@ export const agentName = (s: RootState, tool: string): string => {
   const e = selectSubagent(s, tool);
   if (e?.description) return e.description;
   const tab = s.tabs.open.find((t) => t.kind === 'agent' && t.tool === tool);
-  return (tab?.kind === 'agent' ? tab.title : '') || e?.type || '';
+  if (tab?.kind === 'agent' && tab.title) return tab.title;
+  // after a reload with the tab closed: the call itself is in the replayed chat (or in its parent subagent's feed)
+  const call = s.feed.items.find((it) => it.kind === 'tool' && it.id === tool);
+  const d = call?.kind === 'tool' ? call.input.description : undefined;
+  return (typeof d === 'string' && d) || e?.type || '';
 };
 
 /** Opens (or shows) a subagent's tab by its Agent call's id, named by what is known of it (a jump from a comment card). */

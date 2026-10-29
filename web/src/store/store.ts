@@ -251,7 +251,8 @@ function agentLabel(s: RootState, messageId: string, agent: string): string | nu
   const name = agentName(s, agent);
   if (messageId.startsWith(TOOL_SRC)) {
     const id = messageId.slice(TOOL_SRC.length);
-    const it = itemsOf(s, agent)?.find((x) => x.kind === 'tool' && x.id === id);
+    // not loaded (a reload with the tab closed): the same call forwarded into the chat names it, if it is there
+    const it = (itemsOf(s, agent) ?? s.feed.items).find((x) => x.kind === 'tool' && x.id === id);
     if (it?.kind !== 'tool') return null;
     return t('srcAgentTool', t('srcTool', it.name, it.arg.length > ARG_CUT ? `${it.arg.slice(0, ARG_CUT)}…` : it.arg), name);
   }

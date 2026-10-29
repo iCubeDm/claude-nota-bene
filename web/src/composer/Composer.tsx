@@ -25,6 +25,7 @@ export function Composer() {
   const dispatch = useAppDispatch();
   const busy = useAppSelector(selectBusy);
   const conn = useAppSelector(selectConn);
+  const onAgentTab = useAppSelector((s) => s.tabs.active.startsWith('agent:')); // the message goes to the main agent, not the subagent on screen
   const nPending = useAppSelector(selectPending).length;
   const mode = useAppSelector(selectMode);
   const caps = useAppSelector(selectCapabilities);
@@ -166,7 +167,7 @@ export function Composer() {
           id="composer-input"
           rows={1}
           value={text}
-          placeholder={showSug ? suggestion : t('composerPh')}
+          placeholder={showSug ? suggestion : onAgentTab ? t('composerPhAgent') : t('composerPh')}
           onChange={(e) => {
             dispatch(setDraft(e.target.value));
             setFailed(false);

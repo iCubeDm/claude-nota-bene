@@ -42,6 +42,7 @@ export const en: Dict = {
   hidePanel: 'Hide panel',
   stopTip: 'Stop the agent · Esc',
   keysTip: 'Enter — send\nShift+Enter — new line\n⌘Enter — interrupt the agent and send\nEsc — stop the agent',
+  composerPhAgent: 'Message the main agent… comments on the subagent’s replies go to it too',
   composerPh: 'Message the agent… select text in the chat to comment on it',
   askArchived: 'No answer was given before the compaction',
   allowQ: (tool) => `Allow ${tool}?`,

@@ -30,9 +30,10 @@ const offsetIn = (pane: HTMLElement, el: HTMLElement) => el.getBoundingClientRec
  * one has no archive, so no «earlier» button.
  */
 export function Feed({ feed, agent, running }: { feed?: FeedState; agent?: string; running?: boolean } = {}) {
-  const main = useAppSelector(selectFeed);
-  const { items, compacting, epoch, earlier } = feed ?? main;
-  const busy = agent ? !!running : main.busy;
+  // a subagent's pane must not re-render on every chunk of the main chat (all panes stay mounted)
+  const main = useAppSelector((s) => (feed ? null : selectFeed(s)));
+  const { items, compacting, epoch, earlier } = (feed ?? main)!;
+  const busy = agent ? !!running : main!.busy;
   const scope = useMemo(() => ({ agent, busy: agent ? !!running : undefined }), [agent, running]);
   const t = useT();
   const dispatch = useAppDispatch();

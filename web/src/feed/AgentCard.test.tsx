@@ -25,6 +25,9 @@ beforeEach(() => {
   })) : new Response('', { status: 404 }))));
   Element.prototype.scrollTo = () => {};
   Element.prototype.scrollIntoView = () => {};
+  // jsdom has no layout: highlight marks ask the ranges for rects
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => ({ left: 0, top: 0, right: 5, bottom: 5, width: 5, height: 5, x: 0, y: 0, toJSON() {} }) as DOMRect;
 });
 afterEach(() => {
   cleanup();
@@ -144,7 +147,6 @@ describe('jump to a subagent comment', () => {
     await vi.waitFor(() => expect(scrolled).toHaveBeenCalled());
     await vi.waitFor(() => expect(hook.result.current.orphan).toBe(false));
     expect(hook.result.current.where).toBe('subagent reply «Look around»');
-    delete (Range.prototype as Partial<Range>).getBoundingClientRect;
   });
 });
 
@@ -192,7 +194,6 @@ describe('the same tool id in the chat and in the subagent tab (the SDK forwards
     expect(document.querySelector('[data-pane="agent:t1"] [data-kind="tool-panel"]')).not.toBeNull();
     expect(document.querySelector('[data-pane="chat"] [data-kind="tool-panel"]')).toBeNull();
     expect(scrolled.every((e) => e.closest('[data-agent]')?.getAttribute('data-agent') === 't1')).toBe(true);
-    delete (Range.prototype as Partial<Range>).getBoundingClientRect;
   });
 });
 
