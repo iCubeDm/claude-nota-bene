@@ -18,6 +18,8 @@ const POSE_B: CameraPose = { position: [-3, 1, 4], target: [0, 0.5, 0], fov: 50 
 let opts: ViewerOptions;
 let viewer: ModelViewer & { pose: CameraPose; frozen: boolean[]; playing: boolean[] };
 let clips: string[];
+let created: typeof viewer[] = [];
+let loadGate: Promise<void> | null = null;
 const move = (p: CameraPose) => { viewer.pose = p; opts.onView?.(p); };
 vi.mock('@/model/viewer.ts', () => ({
   createViewer: (host: HTMLElement, o: ViewerOptions) => {
@@ -28,7 +30,7 @@ vi.mock('@/model/viewer.ts', () => ({
     host.appendChild(canvas); // as the real viewer does: the overlays are children of the canvas's parent
     const v = {
       pose: POSE_A, frozen: [] as boolean[], playing: [] as boolean[], canvas,
-      load: vi.fn(async () => { o.onView?.(v.pose); return { meshes: 1, triangles: 12, materials: 1, clips }; }),
+      load: vi.fn(async () => { if (loadGate) await loadGate; o.onView?.(v.pose); return { meshes: 1, triangles: 12, materials: 1, clips }; }),
       clear: vi.fn(), resetView: vi.fn(), setClip: vi.fn(), setBackground: vi.fn(), setVisible: vi.fn(), snapshot: vi.fn(), dispose: vi.fn(),
       getPose: vi.fn(() => v.pose),
       setPose: vi.fn((p: CameraPose) => { v.pose = p; o.onView?.(p); }),
@@ -37,6 +39,7 @@ vi.mock('@/model/viewer.ts', () => ({
       renderNow: vi.fn(() => v.pose),
     };
     viewer = v as never;
+    created.push(viewer);
     return v;
   },
 }));
@@ -53,6 +56,8 @@ const modelComment = (id: string, camera: CameraPose | undefined, o: Partial<Com
 beforeEach(() => {
   setLang('en');
   clips = [];
+  created = [];
+  loadGate = null;
   prepare.mockReset();
   vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(100), { status: 200, headers: { 'content-length': '100', etag: '"v1"' } })));
 });
@@ -164,4 +169,53 @@ it('jump while marking does not move the camera (the drawing belongs to the view
   act(() => void store.dispatch(filesSlice.actions.requestJump({ path: 'm/a.glb', src: 'here', id: 'a' })));
   await waitFor(() => expect(store.getState().files.jump).toBeNull());
   expect(viewer.setPose).not.toHaveBeenCalled();
+});
+
+it('a lost context while marking leaves the mode (the shapes stay in the draft) and the reload then makes a new viewer', async () => {
+  const { store, draft } = await open();
+  act(() => void store.dispatch(setMode(TAB, true)));
+  act(() => void store.dispatch(addShape(TAB, { kind: 'rect', color: '#ff3b30', x: 0.2, y: 0.2, w: 0.3, h: 0.3 })));
+  expect(draft().on).toBe(true);
+  act(() => opts.onContextLost());
+  await waitFor(() => expect(draft().on).toBe(false));
+  expect(draft().shapes.length).toBe(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+  await waitFor(() => expect(created.length).toBe(2));
+  await waitFor(() => expect(document.querySelector('[data-model-ready]')).toBeTruthy());
+  fireEvent.keyDown(document.body, { code: 'KeyN', key: 'n' }); // the mode is back, with the drawing
+  expect(draft().on).toBe(true);
+  expect(draft().shapes.length).toBe(1);
+});
+
+it('a jump into a released tab waits until the new viewer shows the model, then sets the pose', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+    store.dispatch(serverEvent({ kind: 'hello', protocol: 9 } as ServerEvent));
+    store.dispatch(serverEvent({ kind: 'comments', items: [modelComment('a', POSE_B)] }));
+    const ui = (active: boolean) => <Provider store={store}><TooltipProvider><FileView path="m/a.glb" active={active} /></TooltipProvider></Provider>;
+    const r = render(ui(true));
+    await waitFor(() => expect(r.container.querySelector('[data-model-ready]')).toBeTruthy());
+    r.rerender(ui(false));
+    await act(async () => void vi.advanceTimersByTime(21_000));
+    await waitFor(() => expect(created[0]!.dispose).toHaveBeenCalled());
+    // the new viewer is made on activation; its model is not parsed yet when the jump arrives
+    let release!: () => void;
+    loadGate = new Promise<void>((res) => (release = res));
+    store.dispatch(filesSlice.actions.requestJump({ path: 'm/a.glb', src: 'here', id: 'a' }));
+    r.rerender(ui(true));
+    await waitFor(() => expect(created.length).toBe(2));
+    const v2 = created[1]!;
+    expect(v2.setPose).not.toHaveBeenCalledWith(POSE_B); // not before its parse landed
+    await act(async () => void (await new Promise((r) => setTimeout(r, 50))));
+    expect(v2.setPose).not.toHaveBeenCalledWith(POSE_B); // still parsing
+    release();
+    await waitFor(() => expect(v2.setPose).toHaveBeenLastCalledWith(POSE_B));
+  } finally { vi.useRealTimers(); }
+});
+
+it('chip numbers are the panel numbers (an image comment before it counts); a sent comment has none', async () => {
+  const img = modelComment('i', undefined, { text: 'img' });
+  const { chips } = await open({ comments: [img, modelComment('a', POSE_A), modelComment('s', POSE_B, { status: 'sent', sentIn: 'u' })] });
+  expect(chips().map((c) => c.textContent)).toEqual(['2 · note a', 'note s']);
 });

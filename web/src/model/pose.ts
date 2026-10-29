@@ -26,3 +26,13 @@ export function nearPose(c: ModelCamera, p: CameraPose): boolean {
     && c.target.every((x, i) => Math.abs(x - p.target[i]!) <= eps)
     && Math.abs(c.fov - p.fov) <= 0.01;
 }
+
+/**
+ * The x scale, about the canvas centre, that puts a mark drawn on a `w`×`h` frame over the same part of the model on a
+ * canvas of `cw`×`ch`: the camera's fov is vertical, so at one pose relative y is unchanged and x scales by the ratio of
+ * the aspects (the panel or the tree opening changes the canvas aspect without moving the camera). 1 while a size is unknown.
+ */
+export function aspectScale(w: number, h: number, cw: number, ch: number): number {
+  if (!(w > 0 && h > 0 && cw > 0 && ch > 0)) return 1;
+  return (w / h) / (cw / ch);
+}

@@ -219,7 +219,9 @@ describe('a model comment', () => {
     const cl2 = await connect(s.url);
     await until(() => lastComments(cl2)?.length === 1);
     expect((lastComments(cl2)![0].anchor as unknown as { camera: unknown }).camera).toEqual(camera);
-    expect(JSON.parse(fs.readFileSync(path.join(home, 'comments', 'sess-cam.json'), 'utf8'))).toBeTruthy();
+    const onDisk = JSON.parse(fs.readFileSync(path.join(home, 'comments', 'sess-cam.json'), 'utf8')) as { items?: Comment[] } | Comment[];
+    const stored = Array.isArray(onDisk) ? onDisk : onDisk.items!;
+    expect((stored[0]!.anchor as unknown as { camera: unknown }).camera).toEqual(camera);
   });
 });
 

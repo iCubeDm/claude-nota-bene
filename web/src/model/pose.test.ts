@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { cameraLine, nearPose, sig3 } from './pose.ts';
+import { aspectScale, cameraLine, nearPose, sig3 } from './pose.ts';
 
 const cam = { position: [3, 2, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 50 };
 
@@ -28,4 +28,15 @@ it('nearPose: the same pose, a hair away (relative to the distance), but not a v
   // scale: a tiny model is judged by its own distance
   const small = { position: [0.003, 0.002, 0.001] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 50 };
   expect(nearPose(small, { ...small, position: [0.0031, 0.002, 0.001] })).toBe(false);
+});
+
+it('aspectScale: the x scale of a mark about the centre when the canvas aspect changed (vertical fov keeps y)', () => {
+  expect(aspectScale(800, 600, 800, 600)).toBe(1);
+  expect(aspectScale(800, 600, 1600, 600)).toBeCloseTo(0.5, 10); // wider canvas: the model is narrower in relative x
+  expect(aspectScale(1600, 600, 800, 600)).toBeCloseTo(2, 10);
+  expect(aspectScale(800, 600, 0, 600)).toBe(1); // no size yet: no correction
+  // x 0.25..0.75 of an 800x600 frame on a 1600x600 canvas covers 0.375..0.625
+  const k = aspectScale(800, 600, 1600, 600);
+  expect(0.5 + (0.25 - 0.5) * k).toBeCloseTo(0.375, 10);
+  expect(0.5 + (0.75 - 0.5) * k).toBeCloseTo(0.625, 10);
 });

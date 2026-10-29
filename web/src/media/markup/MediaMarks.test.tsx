@@ -185,3 +185,16 @@ it('a sent model comment drawn on another version of the file is not drawn even 
   act(() => void store.dispatch(setFileVersion({ path: 'm.glb', version: 'v2' })));
   expect(pane.querySelector('svg[data-media-marks]')).toBeNull();
 });
+
+it('a model mark is scaled about the centre when the canvas aspect differs from the comment\'s (a 800x600 anchor on a 1600x600 canvas)', () => {
+  const a = comment('a', media('m.glb', [RED], { camera: CAM, width: 800, height: 600 }));
+  const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+  act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [a] })));
+  const c = canvas();
+  c.width = 1600;
+  c.height = 600;
+  render(<Provider store={store}><MediaMarks tabId="file:m.glb" media={c} fit="contain" path="m.glb" atView={new Set(['a'])} /></Provider>);
+  for (const sel of ['[data-mark="a"]', '[data-hit="a"]']) {
+    expect(pane.querySelector(sel)!.getAttribute('transform')).toBe('translate(0.5 0) scale(0.5 1) translate(-0.5 0)');
+  }
+});

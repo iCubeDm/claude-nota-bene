@@ -5,7 +5,8 @@ import { selectFileVersion } from '@/files/slice.ts';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { shapePath } from './geometry.ts';
-import { shapeEls, STROKE_PX, useOverlayPlacement, type Media } from './overlay.tsx';
+import { aspectScale } from '@/model/pose.ts';
+import { shapeEls, STROKE_PX, useNatSize, useOverlayPlacement, type Media } from './overlay.tsx';
 import { selectDraft } from './slice.ts';
 
 /**
@@ -62,6 +63,7 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref, atView }: {
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
   const current = useAppSelector((s) => selectFileVersion(s, path, ref));
   const at = usePausedAt(media);
+  const [nat] = useNatSize(media); // a canvas: followed as its box changes
   const video = media instanceof HTMLVideoElement;
   const shown = useMemo(() => {
     if (at === null) return [];
@@ -89,6 +91,12 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref, atView }: {
   const on = shown.length > 0 && !!pane;
   useOverlayPlacement(svg, media, fit, on);
 
+  // a 3D view: the marks were drawn on the aspect the canvas had then; the camera's fov is vertical, so only x moves
+  const fix = (c: MediaComment): string | undefined => {
+    if (!(media instanceof HTMLCanvasElement)) return undefined;
+    const k = aspectScale(c.anchor.width, c.anchor.height, nat[0], nat[1]);
+    return k === 1 ? undefined : `translate(0.5 0) scale(${k} 1) translate(-0.5 0)`;
+  };
   const open = (id: string) => (e: MouseEvent) => {
     e.stopPropagation();
     dispatch(openCommentCard({ id, x: e.clientX, y: e.clientY }));
@@ -110,12 +118,12 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref, atView }: {
       className="pointer-events-none absolute z-10 overflow-visible select-none"
     >
       {shown.map((c) => (
-        <g key={c.id} data-mark={c.id} opacity={c.status === 'sent' ? SENT_OPACITY : undefined}>{drawn(c).els}</g>
+        <g key={c.id} data-mark={c.id} transform={fix(c)} opacity={c.status === 'sent' ? SENT_OPACITY : undefined}>{drawn(c).els}</g>
       ))}
       {!marking && shown.map((c) => {
         const changed = changedSince(c, current);
         return (
-          <g key={c.id} data-hit={c.id} onClick={open(c.id)} className="cursor-pointer">
+          <g key={c.id} data-hit={c.id} transform={fix(c)} onClick={open(c.id)} className="cursor-pointer">
             {changed && <title>{t('fileChanged')}</title>}
             {drawn(c).ds.map((d, i) => (
               <path key={i} d={d} stroke="transparent" strokeWidth={HIT_PX} vectorEffect="non-scaling-stroke" pointerEvents="stroke" />

@@ -339,3 +339,7 @@ test.each(badCameras)('rejects a camera: %s', (_n, c) => {
 test('camera fov bounds: (0, 180) exclusive', () => {
   for (const fov of [0.01, 45, 179.99]) expect(parseMedia(mediaAnchor({ camera: cam({ fov }) }))).not.toHaveProperty('error');
 });
+
+test('a model comment has no time: camera together with time is rejected', () => {
+  expect(parseMedia(mediaAnchor({ camera: cam(), time: 2 }))).toHaveProperty('error');
+});

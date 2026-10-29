@@ -15,6 +15,7 @@ import { MODEL_MARKUP_PROTOCOL, nearPose } from '@/model/pose.ts';
 import { getViewPose, subscribeViewPose } from '@/model/registry.ts';
 import { toast } from '@/shell/toast.ts';
 import { clearJump, selectFileVersion, selectJump } from '../slice.ts';
+import { selectPending } from '@/comments/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { useMarkPopup } from './useMediaMarkup.ts';
 
@@ -41,6 +42,7 @@ export function ModelMarkup({ tabId, path, src, fileRef, url, active, viewer, re
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
   const offered = useAppSelector((s) => s.controls.protocol >= MODEL_MARKUP_PROTOCOL);
   const all = useAppSelector((s) => selectMediaComments(s, path, fileRef));
+  const pending = useAppSelector(selectPending);
   const current = useAppSelector((s) => selectFileVersion(s, path, fileRef));
   const canvas = viewer?.canvas ?? null;
 
@@ -54,6 +56,11 @@ export function ModelMarkup({ tabId, path, src, fileRef, url, active, viewer, re
     return () => viewer.setFrozen(false);
   }, [viewer, marking, onPause]);
   useEffect(() => void onMarking(marking), [marking, onMarking]);
+  // no model on screen (context lost, a released tab coming back, a failed reload): the toolbar is gone, so the mode must go
+  // too, or ↻ would be held for ever. The shapes stay in the draft; N brings the mode (and the drawing) back
+  useEffect(() => {
+    if (marking && !ready) dispatch(setMode(tabId, false));
+  }, [marking, ready, dispatch, tabId]);
 
   // ---- N enters the mode (the video's key) ----
   useEffect(() => {
@@ -115,7 +122,8 @@ export function ModelMarkup({ tabId, path, src, fileRef, url, active, viewer, re
       <MarkupLayer tabId={tabId} media={canvas} fit="contain" onAdd={onAdd} held={!!markPopup} saving={saving} />
       {views.length > 0 && !marking && (
         <div data-anchor-skip data-model-views role="group" aria-label={t('modelViews')} className="absolute bottom-9 left-3 z-10 flex max-h-24 max-w-[70%] flex-wrap gap-1 overflow-y-auto">
-          {views.map((c, i) => {
+          {views.map((c) => {
+            const n = pending.findIndex((p) => p.id === c.id) + 1; // the number the comments panel shows (a sent comment has none)
             const stale = c.status === 'sent' || changedSince(c, current);
             const text = c.text.trim();
             return (
@@ -128,7 +136,7 @@ export function ModelMarkup({ tabId, path, src, fileRef, url, active, viewer, re
                 onClick={() => viewer?.setPose(c.anchor.camera!)}
                 className={`rounded-full border border-border-soft bg-chrome/90 px-2 py-0.5 text-[11px] text-muted-foreground backdrop-blur hover:text-foreground aria-pressed:border-nb-accent aria-pressed:text-nb-accent ${stale ? 'opacity-60' : ''}`}
               >
-                {i + 1}{text ? ` · ${text.length > CHIP_CHARS ? `${text.slice(0, CHIP_CHARS)}…` : text}` : ''}
+                {[n || '', text.length > CHIP_CHARS ? `${text.slice(0, CHIP_CHARS)}…` : text].filter(Boolean).join(' · ') || '◉'}
               </button>
             );
           })}

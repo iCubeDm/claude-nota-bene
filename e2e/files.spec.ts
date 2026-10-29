@@ -1250,6 +1250,21 @@ test('mark up a model: orbit, N, rect, comment, send (camera line + frame); orbi
   await expect(mark).toHaveCount(1);
   await expect(chip).toHaveAttribute('aria-pressed', 'true');
 
+  // the pane's aspect changes (the comments panel closes): the mark keeps covering the same part of the model. The camera
+  // is unchanged (fov is vertical), so in units of the canvas height the mark's box keeps its offset from the canvas centre
+  const rel = () => page.evaluate(([p, i]) => {
+    const c = document.querySelector(`[data-pane="file:${p}"] canvas`)!.getBoundingClientRect();
+    const r = document.querySelector(`[data-pane="file:${p}"] [data-mark="${i}"] [data-shape="rect"]`)!.getBoundingClientRect();
+    return { w: c.width, x0: (r.left - (c.left + c.width / 2)) / c.height, x1: (r.right - (c.left + c.width / 2)) / c.height, y0: (r.top - c.top) / c.height };
+  }, [path, id]);
+  await chip.click();
+  await expect.poll(cam).toBe(marked);
+  const before = await rel();
+  await page.locator('#toggleComments').click(); // close the panel: the pane gets wider
+  await expect.poll(async () => (await rel()).w).not.toBe(before.w);
+  await expect.poll(async () => Math.abs((await rel()).x0 - before.x0) + Math.abs((await rel()).x1 - before.x1) + Math.abs((await rel()).y0 - before.y0)).toBeLessThan(0.02);
+  await openPanel(page);
+
   // a second, still pending comment from another view; then a reload: both survive, the pending card's jump opens the model
   // at its camera with its marks, and the sent comment's chip still leads back to its own view
   await orbit(-120, -60);

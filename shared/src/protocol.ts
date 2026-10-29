@@ -254,7 +254,7 @@ function isMediaAnchorShape(v: Obj): boolean {
   return isObj(v.source) && isFileSource(v.source) && isPos(v.width) && isPos(v.height)
     && (v.time === undefined || (typeof v.time === 'number' && Number.isFinite(v.time) && v.time >= 0))
     && (v.version === undefined || (typeof v.version === 'string' && v.version.length <= 200))
-    && (v.camera === undefined || isCamera(v.camera))
+    && (v.camera === undefined || (isCamera(v.camera) && v.time === undefined)) // a model comment has no time
     && (v.scale === undefined || (typeof v.scale === 'number' && v.scale > 0 && v.scale < 1))
     && Array.isArray(v.shapes) && v.shapes.length > 0 && v.shapes.every(isMediaShape);
 }

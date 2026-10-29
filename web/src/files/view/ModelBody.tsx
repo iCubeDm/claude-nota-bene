@@ -124,6 +124,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
   const [playing, setPlaying] = useState(false);
   const [lost, setLost] = useState(false);
   const [released, setReleased] = useState(false);
+  const [shown, setShown] = useState<ModelViewer | null>(null); // the viewer whose scene holds the model now
   const [marking, setMarking] = useState(false); // a drawing is being made over the view: the camera and the clip are held
   const bgRef = useRef<string>('');
   const file = `${path}\0${src}`;
@@ -181,6 +182,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
         v.dispose();
       }
       setViewer(null);
+      setShown(null);
     };
   }, [started, released, lost, tabId, file]);
 
@@ -215,6 +217,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       settle();
       loaded.current = key;
       viewer.clear();
+      setShown(null);
       hadModel.current = false;
       lastEtag.current = null;
       bytes.current = null;
@@ -246,6 +249,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
         lastEtag.current = r.etag; // only for a file that really is on screen
         loaded.current = key;
         hadModel.current = true;
+        setShown(viewer);
         if (pose.current?.file === file) viewer.setPose(pose.current.pose); // back from a release or a loss: the camera it had
         pose.current = null;
         setClip(0);
@@ -279,7 +283,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       {status.s === 'noGl' && note(t('modelNoWebgl'), true)}
       {status.s === 'refused' && note(t('modelRefused', status.uri), true)}
       <ModelMarkup
-        tabId={tabId} path={path} src={src} fileRef={fileRef} url={markUrl} active={active} viewer={viewer} ready={!!ready}
+        tabId={tabId} path={path} src={src} fileRef={fileRef} url={markUrl} active={active} viewer={viewer} ready={!!ready && shown === viewer}
         playing={playing} onPause={onPause} onMarking={setMarking}
       />
       {ready && (

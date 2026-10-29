@@ -53,8 +53,8 @@ export const headVersion = (url: string, signal: AbortSignal): Promise<string | 
  * media's cache-busting `bust` / `failed` / resume point, the refresh after a turn (held while marking up) and the
  * file version media comments compare against.
  */
-export function useFileLoad({ path, src, ref, url, kind, media, versioned: hasVersion, active, fixed, marking, markingRef }: {
-  path: string; src: string; ref: string | undefined; url: string; kind: FileKind; media: boolean; versioned: boolean;
+export function useFileLoad({ path, src, ref, url, kind, media, hasVersion, active, fixed, marking, markingRef }: {
+  path: string; src: string; ref: string | undefined; url: string; kind: FileKind; media: boolean; hasVersion: boolean;
   active: boolean; fixed: boolean; marking: boolean; markingRef: MutableRefObject<boolean>;
 }) {
   const dispatch = useAppDispatch();

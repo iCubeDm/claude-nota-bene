@@ -44,7 +44,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
   const markingRef = useRef(marking);
   markingRef.current = marking;
-  const load = useFileLoad({ path, src, ref, url, kind, media, versioned: markableKind || kind === 'model', active, fixed, marking, markingRef });
+  const load = useFileLoad({ path, src, ref, url, kind, media, hasVersion: markableKind || kind === 'model', active, fixed, marking, markingRef });
   const { data, rev, loadedRev, failed, mediaUrl, resumeAt } = load;
   const markup = useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, mediaEl: load.mediaEl });
   const { markable } = markup;
