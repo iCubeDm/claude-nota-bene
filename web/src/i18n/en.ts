@@ -262,10 +262,13 @@ export const en: Dict = {
   noHighlight: 'not highlighted: large file',
   wrapLines: 'Wrap lines',
   reload: 'Reload',
-  // 3D model (.glb / .gltf)
+  // 3D model (.glb / .gltf / .blend)
   modelLoading: (pct) => (pct === null ? 'Loading the model…' : `Loading the model… ${pct}%`),
   modelTooBig: (size) => `The model is too large to show (${size}, the limit is 256 MB)`,
   modelFailed: (e) => `Could not show the model: ${e}`,
+  modelConverting: 'Blender converts the file…',
+  modelNoBlender: 'A .blend file needs Blender installed on this computer. Looked for: the NOTA_BENE_BLENDER variable, "blender" on PATH, /Applications/Blender.app/Contents/MacOS/Blender',
+  modelBlendNote: 'converted by Blender: materials made of shader nodes may look different',
   modelLost: 'The WebGL context was lost: the browser took the GPU back. Reload the tab (↻)',
   modelInfo: (size, meshes, tris, mats, anims) =>
     `${size} · ${meshes} mesh${meshes === 1 ? '' : 'es'} · ${tris} triangle${tris === 1 ? '' : 's'} · ${mats} material${mats === 1 ? '' : 's'} · ${anims} animation${anims === 1 ? '' : 's'}`,

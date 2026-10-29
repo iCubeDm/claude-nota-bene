@@ -3,7 +3,7 @@ import { useT } from '@/i18n/index.ts';
 import type { CameraPose, ModelStats, ModelViewer, ViewerModule } from '@/model/api.ts';
 import { publishViewPose, registerModelViewer, unregisterModelViewer } from '@/model/registry.ts';
 import { RefusedResource, resolveModelUrl } from '@/model/resolve.ts';
-import { fileUrl } from '../kinds.ts';
+import { BLEND, fileUrl, modelUrl } from '../kinds.ts';
 import { ModelMarkup } from './ModelMarkup.tsx';
 
 /** Above this a model is not fetched at all: the whole file lives in memory twice (bytes, then the parsed scene). */
@@ -17,6 +17,7 @@ type Status =
   | { s: 'lost' }
   | { s: 'noGl' }
   | { s: 'refused'; uri: string }
+  | { s: 'noBlender' }
   | { s: 'error'; message: string };
 
 type Tr = ReturnType<typeof useT>;
@@ -40,6 +41,8 @@ function loadViewerModule(): Promise<ViewerModule> {
 }
 
 class Gone extends Error {}
+/** The server has no Blender (501 from /model). */
+class NoBlender extends Error {}
 class TooBig extends Error {
   size: number;
   constructor(size: number) { super('too big'); this.size = size; }
@@ -54,7 +57,13 @@ export async function fetchModel(
 ): Promise<{ bytes: ArrayBuffer | null; etag: string | null; same: boolean }> {
   const res = await fetch(url, { signal });
   if (res.status === 404) throw new Gone();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`.trim());
+  if (res.status === 501) throw new NoBlender();
+  if (!res.ok) {
+    // /model explains a failed conversion as {error, detail}; any other failure is just its status
+    const j = (res.headers.get('content-type') ?? '').includes('json')
+      ? await res.json().catch(() => null) as { error?: string; detail?: string } | null : null;
+    throw new Error(j?.detail || j?.error || `${res.status} ${res.statusText}`.trim());
+  }
   const etag = res.headers.get('etag');
   if (known && etag === known) {
     void res.body?.cancel();
@@ -103,7 +112,7 @@ function useBackground(el: React.RefObject<HTMLElement | null>, onChange: (css: 
 }
 
 /**
- * The pane of a .glb / .gltf: a view-only 3D viewer (orbit, zoom), with reset view, animation clips and an info line.
+ * The pane of a .glb / .gltf / .blend (converted to GLB by the server's Blender): a view-only 3D viewer (orbit, zoom), with reset view, animation clips and an info line.
  * All the 3D code is in the lazy `@/model/viewer.ts`; this component fetches the bytes (size cap, progress), owns the
  * states and the viewer's lifetime. Nothing is created or fetched until the tab is first shown; after that a download
  * goes on while the tab is hidden. `reloadKey`: ↻ / a finished turn; a reload keeps the camera, and a file with the same
@@ -223,6 +232,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       bytes.current = null;
       if (e instanceof Gone) setStatus({ s: 'gone' });
       else if (e instanceof TooBig) setStatus({ s: 'tooBig', size: e.size });
+      else if (e instanceof NoBlender) setStatus({ s: 'noBlender' });
       else if (e instanceof RefusedResource) setStatus({ s: 'refused', uri: e.uri });
       else setStatus({ s: 'error', message: e instanceof Error ? e.message : String(e) });
     };
@@ -231,7 +241,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
     void (async () => {
       try {
         const known = bytes.current ? lastEtag.current : null;
-        const r = await fetchModel(fileUrl(path, undefined, src), ac.signal, known, (pct) => !ac.signal.aborted && !hadModel.current && setStatus({ s: 'loading', pct }));
+        const r = await fetchModel(modelUrl(path, src), ac.signal, known, (pct) => !ac.signal.aborted && !hadModel.current && setStatus({ s: 'loading', pct }));
         if (ac.signal.aborted) return;
         // the same file (same ETag): nothing to parse when it is on screen, else the bytes we kept go to the new viewer
         if (r.same && hadModel.current) {
@@ -265,6 +275,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
   const ready = status.s === 'ready' ? status : null;
   const onPause = useCallback(() => setPlaying(false), []);
   const markUrl = reloadKey ? `${fileUrl(path, undefined, src)}&r=${reloadKey}` : fileUrl(path, undefined, src);
+  const blend = BLEND.test(path);
   const note = (text: string, alert = false) => <p role={alert ? 'alert' : undefined} className="absolute inset-x-0 top-0 p-4 text-sm text-muted-foreground">{text}</p>;
   return (
     <div
@@ -275,12 +286,13 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       className="grid-pane relative min-h-0 flex-1 overflow-hidden"
     >
       <div ref={host} data-model-host className="absolute inset-0 bg-background" onDoubleClick={() => marking || viewer?.resetView()} />
-      {status.s === 'loading' && note(t('modelLoading', status.pct))}
+      {status.s === 'loading' && note(blend && status.pct === null ? t('modelConverting') : t('modelLoading', status.pct))}
       {status.s === 'gone' && note(t('fileGone'))}
       {status.s === 'tooBig' && note(t('modelTooBig', fmtSize(status.size, t)))}
       {status.s === 'error' && note(t('modelFailed', status.message), true)}
       {status.s === 'lost' && note(t('modelLost'), true)}
       {status.s === 'noGl' && note(t('modelNoWebgl'), true)}
+      {status.s === 'noBlender' && note(t('modelNoBlender'), true)}
       {status.s === 'refused' && note(t('modelRefused', status.uri), true)}
       <ModelMarkup
         tabId={tabId} path={path} src={src} fileRef={fileRef} url={markUrl} active={active} viewer={viewer} ready={!!ready && shown === viewer}
@@ -314,6 +326,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
             </>
           )}
           <button type="button" aria-label={t('modelReset')} title={t('modelResetTip')} disabled={marking} onClick={() => viewer?.resetView()} className="rounded px-1.5 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40">⟲</button>
+          {blend && <span data-model-note className="basis-full">{t('modelBlendNote')}</span>}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fileUrl, isPath, kindOf } from './kinds.ts';
+import { fileUrl, isPath, kindOf, modelUrl } from './kinds.ts';
 
 it('kindOf covers each regex', () => {
   expect(kindOf('a/README.md')).toBe('md');
@@ -14,6 +14,9 @@ it('kindOf covers each regex', () => {
   expect(kindOf('m/robot.glb')).toBe('model');
   expect(kindOf('ROBOT.GLB')).toBe('model');
   expect(kindOf('scene.gltf')).toBe('model');
+  expect(kindOf('scene.blend')).toBe('model');
+  expect(kindOf('SCENE.BLEND')).toBe('model');
+  expect(kindOf('scene.blend1')).toBe('text');
   expect(kindOf('scene.gltf.txt')).toBe('text');
   expect(kindOf('main.ts')).toBe('text');
   expect(kindOf('Makefile')).toBe('text');
@@ -37,4 +40,10 @@ it('isPath is the prototype predicate', () => {
   expect(isPath('~/a.md')).toBe(false);
   expect(isPath('a b')).toBe(false);
   expect(isPath('a|b/c')).toBe(false);
+});
+
+it('modelUrl: a .blend goes through /model (converted by Blender), a glb / gltf through /file', () => {
+  expect(modelUrl('m/a b.blend', 'here')).toBe('/model?path=m%2Fa%20b.blend');
+  expect(modelUrl('m/a.BLEND', 'wt-1')).toBe('/model?path=m%2Fa.BLEND&src=wt-1');
+  expect(modelUrl('m/a.glb', 'wt-1')).toBe('/file?path=m%2Fa.glb&src=wt-1');
 });

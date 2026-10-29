@@ -3,6 +3,7 @@ import {
   PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Texture, ACESFilmicToneMapping, Vector3, WebGLRenderer,
 } from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -107,6 +108,9 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
      last = now; return dt; };
   const home = { position: new Vector3(0, 0, 3), target: new Vector3() };
   const latest = createLatest(); // a parse that was superseded (or outlived the viewer) is dropped, never shown
+  // KTX2 / Basis textures: the transcoder (js + wasm) is likewise a hashed asset of our build (three names it with
+  // `new URL(…, import.meta.url)`, which Vite bundles), fetched on the first KTX2 texture; its worker is made then too
+  const ktx2 = new KTX2Loader().detectSupport(renderer);
   const draco = new DRACOLoader(); // its decoder (wasm + js) is a hashed asset of our own build, fetched on the first compressed file
 
   const pose = (): CameraPose => ({
@@ -192,7 +196,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
         if (r === null) { refused.push(url); return 'about:blank'; }
         return r;
       });
-      const loader = new GLTFLoader(manager).setDRACOLoader(draco).setMeshoptDecoder(MeshoptDecoder);
+      const loader = new GLTFLoader(manager).setDRACOLoader(draco).setKTX2Loader(ktx2).setMeshoptDecoder(MeshoptDecoder);
       let gltf: GLTF;
       try {
         gltf = await new Promise<GLTF>((ok, bad) => loader.parse(data, '', ok, (e) => bad(e instanceof Error ? e : new Error(String((e as { message?: string }).message ?? e)))));
@@ -281,6 +285,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
       canvas.removeEventListener('webglcontextlost', onLost);
       controls.dispose();
       draco.dispose();
+      ktx2.dispose();
       envTarget.dispose();
       renderer.dispose();
       renderer.forceContextLoss();

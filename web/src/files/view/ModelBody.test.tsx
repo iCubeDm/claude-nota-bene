@@ -41,7 +41,7 @@ vi.mock('@/model/viewer.ts', () => ({
 
 let fetchGate: Promise<void> | null;
 let pulls: number;
-let fetchSpec: { etag?: string; status?: number; size?: number; bytes?: number; noLength?: boolean };
+let fetchSpec: { etag?: string; status?: number; size?: number; bytes?: number; noLength?: boolean; json?: unknown };
 let fetched: string[];
 beforeEach(() => {
   store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
@@ -53,7 +53,7 @@ beforeEach(() => {
     fetched.push(url);
     if (fetchGate) await fetchGate;
     const status = fetchSpec.status ?? 200;
-    if (status !== 200) return new Response('no', { status });
+    if (status !== 200) return fetchSpec.json ? new Response(JSON.stringify(fetchSpec.json), { status, headers: { 'content-type': 'application/json' } }) : new Response('no', { status });
     const headers: Record<string, string> = {};
     if (fetchSpec.etag) headers.etag = fetchSpec.etag;
     if (!fetchSpec.noLength) headers['content-length'] = String(fetchSpec.size ?? fetchSpec.bytes ?? 0);
@@ -329,4 +329,49 @@ it('the hidden-release timer starts again when the download that blocked it fini
   release();
   await waitFor(() => expect(created[0]!.dispose).toHaveBeenCalledTimes(1));
   expect(container).toBeTruthy();
+});
+
+const blendUi = (p: Partial<{ src: string }> = {}) => (
+  <Provider store={store}><ModelBody path="art/scene.blend" src="here" tabId="file:art/scene.blend" active reloadKey={0} {...p} /></Provider>
+);
+
+it('a .blend is fetched from /model; while Blender converts the pane says so, then it is a normal model with a note', async () => {
+  let release!: () => void;
+  fetchGate = new Promise<void>((r) => { release = r; });
+  const { container } = render(blendUi({ src: 'wt-1' }));
+  await waitFor(() => expect(screen.getByText('Blender converts the file…')).toBeTruthy());
+  await waitFor(() => expect(fetched).toEqual(['/model?path=art%2Fscene.blend&src=wt-1']));
+  expect(screen.getByText('Blender converts the file…')).toBeTruthy();
+  release();
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(screen.getByText(/converted by Blender: materials made of shader nodes may look different/)).toBeTruthy();
+  expect(loadData.length).toBe(1);
+});
+
+it('a .glb has no Blender note', async () => {
+  const { container } = render(ui());
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(screen.queryByText(/converted by Blender/)).toBeNull();
+});
+
+it('no Blender (501): a line says Blender is needed and where it is looked for', async () => {
+  fetchSpec = { status: 501, json: { error: 'no-blender', detail: '' } };
+  const { container } = render(blendUi());
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/needs Blender/));
+  const text = screen.getByRole('alert').textContent!;
+  expect(text).toContain('NOTA_BENE_BLENDER');
+  expect(text).toContain('PATH');
+  expect(text).toContain('/Applications/Blender.app');
+  expect(ready(container)).toBeNull();
+  expect(calls).not.toContain('load');
+});
+
+it('a failed conversion (422) shows what Blender said; a timeout (504) says so', async () => {
+  fetchSpec = { status: 422, json: { error: 'export-failed', detail: 'Error: bad mesh' } };
+  const a = render(blendUi());
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Error: bad mesh'));
+  a.unmount();
+  fetchSpec = { status: 504, json: { error: 'timeout', detail: 'Blender did not finish in 120 s and was stopped' } };
+  render(blendUi());
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('did not finish in 120 s'));
 });

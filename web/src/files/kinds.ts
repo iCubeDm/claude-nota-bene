@@ -2,7 +2,8 @@
 export const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
 export const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
 export const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
-export const MODEL = /\.(glb|gltf)$/i;
+export const MODEL = /\.(glb|gltf|blend)$/i;
+export const BLEND = /\.blend$/i;
 export const MD = /\.(md|markdown)$/i;
 
 export type FileKind = 'md' | 'image' | 'video' | 'audio' | 'model' | 'text';
@@ -47,3 +48,9 @@ export function fileUrl(p: string, baseDir?: string, src?: string): string {
 
 export const isPath = (p: string): boolean =>
   !/^(https?:|~|\/)/.test(p) && !/[\n`<>|*]/.test(p) && (/\//.test(p) || /\.[a-z0-9]{1,5}$/i.test(p));
+
+/** Where a model's bytes come from: a .blend is converted to GLB by the server's Blender (`/model`), the rest are files. */
+export function modelUrl(p: string, src?: string): string {
+  const u = fileUrl(p, undefined, src);
+  return BLEND.test(p) ? u.replace('/file?', '/model?') : u;
+}
