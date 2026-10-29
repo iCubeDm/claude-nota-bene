@@ -1,5 +1,5 @@
 import {
-  AnimationAction, AnimationMixer, Box3, Clock, Color, DirectionalLight, LoadingManager, Material, Mesh, Object3D,
+  AnimationAction, AnimationMixer, Box3, Color, DirectionalLight, LoadingManager, Material, Mesh, Object3D,
   PerspectiveCamera, PMREMGenerator, Scene, SRGBColorSpace, Texture, ACESFilmicToneMapping, Vector3, WebGLRenderer,
 } from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -98,7 +98,9 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
   let visible = true;
   let disposed = false;
   let raf = 0;
-  const clock = new Clock();
+  // seconds since the previous animation frame (THREE.Clock is deprecated); reset when playing (re)starts
+  let last = performance.now();
+  const tick = () => { const now = performance.now(); const dt = (now - last) / 1000; last = now; return dt; };
   const home = { position: new Vector3(0, 0, 3), target: new Vector3() };
   const draco = new DRACOLoader(); // its decoder (wasm + js) is a hashed asset of our own build, fetched on the first compressed file
 
@@ -112,7 +114,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
   const draw = () => {
     raf = 0;
     if (disposed || !visible) return;
-    if (playing && mixer) mixer.update(clock.getDelta());
+    if (playing && mixer) mixer.update(tick());
     renderer.render(scene, camera);
     if (playing) raf = requestAnimationFrame(draw);
   };
@@ -169,7 +171,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
   function setActionPlaying() {
     if (!action) return;
     action.paused = !playing;
-    if (playing) clock.getDelta(); // do not jump by the time spent paused
+    if (playing) tick(); // do not jump by the time spent paused
     mixer?.update(0);
     requestRender();
   }
@@ -245,7 +247,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
     },
     setVisible(v) {
       visible = v;
-      if (v) { clock.getDelta(); resize(); requestRender(); } else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      if (v) { tick(); resize(); requestRender(); } else if (raf) { cancelAnimationFrame(raf); raf = 0; }
     },
     snapshot() {
       if (disposed) return Promise.resolve(null);
