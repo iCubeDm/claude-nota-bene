@@ -82,7 +82,7 @@ export function ShellView({ tab, active }: { tab: ShellTab; active: boolean }) {
     // `ended`: the task's end reached the store, so the read that follows is the one after the end
   }, [session, task, active, protocol, ended]);
 
-  const text = plainOutput(out.output);
+  const text = plainOutput(out.output, out.truncated);
   useLayoutEffect(() => {
     const el = pre.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
