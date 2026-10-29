@@ -496,6 +496,7 @@ export async function startServer(o: {
       hubs.delete(hub);
       if (heartbeat) clearInterval(heartbeat);
       manager.close();
+      blend.dispose();
       for (const c of wss.clients) c.terminate();
       wss.close(() => {
         server.close(() => resolve());

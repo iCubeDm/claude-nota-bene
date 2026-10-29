@@ -18,6 +18,7 @@ type Status =
   | { s: 'noGl' }
   | { s: 'refused'; uri: string }
   | { s: 'noBlender' }
+  | { s: 'outside'; paths: string[] }
   | { s: 'error'; message: string };
 
 type Tr = ReturnType<typeof useT>;
@@ -43,6 +44,11 @@ function loadViewerModule(): Promise<ViewerModule> {
 class Gone extends Error {}
 /** The server has no Blender (501 from /model). */
 class NoBlender extends Error {}
+/** The .blend references files outside the project (422 `outside-refs`). */
+class OutsideRefs extends Error {
+  paths: string[];
+  constructor(paths: string[]) { super('outside-refs'); this.paths = paths; }
+}
 class TooBig extends Error {
   size: number;
   constructor(size: number) { super('too big'); this.size = size; }
@@ -61,7 +67,8 @@ export async function fetchModel(
   if (!res.ok) {
     // /model explains a failed conversion as {error, detail}; any other failure is just its status
     const j = (res.headers.get('content-type') ?? '').includes('json')
-      ? await res.json().catch(() => null) as { error?: string; detail?: string } | null : null;
+      ? await res.json().catch(() => null) as { error?: string; detail?: string; paths?: string[] } | null : null;
+    if (j?.error === 'outside-refs' && Array.isArray(j.paths)) throw new OutsideRefs(j.paths.map(String));
     throw new Error(j?.detail || j?.error || `${res.status} ${res.statusText}`.trim());
   }
   const etag = res.headers.get('etag');
@@ -233,6 +240,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       if (e instanceof Gone) setStatus({ s: 'gone' });
       else if (e instanceof TooBig) setStatus({ s: 'tooBig', size: e.size });
       else if (e instanceof NoBlender) setStatus({ s: 'noBlender' });
+      else if (e instanceof OutsideRefs) setStatus({ s: 'outside', paths: e.paths });
       else if (e instanceof RefusedResource) setStatus({ s: 'refused', uri: e.uri });
       else setStatus({ s: 'error', message: e instanceof Error ? e.message : String(e) });
     };
@@ -273,6 +281,19 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
   }, [viewer, active, file, path, src, reloadKey]);
 
   const ready = status.s === 'ready' ? status : null;
+  // the info bar sits over the pane's bottom edge: the canvas ends above it, so the model is framed in what is visible
+  const bar = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(0);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const read = () => setBarH(el.offsetHeight);
+    read();
+    if (typeof ResizeObserver === 'undefined') return; // jsdom
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [!!ready]);
   const onPause = useCallback(() => setPlaying(false), []);
   const markUrl = reloadKey ? `${fileUrl(path, undefined, src)}&r=${reloadKey}` : fileUrl(path, undefined, src);
   const blend = BLEND.test(path);
@@ -285,7 +306,7 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       hidden={!active}
       className="grid-pane relative min-h-0 flex-1 overflow-hidden"
     >
-      <div ref={host} data-model-host className="absolute inset-0 bg-background" onDoubleClick={() => marking || viewer?.resetView()} />
+      <div ref={host} data-model-host style={{ bottom: ready ? barH : 0 }} className="absolute inset-x-0 top-0 bg-background" onDoubleClick={() => marking || viewer?.resetView()} />
       {status.s === 'loading' && note(blend && status.pct === null ? t('modelConverting') : t('modelLoading', status.pct))}
       {status.s === 'gone' && note(t('fileGone'))}
       {status.s === 'tooBig' && note(t('modelTooBig', fmtSize(status.size, t)))}
@@ -293,13 +314,15 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
       {status.s === 'lost' && note(t('modelLost'), true)}
       {status.s === 'noGl' && note(t('modelNoWebgl'), true)}
       {status.s === 'noBlender' && note(t('modelNoBlender'), true)}
+      {status.s === 'outside' && note(t('modelOutsideRefs', status.paths.join(', ')), true)}
       {status.s === 'refused' && note(t('modelRefused', status.uri), true)}
       <ModelMarkup
         tabId={tabId} path={path} src={src} fileRef={fileRef} url={markUrl} active={active} viewer={viewer} ready={!!ready && shown === viewer}
         playing={playing} onPause={onPause} onMarking={setMarking}
       />
       {ready && (
-        <div data-anchor-skip className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 border-t border-border-soft bg-chrome px-3 py-1 font-mono text-[11.5px] text-muted-foreground backdrop-blur">
+        <div ref={bar} data-anchor-skip className="absolute inset-x-0 bottom-0 border-t border-border-soft bg-chrome px-3 py-1 font-mono text-[11.5px] text-muted-foreground backdrop-blur">
+         <div className="flex flex-wrap items-center gap-2">
           <span data-model-info className="min-w-0 flex-1 truncate">
             {t('modelInfo', fmtSize(ready.size, t), ready.stats.meshes, ready.stats.triangles, ready.stats.materials, ready.stats.clips.length)}
             {ready.stats.refused ? ` · ${t('modelRefusedN', ready.stats.refused)}` : ''}
@@ -326,7 +349,8 @@ export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releas
             </>
           )}
           <button type="button" aria-label={t('modelReset')} title={t('modelResetTip')} disabled={marking} onClick={() => viewer?.resetView()} className="rounded px-1.5 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40">⟲</button>
-          {blend && <span data-model-note className="basis-full">{t('modelBlendNote')}</span>}
+         </div>
+          {blend && <div data-model-note>{t('modelBlendNote')}</div>}
         </div>
       )}
     </div>

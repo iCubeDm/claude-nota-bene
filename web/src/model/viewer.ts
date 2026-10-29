@@ -160,7 +160,10 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
     const empty = box.isEmpty();
     const center = empty ? new Vector3() : box.getCenter(new Vector3());
     const radius = empty ? 1 : Math.max(box.getSize(new Vector3()).length() / 2, 1e-6);
-    const dist = (radius / Math.sin((camera.fov * Math.PI) / 360)) * 1.1;
+    // the sphere must fit both ways: the vertical fov, and the horizontal one of a pane that is narrower than tall
+    const half = (camera.fov * Math.PI) / 360;
+    const halfMin = Math.atan(Math.tan(half) * Math.min(1, camera.aspect));
+    const dist = (radius / Math.sin(halfMin)) * 1.1;
     camera.near = dist / 100;
     camera.far = dist * 100;
     camera.updateProjectionMatrix();

@@ -264,6 +264,7 @@ export const ru = {
   modelLoading: (pct: number | null) => (pct === null ? 'Загрузка модели…' : `Загрузка модели… ${pct}%`),
   modelTooBig: (size: string) => `Модель слишком большая для показа (${size}, предел 256 МБ)`,
   modelFailed: (e: string) => `Не удалось показать модель: ${e}`,
+  modelOutsideRefs: (paths: string) => `Этот .blend ссылается на файлы вне проекта: ${paths}`,
   modelConverting: 'Blender конвертирует файл…',
   modelNoBlender: 'Для файла .blend нужен установленный Blender. Искали: переменную NOTA_BENE_BLENDER, "blender" в PATH, /Applications/Blender.app/Contents/MacOS/Blender',
   modelBlendNote: 'сконвертировано Blender: материалы из шейдерных нод могут выглядеть иначе',

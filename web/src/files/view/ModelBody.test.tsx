@@ -375,3 +375,20 @@ it('a failed conversion (422) shows what Blender said; a timeout (504) says so',
   render(blendUi());
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('did not finish in 120 s'));
 });
+
+it('a .blend that references files outside the project says which', async () => {
+  fetchSpec = { status: 422, json: { error: 'outside-refs', detail: 'x', paths: ['/Users/me/secret.png', 'G: GeometryNodeImportText'] } };
+  render(blendUi());
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This .blend references files outside the project: /Users/me/secret.png, G: GeometryNodeImportText'));
+});
+
+it('the controls stay on the info row and the Blender note is its own line below them', async () => {
+  const { container } = render(blendUi());
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  const info = container.querySelector('[data-model-info]')!;
+  const reset = container.querySelector('button[aria-label="Reset view"]')!;
+  const note = container.querySelector('[data-model-note]')!;
+  // the controls share the info's row; the note is a separate block after that row
+  expect(info.parentElement).toBe(reset.parentElement);
+  expect(info.parentElement!.nextElementSibling).toBe(note);
+});

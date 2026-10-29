@@ -266,6 +266,7 @@ export const en: Dict = {
   modelLoading: (pct) => (pct === null ? 'Loading the model…' : `Loading the model… ${pct}%`),
   modelTooBig: (size) => `The model is too large to show (${size}, the limit is 256 MB)`,
   modelFailed: (e) => `Could not show the model: ${e}`,
+  modelOutsideRefs: (paths) => `This .blend references files outside the project: ${paths}`,
   modelConverting: 'Blender converts the file…',
   modelNoBlender: 'A .blend file needs Blender installed on this computer. Looked for: the NOTA_BENE_BLENDER variable, "blender" on PATH, /Applications/Blender.app/Contents/MacOS/Blender',
   modelBlendNote: 'converted by Blender: materials made of shader nodes may look different',

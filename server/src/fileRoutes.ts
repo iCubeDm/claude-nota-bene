@@ -264,6 +264,9 @@ export function fileRoutes(o: {
       if (!getOnly(req, res)) return;
       const blend = o.blend;
       if (!blend) return plain(res, 404, 'not found');
+      // the first GET that starts a process: a page of another site must not be able to queue Blender
+      const site = req.headers['sec-fetch-site'];
+      if (site !== undefined && site !== 'same-origin' && site !== 'none') return plain(res, 403, 'cross-site request');
       const rel = queryPath(req);
       if (!/\.blend$/i.test(rel)) return plain(res, 400, 'only .blend files are converted');
       withSource(req, res, async (src, root) => {
@@ -273,7 +276,7 @@ export function fileRoutes(o: {
           if (abs === null) return plain(res, 403, 'outside project');
           const st = await fs.promises.stat(abs).catch(() => null);
           if (!st?.isFile()) return plain(res, 404, 'not found');
-          input = { file: abs };
+          input = { file: abs, base: src === 'here' ? root : src.dir! };
         } else {
           // a branch: the blob is written to a temp file by the converter and removed after
           let bytes: Buffer | null;
@@ -286,15 +289,21 @@ export function fileRoutes(o: {
           input = { bytes };
         }
         try {
-          const { glb, hash } = await blend.convert(input);
+          const conv = await blend.convert(input);
+          const { glb, hash, transient } = conv;
           const st = await fs.promises.stat(glb);
           res.writeHead(200, { 'content-type': 'model/gltf-binary', 'content-length': st.size, etag: `"${hash}"`, ...SAFETY });
-          if (req.method === 'HEAD') return void res.end();
+          if (req.method === 'HEAD') {
+            res.end();
+            if (transient) fs.promises.rm(glb, { force: true }).catch(() => {});
+            return;
+          }
           pipeline(fs.createReadStream(glb), res, (e) => {
+            if (transient) fs.promises.rm(glb, { force: true }).catch(() => {});
             if (e && (e as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') reportError(o.hub, rel, e);
           });
         } catch (e) {
-          if (e instanceof BlendError) return json(req, res, e.status, { error: e.code, detail: e.detail });
+          if (e instanceof BlendError) return json(req, res, e.status, { error: e.code, detail: e.detail, ...(e.paths ? { paths: e.paths } : {}) });
           fail(req, res, e);
         }
       });

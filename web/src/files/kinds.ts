@@ -51,6 +51,6 @@ export const isPath = (p: string): boolean =>
 
 /** Where a model's bytes come from: a .blend is converted to GLB by the server's Blender (`/model`), the rest are files. */
 export function modelUrl(p: string, src?: string): string {
-  const u = fileUrl(p, undefined, src);
-  return BLEND.test(p) ? u.replace('/file?', '/model?') : u;
+  if (!BLEND.test(p)) return fileUrl(p, undefined, src);
+  return `/model?path=${encodeURIComponent(p)}${src && src !== 'here' ? `&src=${encodeURIComponent(src)}` : ''}`;
 }
