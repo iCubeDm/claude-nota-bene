@@ -1183,3 +1183,96 @@ test('the header reload reloads a model and keeps the camera; a model tab surviv
   await expect(pane).toHaveAttribute('data-model-ready', 'true');
   expect(await pane.getAttribute('data-model-camera')).toBe(zoomed);
 });
+
+// ---- Margin comments on a 3D view (step B): the frame is the canvas at the camera's pose, the batch names the camera.
+test('mark up a model: orbit, N, rect, comment, send (camera line + frame); orbit away hides the mark, the view chip brings the camera back, a reload and the jump restore it @files', async ({ page }) => {
+  const frames = sentFrames(page);
+  await start(page);
+  test.skip(!(await webGl(page)), 'needs WebGL (software or hardware) in the browser');
+  await clearPending(page);
+  await openFromTree(page, 'models/cube.glb');
+  const path = 'models/cube.glb';
+  const pane = modelPane(page, path);
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  const canvas = pane.locator('canvas');
+  const cam = () => pane.getAttribute('data-model-camera');
+  const orbit = async (dx: number, dy: number) => {
+    const b = (await canvas.boundingBox())!;
+    await drag(page, { x: b.x + b.width / 2, y: b.y + b.height / 2 }, { x: b.x + b.width / 2 + dx, y: b.y + b.height / 2 + dy });
+  };
+  const home = await cam();
+  await orbit(90, 30);
+  await expect.poll(cam).not.toBe(home);
+  const marked = (await cam())!;
+
+  await page.keyboard.press('n');
+  const layer = markupLayer(page, path);
+  await expect(layer).toBeVisible();
+  // the camera is frozen while marking: a drag on the view draws, it does not orbit
+  const cb = (await canvas.boundingBox())!;
+  await drag(page, at(cb, 0.3, 0.3), at(cb, 0.6, 0.6));
+  await expect(layer.locator('[data-shape="rect"]')).toHaveCount(1);
+  expect(await cam()).toBe(marked);
+  const text = uniq('model');
+  const id = await addMarkComment(page, text);
+  await page.keyboard.press('Escape');
+  await expect(layer).toHaveCount(0);
+  const mark = pane.locator(`[data-media-marks] [data-mark="${id}"]`);
+  await expect(mark).toHaveCount(1);
+
+  await sendAndSettle(page);
+  await expect.poll(() => batchText(frames, text)).toBeTruthy();
+  const batch = batchText(frames, text)!;
+  const line = /\[models\/cube\.glb · (\d+)×(\d+) · camera \(([^)]*)\) → \(([^)]*)\), fov 50°\]/.exec(batch);
+  expect(line, batch).not.toBeNull();
+  expect(Number(line![1])).toBeGreaterThan(100);
+  const nums = (s: string) => s.split(', ').map(Number);
+  const sent = [...nums(line![3]!), ...nums(line![4]!)];
+  const live = marked.split(' ').map(Number);
+  sent.forEach((v, i) => expect(Math.abs(v - live[i]!), `${sent} vs ${live}`).toBeLessThanOrEqual(Math.max(0.01, Math.abs(live[i]!) * 0.006))); // 3 significant digits
+  expect(batch).not.toContain(' @ '); // no clip time
+  const msg = frames.map((f) => { try { return JSON.parse(f) as { type?: string; text?: string; images?: { id: string }[] }; } catch { return null; } })
+    .find((m) => m?.type === 'send' && m.text?.includes(text))!;
+  expect(msg.images).toHaveLength(1);
+  const png = await page.request.get(`/attach/${msg.images![0].id}`);
+  expect(png.ok()).toBe(true);
+  if (process.env.NB_SAVE_COMPOSITE) fs.writeFileSync(process.env.NB_SAVE_COMPOSITE, await png.body());
+
+  // orbit away: the mark hides, the comment stays reachable as a chip; the chip brings the camera back and the mark shows
+  await openFromTree(page, path);
+  await orbit(-120, -60);
+  await expect.poll(cam).not.toBe(marked);
+  await expect(mark).toHaveCount(0);
+  const chip = pane.locator(`[data-view-chip="${id}"]`);
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await expect.poll(cam).toBe(marked);
+  await expect(mark).toHaveCount(1);
+  await expect(chip).toHaveAttribute('aria-pressed', 'true');
+
+  // a second, still pending comment from another view; then a reload: both survive, the pending card's jump opens the model
+  // at its camera with its marks, and the sent comment's chip still leads back to its own view
+  await orbit(-120, -60);
+  await expect.poll(cam).not.toBe(marked);
+  const second = (await cam())!;
+  await page.keyboard.press('n');
+  await expect(layer).toBeVisible();
+  await drag(page, at(cb, 0.4, 0.2), at(cb, 0.7, 0.5));
+  const text2 = uniq('model2');
+  const id2 = await addMarkComment(page, text2);
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await openPanel(page);
+  const card = cards(page).filter({ hasText: text2 });
+  await expect(card).toHaveCount(1);
+  await card.locator('[data-media-thumb]').click();
+  await expect(tabOf(page, path)).toHaveAttribute('aria-selected', 'true');
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  await expect.poll(cam).toBe(second);
+  await expect(pane.locator(`[data-media-marks] [data-mark="${id2}"]`)).toHaveCount(1);
+  await pane.locator(`[data-view-chip="${id}"]`).click();
+  await expect.poll(cam).toBe(marked);
+  await expect(pane.locator(`[data-media-marks] [data-mark="${id}"]`)).toHaveCount(1);
+  await cards(page).filter({ hasText: text2 }).getByRole('button', { name: /^(Delete|Удалить)$/ }).click(); // leaves no pending comment behind
+});
