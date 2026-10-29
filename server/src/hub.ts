@@ -1,4 +1,4 @@
-import { reduceTasks, type ServerEvent } from '@nota-bene/shared';
+import { reduceTasks, type ServerEvent, type Task } from '@nota-bene/shared';
 
 type Sock = { send(data: string): void };
 
@@ -36,9 +36,14 @@ export class EventHub {
    * `call`, not yet done) and whether its tool_result has arrived. The subagent route's `running` and its cached 404 read it.
    */
   callState(tool: string): { live: boolean; hasResult: boolean } {
-    const live = Object.values(reduceTasks({}, { kind: 'replay', events: this.history, ts: 0 } as ServerEvent)).some((t) => t.call === tool);
+    const live = Object.values(reduceTasks({}, { kind: 'replay', events: this.history, ts: 0 } as ServerEvent)).some((t) => t.call === tool && t.status === 'running');
     const hasResult = this.history.some((ev) => ev.kind === 'agent' && ev.e.t === 'tool-update' && ev.e.id === tool);
     return { live, hasResult };
+  }
+
+  /** The task `id` as the history replays it (running, or among the last finished); undefined when the server does not know it. */
+  task(id: string): Task | undefined {
+    return reduceTasks({}, { kind: 'replay', events: this.history, ts: 0 } as ServerEvent)[id];
   }
 
   /** Attached sockets. */
@@ -80,8 +85,7 @@ export class EventHub {
    * with everything after it) goes to `archive` as one segment, which returns its number (the new `earlier`); when
    * it throws, nothing changes. Segments never overlap: an event already written by an earlier cut is not written
    * again. Some events are archived AND kept in the hub, in their order before the boundary, because a reloaded page
-   * still needs them: the last `session` event (the header), an ask with no answer yet, the events of a task not
-   * done yet, and whatever `keep` says (the façade: a send still waiting, so a reload mid-turn shows the turn
+   * still needs them: the last `session` event (the header), an ask with no answer yet, the events of the tasks the state holds, and whatever `keep` says (the façade: a send still waiting, so a reload mid-turn shows the turn
    * running; the archived copy is the same event, same id, so a page that loads the segment can dedupe it). Returns
    * what was written. No live socket hears of a cut: their feeds already hold all of it.
    */
@@ -118,18 +122,26 @@ export class EventHub {
 }
 
 /**
- * The indexes of the task events a replay needs for the tasks still running at the boundary: per id its last
- * `started`, its last `progress` and its last `updated` that names a desc. That is all the web's reduceTasks reads
- * (a progress overwrites tokens, tool and summary; an updated with a desc overwrites the desc, one without changes
- * nothing; a later started restarts the task), so the trimmed events replay to the same state. The rest is archived.
+ * The indexes of the task events a replay needs for the tasks the state holds at the boundary (the running ones and the
+ * last few finished): per id, after its last `started`, that `started`, the last `progress` before it ended, the first
+ * `done` (the reducer ignores a second end), and the last `updated` that names a desc. That is all the web's
+ * reduceTasks reads (a progress overwrites tokens, tool and summary of a running task; an updated with a desc overwrites
+ * the desc, one without changes nothing), so the trimmed events replay to the same state. The rest is archived.
  */
 function runningTasks(before: ServerEvent[]): Set<number> {
+  const live = new Set(Object.keys(reduceTasks({}, { kind: 'replay', events: before, ts: 0 } as ServerEvent)));
   const last = new Map<string, Map<string, number>>(); // id -> phase -> index
   before.forEach((ev, i) => {
-    if (ev.kind !== 'agent' || ev.e.t !== 'task') return;
+    if (ev.kind !== 'agent' || ev.e.t !== 'task' || !live.has(ev.e.id)) return;
     const { id, phase } = ev.e;
-    if (phase === 'done') last.delete(id);
-    else if (phase !== 'updated' || ev.e.desc) last.set(id, (last.get(id) ?? new Map()).set(phase, i));
+    if (phase === 'started') last.set(id, new Map([[phase, i]]));
+    const m = last.get(id);
+    if (!m) return;
+    if (phase === 'done') {
+      if (!m.has('done')) m.set('done', i);
+    } else if (phase === 'progress') {
+      if (!m.has('done')) m.set(phase, i);
+    } else if (phase === 'updated' && ev.e.desc) m.set(phase, i);
   });
   return new Set([...last.values()].flatMap((m) => [...m.values()]));
 }

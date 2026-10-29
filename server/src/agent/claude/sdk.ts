@@ -110,6 +110,24 @@ class SdkSession implements AgentSession {
     return r.response.suggestions.map((x) => x.path);
   }
 
+  async stopTask(taskId: string): Promise<void> {
+    await this.q.stopTask(taskId);
+  }
+
+  async backgroundTask(toolUseId: string): Promise<boolean> {
+    return await this.q.backgroundTasks(toolUseId);
+  }
+
+  async taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }> {
+    // the control request is typed in the SDK but not exposed as a method yet; same narrow cast as fileSuggestions
+    const { q } = this as unknown as {
+      q: { request(r: { subtype: 'get_task_output'; task_id: string }, o?: { signal?: AbortSignal }): Promise<{ response: { output: string; total_bytes: number; truncated: boolean } }> };
+    };
+    const { response: r } = await q.request({ subtype: 'get_task_output', task_id: taskId }, { signal: AbortSignal.timeout(5000) });
+    if (typeof r?.output !== 'string') throw new Error('get_task_output: unexpected answer');
+    return { output: r.output, totalBytes: Number(r.total_bytes) || 0, truncated: r.truncated === true };
+  }
+
   async contextUsage(): Promise<{ used: number; max: number; pct: number }> {
     return mapContextUsage(await this.q.getContextUsage({ detail: 'summary' }));
   }

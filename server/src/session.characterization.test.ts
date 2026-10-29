@@ -17,6 +17,9 @@ import { createSessionManager, SwitchError } from './session.ts';
 import { lastSession } from './state.ts';
 import { prefsKey, readPrefs } from './prefs.ts';
 
+/** the task methods of a test double that has no tasks */
+const noTasks = { stopTask: async () => {}, backgroundTask: async () => false, taskOutput: async () => ({ output: '', totalBytes: 0, truncated: false }) };
+
 let home: string;
 let dirB: string;
 const prevHome = process.env.NOTA_BENE_HOME;
@@ -77,7 +80,7 @@ function spy(inner: ReturnType<typeof fakeBackend>, log: string[]): AgentBackend
         supportedModels: () => a.supportedModels(), setModel: (m) => a.setModel(m), setEffort: (e) => a.setEffort(e),
         fileSuggestions: (q) => a.fileSuggestions(q),
         contextUsage: () => a.contextUsage(),
-        usage: () => a.usage(),
+        usage: () => a.usage(), stopTask: (i) => a.stopTask(i), backgroundTask: (i) => a.backgroundTask(i), taskOutput: (i) => a.taskOutput(i),
         close: () => { log.push(`close${k}`); a.close(); },
       };
       return wrapped;
@@ -112,7 +115,7 @@ function scripted() {
         })()),
         send: (m) => { sends.push({ uuid: m.uuid, text: m.text }); },
         interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [],
-        contextUsage: async () => ({ used: 500_000, max: 1_000_000, pct: 50 }), usage: async () => ({ cost: null, limits: null }), close() {},
+        contextUsage: async () => ({ used: 500_000, max: 1_000_000, pct: 50 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
       };
     },
   };
@@ -138,7 +141,7 @@ function over(a: AgentSession, patch: Partial<AgentSession>): AgentSession {
   return {
     messages: a.messages, send: (m) => a.send(m), interrupt: () => a.interrupt(), setPermissionMode: (m) => a.setPermissionMode(m),
     supportedModels: () => a.supportedModels(), setModel: (m) => a.setModel(m), setEffort: (e) => a.setEffort(e),
-    fileSuggestions: (q) => a.fileSuggestions(q), contextUsage: () => a.contextUsage(), usage: () => a.usage(), close: () => a.close(), ...patch,
+    fileSuggestions: (q) => a.fileSuggestions(q), contextUsage: () => a.contextUsage(), usage: () => a.usage(), stopTask: (i) => a.stopTask(i), backgroundTask: (i) => a.backgroundTask(i), taskOutput: (i) => a.taskOutput(i), close: () => a.close(), ...patch,
   };
 }
 

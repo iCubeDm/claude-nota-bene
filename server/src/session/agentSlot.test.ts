@@ -11,6 +11,7 @@ function fakeAgent(log: string[], name: string, o: { closeThrows?: boolean } = {
     messages: (async function* () { await ended; })(),
     send() {}, interrupt: async () => {}, fileSuggestions: async () => [], setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {},
     contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }),
+    stopTask: async () => {}, backgroundTask: async () => false, taskOutput: async () => ({ output: '', totalBytes: 0, truncated: false }),
     close() { log.push(`close ${name}`); if (o.closeThrows) throw new Error('close failed'); },
   } as AgentSession;
   return { a, end, ended };

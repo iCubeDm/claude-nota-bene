@@ -3,14 +3,44 @@ import type { ServerEvent } from './protocol.ts';
 // The web's task reducer (tasks/slice.ts), here so the server can check that what it keeps in the hub across a
 // compaction replays to the same state (R-M7-12). Pure: no web dependency.
 
-export type Task = { desc: string; type: string; /** the tool-use id of the call that started it, when the CLI said */ call?: string; start: number; tokens: number; tool: string; summary: string };
-/** task_id -> live task. Rebuilt from replayed task events, so a reload mid-task still shows it. */
+export type TaskStatus = 'running' | 'done' | 'failed' | 'stopped';
+/** `agent`: a subagent; `shell`: a background shell or Monitor (has an output to read); `other`: workflows and the rest */
+export type TaskKind = 'agent' | 'shell' | 'other';
+
+export type Task = {
+  desc: string; type: string; kind: TaskKind;
+  /** the tool-use id of the call that started it, when the CLI said */ call?: string;
+  /** task_id of the subagent task that launched it, when the CLI said */ parent?: string;
+  start: number; status: TaskStatus; /** the server time the task ended; only once it is not running */ end?: number;
+  tokens: number; tool: string; summary: string;
+};
+/** task_id -> task, the running ones and the last FINISHED_CAP finished. Rebuilt from replayed task events, so a reload mid-task still shows it. */
 export type TasksState = Record<string, Task>;
 
-const without = (s: TasksState, id: string): TasksState => {
-  const { [id]: _gone, ...rest } = s;
+/** the most finished tasks kept (the oldest ended go first) */
+export const FINISHED_CAP = 20;
+
+/** The task's kind from the CLI's task_type (local_agent, remote_agent, local_bash, monitor_mcp, ...); no type but a call: an agent. */
+export function taskKind(type: string, call?: string): TaskKind {
+  if (/agent/.test(type)) return 'agent';
+  if (/bash|shell|monitor/.test(type)) return 'shell';
+  return !type && call ? 'agent' : 'other';
+}
+
+const without = (s: TasksState, ids: string[]): TasksState => {
+  const rest = { ...s };
+  for (const id of ids) delete rest[id];
   return rest;
 };
+
+/** The running tasks, oldest first, then the finished, newest ended first (the drawer's order of rows). */
+export function orderedTasks(s: TasksState): [string, Task][] {
+  const all = Object.entries(s);
+  return [
+    ...all.filter(([, t]) => t.status === 'running').sort((a, b) => a[1].start - b[1].start),
+    ...all.filter(([, t]) => t.status !== 'running').sort((a, b) => (b[1].end ?? 0) - (a[1].end ?? 0)),
+  ];
+}
 
 /** Pure; follows the prototype's onTask. `ts` is the server event time, so elapsed survives a reload. */
 export function reduceTasks(s: TasksState, ev: ServerEvent): TasksState {
@@ -22,13 +52,27 @@ export function reduceTasks(s: TasksState, ev: ServerEvent): TasksState {
   const cur = s[e.id];
   switch (e.phase) {
     // the mapper drops ambient and transcript-less tasks and fills the description fallbacks
-    case 'started':
-      return { ...s, [e.id]: { desc: e.desc ?? 'task', type: e.type ?? '', ...(e.call ? { call: e.call } : {}), start: ev.ts, tokens: 0, tool: '', summary: '' } };
+    case 'started': {
+      const type = e.type ?? '';
+      return {
+        ...s,
+        [e.id]: {
+          desc: e.desc ?? 'task', type, kind: taskKind(type, e.call), ...(e.call ? { call: e.call } : {}), ...(e.parent ? { parent: e.parent } : {}),
+          start: ev.ts, status: 'running', tokens: 0, tool: '', summary: '',
+        },
+      };
+    }
     case 'progress':
-      return cur ? { ...s, [e.id]: { ...cur, tokens: e.tokens || 0, tool: e.tool || '', summary: e.summary || '' } } : s;
+      return cur?.status === 'running' ? { ...s, [e.id]: { ...cur, tokens: e.tokens || 0, tool: e.tool || '', summary: e.summary || '' } } : s;
     case 'updated':
       return cur && e.desc ? { ...s, [e.id]: { ...cur, desc: e.desc } } : s;
-    case 'done':
-      return cur ? without(s, e.id) : s;
+    case 'done': {
+      if (cur?.status !== 'running') return s; // unknown, or already over (the CLI reports an end twice: update, then notification)
+      const next = { ...s, [e.id]: { ...cur, status: e.status ?? 'done', end: ev.ts } as Task };
+      const finished = Object.entries(next).filter(([, t]) => t.status !== 'running');
+      if (finished.length <= FINISHED_CAP) return next;
+      const drop = finished.sort((a, b) => (a[1].end ?? 0) - (b[1].end ?? 0)).slice(0, finished.length - FINISHED_CAP).map(([id]) => id);
+      return without(next, drop);
+    }
   }
 }

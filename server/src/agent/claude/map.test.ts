@@ -237,10 +237,18 @@ describe('mapSdk: tasks, suggestion, rate limit', () => {
     expect(sys('task_updated', { task_id: 't', patch: { description: 'new' } })).toEqual([{ t: 'task', id: 't', phase: 'updated', desc: 'new' }]);
     expect(sys('task_updated', { task_id: 't', patch: { status: 'running', description: 'new' } })[0]).toMatchObject({ phase: 'updated', desc: 'new' });
     expect(sys('task_updated', { task_id: 't', patch: { status: 'completed' } })).toEqual([{ t: 'task', id: 't', phase: 'done' }]);
-    expect(sys('task_updated', { task_id: 't', patch: { status: 'killed', description: 'x' } })).toEqual([{ t: 'task', id: 't', phase: 'done' }]);
+    expect(sys('task_updated', { task_id: 't', patch: { status: 'killed', description: 'x' } })).toEqual([{ t: 'task', id: 't', phase: 'done', status: 'stopped' }]);
+    expect(sys('task_updated', { task_id: 't', patch: { status: 'failed' } })).toEqual([{ t: 'task', id: 't', phase: 'done', status: 'failed' }]);
     expect(sys('task_updated', { task_id: 't', patch: { status: 'paused' } })).toEqual([]);
   });
-  it('task_notification -> done', () => {
+  it('task_started carries the launching subagent task as `parent`', () => {
+    expect(sys('task_started', { task_id: 't', description: 'D', parent_task_id: 'p1' })[0]).toMatchObject({ parent: 'p1' });
+    expect(sys('task_started', { task_id: 't', description: 'D' })[0]).not.toHaveProperty('parent');
+    expect(sys('task_started', { task_id: 't', description: 'D', parent_task_id: '../x' })[0]).not.toHaveProperty('parent');
+  });
+  it('task_notification -> done, with how it ended', () => {
+    expect(sys('task_notification', { task_id: 't', status: 'failed' })).toEqual([{ t: 'task', id: 't', phase: 'done', status: 'failed' }]);
+    expect(sys('task_notification', { task_id: 't', status: 'stopped' })).toEqual([{ t: 'task', id: 't', phase: 'done', status: 'stopped' }]);
     expect(sys('task_notification', { task_id: 't', status: 'completed' })).toEqual([{ t: 'task', id: 't', phase: 'done' }]);
   });
   it('prompt_suggestion -> trimmed suggestion; non-string -> nothing', () => {

@@ -27,7 +27,7 @@ type Frame = {
   compact_metadata?: { pre_tokens?: number; duration_ms?: number };
   new_conversation_id?: unknown;
   // tasks
-  task_id?: string; tool_use_id?: string; description?: string; subagent_type?: string; task_type?: string; ambient?: boolean; skip_transcript?: boolean;
+  task_id?: string; parent_task_id?: string; tool_use_id?: string; description?: string; subagent_type?: string; task_type?: string; ambient?: boolean; skip_transcript?: boolean;
   usage?: { total_tokens?: number }; last_tool_name?: string; summary?: string;
   patch?: { status?: string; description?: string };
   // prompt_suggestion, rate_limit_event
@@ -107,6 +107,11 @@ function reset(m: Frame): AgentEvent[] {
   return [{ t: 'reset', ...(newId ? { newId } : {}) }];
 }
 
+/** how a task ended, from task_notification.status (completed / failed / stopped) or task_updated's patch.status (… / killed); completed adds nothing */
+function endStatus(st: string | null | undefined): { status?: 'failed' | 'stopped' } {
+  return st === 'failed' ? { status: 'failed' } : st === 'stopped' || st === 'killed' ? { status: 'stopped' } : {};
+}
+
 function task(m: Frame): AgentEvent[] {
   const id = m.task_id;
   if (!id) return [];
@@ -114,16 +119,16 @@ function task(m: Frame): AgentEvent[] {
     case 'task_started':
       // ambient tasks and the ones kept out of the transcript are not shown
       if (m.ambient || m.skip_transcript) return [];
-      return [{ t: 'task', id, phase: 'started', desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type ?? '', ...(typeof m.tool_use_id === 'string' && TOOL_USE_ID.test(m.tool_use_id) ? { call: m.tool_use_id } : {}) }];
+      return [{ t: 'task', id, phase: 'started', desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type ?? '', ...(typeof m.tool_use_id === 'string' && TOOL_USE_ID.test(m.tool_use_id) ? { call: m.tool_use_id } : {}), ...(typeof m.parent_task_id === 'string' && TOOL_USE_ID.test(m.parent_task_id) ? { parent: m.parent_task_id } : {}) }];
     case 'task_progress':
       return [{ t: 'task', id, phase: 'progress', tokens: m.usage?.total_tokens || 0, tool: m.last_tool_name || '', summary: m.summary || '' }];
     case 'task_updated': {
       const st = m.patch?.status;
-      if (st && st !== 'running' && st !== 'pending' && st !== 'paused') return [{ t: 'task', id, phase: 'done' }];
+      if (st && st !== 'running' && st !== 'pending' && st !== 'paused') return [{ t: 'task', id, phase: 'done', ...endStatus(st) }];
       return m.patch?.description ? [{ t: 'task', id, phase: 'updated', desc: m.patch.description }] : [];
     }
     default: // task_notification
-      return [{ t: 'task', id, phase: 'done' }];
+      return [{ t: 'task', id, phase: 'done', ...endStatus(m.status) }];
   }
 }
 

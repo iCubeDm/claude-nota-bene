@@ -9,6 +9,7 @@ import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { HistoryArchive, historyRoutes } from './archive.ts';
 import { subagentRoutes } from './subagent.ts';
+import { taskOutputRoutes } from './taskOutput.ts';
 import { AttachmentStore, attachmentRoutes } from './attachments.ts';
 import { MarkFiles, markRoutes } from './marks.ts';
 import { CommentStore } from './comments.ts';
@@ -144,6 +145,8 @@ export async function startServer(o: {
         ...historyRoutes(archive, () => manager.archiveId(), hub),
         // a subagent's conversation (protocol 7); same rule: only the current conversation's
         ...subagentRoutes({ backend: o.backend, attachments, hub, current: () => manager.archiveId(), root }),
+        // a shell task's output tail (protocol 8)
+        ...taskOutputRoutes({ hub, current: () => manager.archiveId(), taskOutput: (id) => manager.taskOutput(id) }),
         ...markRoutes(marks, hub, {
           isSent: (id) => store.get(manager.info().id).some((c) => c.id === id && c.status === 'sent'),
         }),
@@ -357,6 +360,16 @@ export async function startServer(o: {
             break;
           case 'activity':
             manager.activity();
+            break;
+          case 'task-stop':
+            manager.stopTask(msg.id).catch((e) => reportError(hub, 'task', e));
+            break;
+          case 'task-background':
+            // false: the call is not a foreground task any more (it ended, or went to the background already)
+            manager.backgroundTask(msg.toolUseId).then(
+              (moved) => { if (!moved) reportError(hub, 'task', new Error('nothing to move to the background: the task is not running in the foreground')); },
+              (e) => reportError(hub, 'task', e),
+            );
             break;
           case 'idle-compact':
             if (!(caps.idleCompact && caps.compact)) return refuse('idle-compact');

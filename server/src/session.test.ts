@@ -13,6 +13,9 @@ import { lastSession } from './state.ts';
 import { prefsKey, readPrefs, setModePref } from './prefs.ts';
 import { AttachmentStore } from './attachments.ts';
 
+/** the task methods of a test double that has no tasks */
+const noTasks = { stopTask: async () => {}, backgroundTask: async () => false, taskOutput: async () => ({ output: '', totalBytes: 0, truncated: false }) };
+
 let home: string;
 const extraDirs: string[] = []; // project folders a test makes besides `home`, removed even when the test fails
 const mkExtra = (prefix: string) => {
@@ -61,7 +64,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: mapFrames((async function* () { yield* frames as never[]; await new Promise(() => {}); })()),
-        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -78,7 +81,7 @@ describe('session manager', () => {
       history: async () => [],
       start: () => ({
         messages: mapFrames((async function* () { await new Promise((r) => setTimeout(r, 30)); throw new Error('boom'); yield* []; })()),
-        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async (q) => [`hit-${q}`], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -146,7 +149,7 @@ describe('session manager', () => {
           messages: a.messages, send: (m) => a.send(m), interrupt: () => a.interrupt(), setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {},
           fileSuggestions: async () => { calls.push('files'); return ['x']; },
           contextUsage: async () => { calls.push('context'); return { used: 1, max: 2, pct: 50 }; },
-          usage: async () => { calls.push('usage'); return { cost: null, limits: null }; }, close: () => a.close(),
+          usage: async () => { calls.push('usage'); return { cost: null, limits: null }; }, ...noTasks, close: () => a.close(),
         };
       },
     };
@@ -194,7 +197,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { log.push(`send:${m.priority}`); a.send(m); },
           interrupt: () => { log.push('interrupt'); return a.interrupt(); },
-          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
+          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => a.close(),
         };
       },
     };
@@ -225,7 +228,7 @@ describe('session manager', () => {
           ...a,
           send: (m) => a.send(m),
           interrupt: () => a.interrupt(),
-          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
+          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => a.close(),
           messages: (async function* () {
             for await (const e of a.messages) {
               yield e;
@@ -261,7 +264,7 @@ describe('session manager', () => {
         })()),
         send: () => {},
         interrupt: async () => {},
-        setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => { closed++; },
+        setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => { closed++; },
       }),
     };
     const { events, make } = setup(backend);
@@ -283,7 +286,7 @@ describe('session manager', () => {
           messages: a.messages,
           send: (m) => { if (first) { first = false; throw new Error('send failed'); } a.send(m); },
           interrupt: () => a.interrupt(),
-          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close(),
+          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => a.close(),
         };
       },
     };
@@ -313,7 +316,7 @@ describe('session manager', () => {
           })()),
           send: (m) => { delivered.push(`${mine}:${m.text}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
+          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => {},
         };
       },
     };
@@ -342,7 +345,7 @@ describe('session manager', () => {
           })()),
           send: (m) => { delivered.push(`${mine}:${m.uuid}`); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
+          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => {},
         };
       },
     };
@@ -422,7 +425,7 @@ describe('busy cannot get stuck', () => {
       history: inner.history,
       start: (o) => {
         const a = inner.start(o);
-        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => a.close() };
+        return { messages: a.messages, send: () => { throw new Error('stdin closed'); }, interrupt: () => a.interrupt(), setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => a.close() };
       },
     };
     const { hub, events, make } = setup(backend);
@@ -459,7 +462,7 @@ describe('busy cannot get stuck', () => {
           })()),
           send: (m) => { if (mine === 1) answer(m.uuid); },
           interrupt: () => new Promise<void>((r) => setTimeout(r, 40)),
-          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
+          setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => {},
         };
       },
     };
@@ -502,7 +505,7 @@ describe('busy cannot get stuck', () => {
         })()),
         send: () => { sent++; },
         interrupt: async () => {},
-        setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close: () => {},
+        setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close: () => {},
       }),
     };
     const { hub, events, make } = setup(backend);
@@ -533,7 +536,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: mapFrames((async function* () { await new Promise(() => {}); })()),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
         }),
       };
       const hub = new EventHub();
@@ -564,7 +567,7 @@ describe('busy cannot get stuck', () => {
         history: async () => [],
         start: () => ({
           messages: mapFrames((async function* () { await new Promise(() => {}); })()),
-          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+          send: (m) => { got.push(m); }, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
         }),
       };
       const hub = new EventHub();
@@ -602,7 +605,7 @@ describe('compact-end and idle compaction', () => {
           })()),
           send: (m) => { sends.push({ uuid: m.uuid, text: m.text }); },
           interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [],
-          contextUsage: async () => ({ used: 500_000, max: 1_000_000, pct: 50 }), usage: async () => ({ cost: null, limits: null }), close() {},
+          contextUsage: async () => ({ used: 500_000, max: 1_000_000, pct: 50 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
         };
       },
     };
@@ -723,7 +726,7 @@ describe('permission mode', () => {
       history: async () => [],
       start: () => ({
         messages: mapFrames((async function* () { yield { type: 'system', subtype: 'status', permissionMode: 'acceptEdits' } as never; await new Promise(() => {}); })()),
-        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+        send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
       }),
     };
     const { events, make } = setup(backend);
@@ -748,7 +751,7 @@ describe('permission mode', () => {
               await new Promise<void>((r) => { wake = r; });
             }
           })()),
-          send() {}, interrupt: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+          send() {}, interrupt: async () => {}, fileSuggestions: async () => [], contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks, close() {},
           setPermissionMode: () => onSet(push), supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {},
         };
       },
@@ -785,7 +788,7 @@ describe('permission mode', () => {
 describe('switch', () => {
   const stubs = {
     send() {}, interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [],
-    contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }),
+    contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), ...noTasks,
   };
 
   it('a late message from the old agent after the reset is not emitted', async () => {
@@ -856,7 +859,7 @@ describe('switch', () => {
           // like the SDK: an interrupt that hangs and is rejected when the query closes
           interrupt: () => onClose.then(() => { throw new Error('Query closed'); }),
           setPermissionMode: (m) => a.setPermissionMode(m), supportedModels: () => a.supportedModels(), setModel: (m) => a.setModel(m), setEffort: (e) => a.setEffort(e), fileSuggestions: (q) => a.fileSuggestions(q),
-          contextUsage: () => a.contextUsage(), usage: () => a.usage(),
+          contextUsage: () => a.contextUsage(), usage: () => a.usage(), stopTask: (i) => a.stopTask(i), backgroundTask: (i) => a.backgroundTask(i), taskOutput: (i) => a.taskOutput(i),
           close: () => { closed(); a.close(); },
         };
       },

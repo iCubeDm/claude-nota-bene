@@ -47,6 +47,11 @@ export type SessionManager = {
   onSwitch(cb: (id: string | null, o: { restart: boolean }) => void): void;
   /** The running agent's @ search; rejects when there is no agent (then the caller falls back). */
   fileSuggestions(query: string): Promise<string[]>;
+  /** The running agent's task controls (protocol 8); each rejects when there is no agent, or the agent refuses. */
+  stopTask(taskId: string): Promise<void>;
+  /** false: no foreground task matched the call */
+  backgroundTask(toolUseId: string): Promise<boolean>;
+  taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }>;
   /** Context, plan limits and cost as last measured (what a new socket gets). */
   stats(): Stats;
   /** A socket attached: the stats catch up when the skipped 5-minute ticks left them stale. */

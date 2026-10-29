@@ -236,10 +236,49 @@ test('an old message anchor without agent is unchanged', () => {
   expect(toAnchor(anchor as never)).toEqual(anchor);
 });
 
-import { reduceTasks } from './tasks.ts';
-test('a task keeps the call id of its start, and is gone with its end', () => {
-  const started = { kind: 'agent', ts: 5, e: { t: 'task', id: 'k', phase: 'started', desc: 'd', type: 'local_agent', call: 'toolu_A' } } as never;
-  const s = reduceTasks({}, started);
-  expect(s.k).toMatchObject({ call: 'toolu_A' });
-  expect(reduceTasks(s, { kind: 'agent', ts: 6, e: { t: 'task', id: 'k', phase: 'done' } } as never)).toEqual({});
+import { FINISHED_CAP, orderedTasks, reduceTasks, taskKind } from './tasks.ts';
+const T = (ts: number, e: object) => ({ kind: 'agent', ts, e: { t: 'task', ...e } }) as never;
+test('a task keeps the call id of its start; its end keeps it as finished', () => {
+  const s = reduceTasks({}, T(5, { id: 'k', phase: 'started', desc: 'd', type: 'local_agent', call: 'toolu_A' }));
+  expect(s.k).toMatchObject({ call: 'toolu_A', status: 'running', kind: 'agent' });
+  expect(s.k).not.toHaveProperty('end');
+  expect(reduceTasks(s, T(6, { id: 'k', phase: 'done' })).k).toMatchObject({ call: 'toolu_A', status: 'done', end: 6 });
+});
+test('status of the end: failed and stopped come from the event; a second end changes nothing; late progress is ignored', () => {
+  let s = reduceTasks({}, T(1, { id: 'a', phase: 'started', desc: 'a', type: 'local_bash' }));
+  s = reduceTasks(s, T(2, { id: 'a', phase: 'done', status: 'stopped' }));
+  s = reduceTasks(s, T(3, { id: 'a', phase: 'done' }));
+  s = reduceTasks(s, T(4, { id: 'a', phase: 'progress', tokens: 9, tool: 'x', summary: 'y' }));
+  expect(s.a).toMatchObject({ status: 'stopped', end: 2, tokens: 0, kind: 'shell' });
+  expect(reduceTasks(reduceTasks({}, T(1, { id: 'b', phase: 'started', desc: 'b' })), T(2, { id: 'b', phase: 'done', status: 'failed' })).b?.status).toBe('failed');
+});
+test('parent is kept from the start; an unknown task id changes nothing', () => {
+  const s = reduceTasks({}, T(1, { id: 'c', phase: 'started', desc: 'c', type: 'local_bash', parent: 'p' }));
+  expect(s.c?.parent).toBe('p');
+  expect(reduceTasks(s, T(2, { id: 'zz', phase: 'done' }))).toBe(s);
+});
+test('only the newest FINISHED_CAP finished tasks stay, running ones never go; replay gives the same state', () => {
+  const evs = [T(1, { id: 'run', phase: 'started', desc: 'run', type: 'local_agent' })];
+  for (let i = 0; i < FINISHED_CAP + 5; i++) evs.push(T(10 + 2 * i, { id: `t${i}`, phase: 'started', desc: `t${i}` }), T(11 + 2 * i, { id: `t${i}`, phase: 'done' }));
+  const s = evs.reduce(reduceTasks, {} as ReturnType<typeof reduceTasks>);
+  expect(Object.keys(s)).toHaveLength(FINISHED_CAP + 1);
+  expect(s.t0).toBeUndefined();
+  expect(s.t5).toBeDefined();
+  expect(s.run?.status).toBe('running');
+  expect(reduceTasks({}, { kind: 'replay', events: evs as never, ts: 0 } as never)).toEqual(s);
+  expect(orderedTasks(s).map(([id]) => id).slice(0, 3)).toEqual(['run', `t${FINISHED_CAP + 4}`, `t${FINISHED_CAP + 3}`]);
+});
+test('taskKind', () => {
+  expect([taskKind('local_agent'), taskKind('remote_agent'), taskKind('local_bash'), taskKind('monitor_mcp'), taskKind('local_workflow'), taskKind('', 'toolu_A'), taskKind('')])
+    .toEqual(['agent', 'agent', 'shell', 'shell', 'other', 'agent', 'other']);
+});
+
+test('task-stop and task-background parse strictly', () => {
+  expect(parseClientMessage('{"type":"task-stop","id":"b4k2x9"}')).toEqual({ type: 'task-stop', id: 'b4k2x9' });
+  expect(parseClientMessage('{"type":"task-stop","id":"b4k2x9","x":1}')).toEqual({ type: 'task-stop', id: 'b4k2x9' });
+  expect(parseClientMessage('{"type":"task-background","toolUseId":"toolu_01AbC"}')).toEqual({ type: 'task-background', toolUseId: 'toolu_01AbC' });
+  for (const bad of ['{"type":"task-stop"}', '{"type":"task-stop","id":7}', '{"type":"task-stop","id":"../x"}', '{"type":"task-stop","id":""}',
+    '{"type":"task-background"}', '{"type":"task-background","toolUseId":"a/b"}', '{"type":"task-background","id":"x"}']) {
+    expect(parseClientMessage(bad)).toHaveProperty('error');
+  }
 });

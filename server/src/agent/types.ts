@@ -24,6 +24,15 @@ export interface AgentSession {
   contextUsage(): Promise<{ used: number; max: number; pct: number }>;
   /** Session cost and plan limits; throws UsageUnavailableError when the SDK has no usage API. */
   usage(): Promise<{ cost: number | null; limits: Stats['limits'] }>;
+  /** Stops a running task (a task_id); the agent then reports it ended as `stopped`. Rejects when the CLI refuses. */
+  stopTask(taskId: string): Promise<void>;
+  /**
+   * Moves the foreground task started by the tool call `toolUseId` to the background (the tool call returns at once and the
+   * task goes on). false: no foreground task matched. Rejects when the agent has background tasks disabled.
+   */
+  backgroundTask(toolUseId: string): Promise<boolean>;
+  /** The end of a background shell / Monitor task's output (the CLI keeps the last 8 KiB, escape sequences included). Rejects for any other task. */
+  taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }>;
   close(): void;
 }
 

@@ -135,7 +135,8 @@ describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
     const cut = hub.cut({ keep: (ev) => ev.kind === 'user' && ev.id === 'b', archive: (evs) => { archived.push(evs); return 1; } });
     expect(cut).toEqual(before); // segments are whole: the kept items are in it too (R-M7-12 ruling)
     expect(archived).toEqual([before]);
-    expect(replayOf(hub).events).toEqual([task('t1', 'started'), ask('p2'), task('t1', 'progress'), session, user('b'), boundary]);
+    // t2 finished: its started and end stay too (finished tasks replay like running ones)
+    expect(replayOf(hub).events).toEqual([task('t1', 'started'), task('t2', 'started'), ask('p2'), task('t1', 'progress'), task('t2', 'done'), session, user('b'), boundary]);
   });
 
   it('segments never overlap: a kept item is archived once, and dropped from the hub once nothing needs it', () => {
@@ -201,6 +202,45 @@ describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
+  it('finished tasks (the last 20) replay the same after a cut: first end wins, nothing after it counts', () => {
+    const hub = new EventHub();
+    let ts = 0;
+    const task = (e: object): Stored => ({ kind: 'agent', e: { t: 'task', ...e } as never, ts: ++ts });
+    const tasksOf = () => reduceTasks({}, replayOf(hub) as ServerEvent);
+    hub.emit(task({ id: 'run', phase: 'started', desc: 'run', type: 'local_agent' }));
+    hub.emit(task({ id: 'x', phase: 'started', desc: 'x', type: 'local_bash' }));
+    hub.emit(task({ id: 'x', phase: 'progress', tokens: 3, tool: 'Bash', summary: 'a' }));
+    hub.emit(task({ id: 'x', phase: 'done', status: 'stopped' }));
+    hub.emit(task({ id: 'x', phase: 'done' }));
+    hub.emit(task({ id: 'x', phase: 'progress', tokens: 99, tool: 'late', summary: 'late' }));
+    hub.emit(task({ id: 'x', phase: 'updated', desc: 'x renamed' }));
+    for (let i = 0; i < 25; i++) { hub.emit(task({ id: `t${i}`, phase: 'started', desc: `t${i}` })); hub.emit(task({ id: `t${i}`, phase: 'done' })); }
+    const expected = tasksOf();
+    expect(expected.x).toBeUndefined(); // pushed out by the cap
+    expect(Object.keys(expected)).toHaveLength(21);
+    hub.emit(boundary);
+    hub.cut({ archive: () => 1 });
+    expect(tasksOf()).toEqual(expected);
+    const kept = replayOf(hub).events.filter((e) => e.kind === 'agent' && e.e.t === 'task');
+    expect(kept.length).toBe(1 + 20 * 2); // run, and per finished its started and done
+    expect(hub.task('run')).toMatchObject({ status: 'running' });
+    expect(hub.task('x')).toBeUndefined();
+  });
+
+  it('a finished task with progress, a second end and a later update keeps what the reducer reads', () => {
+    const hub = new EventHub();
+    let ts = 0;
+    const task = (e: object): Stored => ({ kind: 'agent', e: { t: 'task', ...e } as never, ts: ++ts });
+    for (const e of [{ id: 'x', phase: 'started', desc: 'x', type: 'local_bash' }, { id: 'x', phase: 'progress', tokens: 3, tool: 'Bash', summary: 'a' },
+      { id: 'x', phase: 'done', status: 'stopped' }, { id: 'x', phase: 'done' }, { id: 'x', phase: 'progress', tokens: 99, tool: 'late', summary: 'late' },
+      { id: 'x', phase: 'updated', desc: 'x renamed' }]) hub.emit(task(e));
+    const expected = reduceTasks({}, replayOf(hub) as ServerEvent);
+    expect(expected.x).toMatchObject({ status: 'stopped', tokens: 3, desc: 'x renamed' });
+    hub.emit(boundary);
+    hub.cut({ archive: () => 1 });
+    expect(reduceTasks({}, replayOf(hub) as ServerEvent)).toEqual(expected);
+  });
+
   it('a failing archive leaves the history as it was', () => {
     const hub = new EventHub();
     hub.emit(user('a'));
@@ -256,6 +296,6 @@ describe('callState', () => {
     expect(hub.callState('toolu_B').live).toBe(false);
     hub.emit({ kind: 'agent', e: { t: 'tool-update', id: 'toolu_A', text: 'x', isError: false } });
     hub.emit(task({ id: 'k', phase: 'done' }));
-    expect(hub.callState('toolu_A')).toEqual({ live: false, hasResult: true });
+    expect(hub.callState('toolu_A')).toEqual({ live: false, hasResult: true }); // finished: no longer live
   });
 });

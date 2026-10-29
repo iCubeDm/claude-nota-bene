@@ -2,6 +2,8 @@ import type { WireAgentEvent } from './agent.ts';
 
 /** A tool-use id as the wire carries it (the Agent call's id, `agent` of a source, `tool` of `/subagent`): ids only, never path pieces. */
 export const TOOL_USE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** A task id as the wire carries it (`task-stop`, `/task-output?task=`): the CLI's own ids (`b4k2x9...`), never a path piece. */
+export const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
 export type AnchorSource = { kind: 'message'; id: string; /** the toolUseId of the subagent whose conversation holds the item (protocol 7); absent: the main chat */ agent?: string } | { kind: 'file'; path: string; ref?: string };
@@ -69,9 +71,10 @@ export const generatedImages = (c: Comment): number => (isMediaAnchor(c.anchor) 
  * `hello.capabilities`;
  * 6: the model and effort switch: the client's `model` (ids answered with `ack`), the server's `model` and `models` events,
  * `capabilities.models`;
- * 7: a message anchor may name a subagent (`source.agent`, the Agent call's tool-use id) and `GET /subagent` serves its conversation.
+ * 7: a message anchor may name a subagent (`source.agent`, the Agent call's tool-use id) and `GET /subagent` serves its conversation;
+ * 8: the client's `task-stop` and `task-background`, and `GET /task-output` (a shell task's output tail).
  */
-export const PROTOCOL = 7;
+export const PROTOCOL = 8;
 
 /** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
 export const TAKEN_OVER_CODE = 4001;
@@ -129,7 +132,11 @@ export type ClientMessage =
   /** idle compaction on or off for this project */
   | { type: 'idle-compact'; on: boolean }
   /** from an occupied socket (R-M7-5): the window moves here; the old owner is closed with 4001 */
-  | { type: 'takeover' };
+  | { type: 'takeover' }
+  /** protocol 8: stop the running task `id` (a task_id); a refusal comes back as a `server-error` */
+  | { type: 'task-stop'; id: string }
+  /** protocol 8: move the foreground task started by the tool call `toolUseId` to the background; a refusal (or no match) comes back as a `server-error` */
+  | { type: 'task-background'; toolUseId: string };
 
 /**
  * Idle compaction of this window's project. `on` is the project's setting; `blocked`: `"idleCompaction": false` in the
@@ -367,6 +374,12 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
       return { type: 'takeover' };
     case 'activity':
       return { type: 'activity' };
+    case 'task-stop':
+      if (typeof m.id !== 'string' || !TASK_ID.test(m.id)) return { error: 'task-stop needs a task id' };
+      return { type: 'task-stop', id: m.id };
+    case 'task-background':
+      if (typeof m.toolUseId !== 'string' || !TOOL_USE_ID.test(m.toolUseId)) return { error: 'task-background needs a tool-use id' };
+      return { type: 'task-background', toolUseId: m.toolUseId };
     case 'idle-compact':
       if (typeof m.on !== 'boolean') return { error: 'idle-compact needs boolean on' };
       return { type: 'idle-compact', on: m.on };
@@ -376,7 +389,10 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
 }
 
 export type { AgentEvent, StopReason, WireAgentEvent } from './agent.ts';
-export { reduceTasks, type Task, type TasksState } from './tasks.ts';
+export { FINISHED_CAP, orderedTasks, reduceTasks, taskKind, type Task, type TaskKind, type TasksState, type TaskStatus } from './tasks.ts';
 
 /** `GET /subagent` (protocol 7): a subagent's conversation as feed events, whether it still runs, and what the Agent call named it. */
 export type SubagentView = { events: ServerEvent[]; running: boolean; type: string; description: string };
+
+/** `GET /task-output` (protocol 8): the end of a shell / Monitor task's output (at most 8 KiB, may hold escape sequences), its size, and whether it still runs. */
+export type TaskOutputView = { output: string; totalBytes: number; truncated: boolean; running: boolean };

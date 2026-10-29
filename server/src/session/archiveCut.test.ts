@@ -48,7 +48,8 @@ function pushed(history: ServerEvent[] = []) {
         })(),
         send: (m) => void sends.push(m.uuid),
         interrupt: async () => {}, setPermissionMode: async () => {}, supportedModels: async () => [], setModel: async () => {}, setEffort: async () => {}, fileSuggestions: async () => [],
-        contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }), close() {},
+        contextUsage: async () => ({ used: 0, max: 1, pct: 0 }), usage: async () => ({ cost: null, limits: null }),
+        stopTask: async () => {}, backgroundTask: async () => false, taskOutput: async () => ({ output: '', totalBytes: 0, truncated: false }), close() {},
       };
     },
   };
@@ -146,7 +147,7 @@ describe('archive cut at a compaction', () => {
     s.close();
   });
 
-  it('a task running at a compaction still shows after a reload', async () => {
+  it('a task running at a compaction, and a finished one, still show after a reload', async () => {
     const { backend, sends, push } = pushed();
     const { hub, live, replay } = hubWithLog();
     const s = await createSessionManager({ hub, backend, cwd: '/proj' });
@@ -157,7 +158,7 @@ describe('archive cut at a compaction', () => {
       { t: 'task', id: 'quick', phase: 'done' }, compacted, msg('m2'));
     await until(() => has(live, 'message', 'm2'));
     const tasks = replay().events.filter((e) => e.kind === 'agent' && e.e.t === 'task').map((e) => (e as { e: { id: string } }).e.id);
-    expect(tasks).toEqual(['bg']);
+    expect(tasks).toEqual(['bg', 'quick', 'quick']); // bg's started, quick's started and end
     expect(ofAgent(archiveAt().segment('S1', 1)!, 'task')).toHaveLength(3);
     s.close();
   });

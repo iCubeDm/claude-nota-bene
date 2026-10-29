@@ -326,6 +326,9 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     },
     onSwitch: (cb) => void switchListeners.push(cb),
     fileSuggestions: (query) => (!backend.capabilities.fileSuggestions ? Promise.resolve([]) : slot.agent ? slot.agent.fileSuggestions(query) : Promise.reject(new Error('no agent'))),
+    stopTask: (id) => (slot.agent ? slot.agent.stopTask(id) : Promise.reject(new Error('no agent'))),
+    backgroundTask: (call) => (slot.agent ? slot.agent.backgroundTask(call) : Promise.reject(new Error('no agent'))),
+    taskOutput: (id) => (slot.agent ? slot.agent.taskOutput(id) : Promise.reject(new Error('no agent'))),
     stats: () => stats.current(),
     clientAttached: () => stats.onAttach(),
     close() {

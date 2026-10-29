@@ -88,6 +88,21 @@ function subagentMessages(a: FakeSubagent): SessionMessage[] {
   return out as unknown as SessionMessage[];
 }
 
+/**
+ * A scripted shell / Monitor task, found by its task id (the `task_started` frame a turn's `frames` sends names it).
+ * `chunks` are the output a reader sees growing: each `taskOutput` read reveals one more (a stopped task stops growing).
+ */
+export type FakeShell = { taskId: string; chunks: string[] };
+
+/** What the fake knows of tasks, shared by its sessions: the scripted shells, how far each was read, and what was asked. */
+type TaskState = {
+  shells: FakeShell[]; reads: Map<string, number>; stopped: Set<string>; stops: string[]; backgrounds: string[];
+  /** what `backgroundTask` answers: true (default), false (nothing matched) or 'throw' (background tasks disabled) */
+  background: boolean | 'throw';
+};
+
+const TAIL_BYTES = 8192;
+
 /** A --fake script: the turns alone (the M0-M3 format), or the turns and a session list. */
 export type FakeScript = FakeTurn[] | {
   turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number;
@@ -96,6 +111,10 @@ export type FakeScript = FakeTurn[] | {
   models?: ModelOption[];
   /** the subagents the Agent calls of the script started (`GET /subagent`) */
   subagents?: FakeSubagent[];
+  /** the shell / Monitor tasks of the script (`GET /task-output`) */
+  shells?: FakeShell[];
+  /** what `backgroundTask` answers (default true) */
+  background?: boolean | 'throw';
 };
 
 /** What a fake agent knows of its model: the list, the one running, and what was asked of it (shared by the backend's tests). */
@@ -150,8 +169,12 @@ class FakeSession implements FakeAgentSession {
   private readonly mdl: ModelState;
   private sessionId: string; // a /clear replaces it
 
-  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], mdl: ModelState, resume?: string, fork?: boolean) {
+  private readonly tasks: TaskState;
+  private injected: SDKMessage[] = []; // frames outside a turn (a task's end); sent as soon as the stream is idle
+
+  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], mdl: ModelState, tasks: TaskState, resume?: string, fork?: boolean) {
     this.turns = turns;
+    this.tasks = tasks;
     this.mdl = mdl;
     this.modes = modes;
     this.ask = ask;
@@ -171,6 +194,31 @@ class FakeSession implements FakeAgentSession {
 
   async interrupt(): Promise<void> {
     this.turnCtl?.abort();
+  }
+
+  async stopTask(taskId: string): Promise<void> {
+    this.tasks.stops.push(taskId);
+    if (this.tasks.stopped.has(taskId)) return;
+    this.tasks.stopped.add(taskId);
+    // as the CLI does: a task_notification with status stopped
+    this.injected.push(sdk({ type: 'system', subtype: 'task_notification', task_id: taskId, status: 'stopped', output_file: '', summary: 'stopped', session_id: this.sessionId, uuid: `fake-tn-${taskId}` }));
+    this.wake?.();
+  }
+
+  async backgroundTask(toolUseId: string): Promise<boolean> {
+    this.tasks.backgrounds.push(toolUseId);
+    if (this.tasks.background === 'throw') throw new Error('background tasks are disabled');
+    return this.tasks.background;
+  }
+
+  async taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }> {
+    const sh = this.tasks.shells.find((x) => x.taskId === taskId);
+    if (!sh) throw new Error(`no shell task ${taskId}`);
+    const n = this.tasks.reads.get(taskId) ?? 0;
+    if (!this.tasks.stopped.has(taskId)) this.tasks.reads.set(taskId, n + 1);
+    const bytes = Buffer.from(sh.chunks.slice(0, n + 1).join(''), 'utf8');
+    const tail = bytes.length > TAIL_BYTES ? bytes.subarray(bytes.length - TAIL_BYTES) : bytes;
+    return { output: tail.toString('utf8'), totalBytes: bytes.length, truncated: bytes.length > TAIL_BYTES };
   }
 
   async setPermissionMode(mode: Mode): Promise<void> {
@@ -231,6 +279,8 @@ class FakeSession implements FakeAgentSession {
   private async *run(): AsyncGenerator<SDKMessage> {
     while (true) {
       while (this.pending.length === 0 && !this.closed) {
+        while (this.injected.length) yield this.injected.shift()!;
+        if (this.pending.length || this.closed) break;
         await new Promise<void>((r) => { this.wake = r; });
         this.wake = null;
       }
@@ -385,12 +435,15 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; subagents?: FakeSubagent[] } = {},
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; subagents?: FakeSubagent[]; shells?: FakeShell[]; background?: boolean | 'throw' } = {},
 ): Omit<AgentBackend, 'start'> & {
   start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[];
   /** every setModel / setEffort call, in order */
   setModels: (string | null)[]; setEfforts: (EffortLevel | null)[];
+  /** every stopTask / backgroundTask call, in order */
+  stops: string[]; backgrounds: string[];
 } {
+  const tasks: TaskState = { shells: o.shells ?? [], reads: new Map(), stopped: new Set(), stops: [], backgrounds: [], background: o.background ?? true };
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
   const setModels: (string | null)[] = [];
@@ -411,13 +464,15 @@ export function fakeBackend(
     setModels,
     setEfforts,
     starts,
+    stops: tasks.stops,
+    backgrounds: tasks.backgrounds,
     start: (s) => {
       startModes.push(s.permissionMode);
       starts.push({
         cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}), ...(s.fork ? { fork: true } : {}),
         ...(s.model ? { model: s.model } : {}), ...(s.effort ? { effort: s.effort } : {}),
       });
-      return new FakeSession(turns, s.ask, setModes, { options: o.models ?? [], ...(s.model ? { running: s.model } : {}), sets: setModels, efforts: setEfforts }, s.resume, s.fork);
+      return new FakeSession(turns, s.ask, setModes, { options: o.models ?? [], ...(s.model ? { running: s.model } : {}), sets: setModels, efforts: setEfforts }, tasks, s.resume, s.fork);
     },
     listSessions: async () => sessions.map((x) => {
       const cwd = cwdOf(x);
@@ -446,5 +501,5 @@ export function fakeBackend(
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
   return Array.isArray(script)
     ? fakeBackend(script, { base })
-    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.subagents ? { subagents: script.subagents } : {}) });
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.subagents ? { subagents: script.subagents } : {}), ...(script.shells ? { shells: script.shells } : {}), ...(script.background !== undefined ? { background: script.background } : {}) });
 }
