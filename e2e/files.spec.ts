@@ -1073,3 +1073,113 @@ test('player keys on a video tab after a click on the tab strip: Space plays, Ar
   await page.keyboard.press('Escape');
   await expect(markupLayer(page, 'media/a.mp4')).toHaveCount(0);
 });
+
+// ---- 3D models: models/cube.glb (one clip, "spin") and models/ext/box.gltf (+ box.bin + tex.png next to it) are the committed fixtures
+// of e2e/fixtures/make-models.mjs. Headless Chrome renders WebGL in software; a machine without WebGL skips these with a message.
+const modelPane = (page: Page, path: string) => page.locator(`[data-pane="file:${path}"]`);
+const webGl = (page: Page) => page.evaluate(() => !!document.createElement('canvas').getContext('webgl2'));
+
+/** How many distinct (coarsely quantised) colours the canvas shows, and the share of pixels unlike its corner (the background). */
+const canvasColours = (canvas: Locator) => canvas.evaluate(async (c) => {
+  const img = new Image();
+  img.src = (c as HTMLCanvasElement).toDataURL('image/png');
+  await img.decode();
+  const k = document.createElement('canvas');
+  k.width = img.width;
+  k.height = img.height;
+  const g = k.getContext('2d')!;
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, k.width, k.height).data;
+  const seen = new Set<number>();
+  let unlike = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    seen.add(((d[i]! >> 3) << 16) | ((d[i + 1]! >> 3) << 8) | (d[i + 2]! >> 3));
+    if (Math.abs(d[i]! - d[0]!) + Math.abs(d[i + 1]! - d[1]!) + Math.abs(d[i + 2]! - d[2]!) > 24) unlike++;
+  }
+  return { distinct: seen.size, unlike: unlike / (d.length / 4) };
+});
+
+for (const [file, name] of [['models/cube.glb', 'a .glb with an animation clip'], ['models/ext/box.gltf', 'a .gltf with an external .bin and texture']] as const) {
+  test(`${name} opens as a 3D view: ready, info line, drawn pixels, nothing leaves the server, reset view @files`, async ({ page }) => {
+    await start(page);
+    test.skip(!(await webGl(page)), 'needs WebGL (software or hardware) in the browser');
+    const foreign: string[] = [];
+    const served: string[] = [];
+    page.on('request', (r) => { if (!/^(data:|blob:|http:\/\/127\.0\.0\.1:4794\/)/.test(r.url())) foreign.push(r.url()); });
+    page.on('response', (r) => { if (r.url().includes('/file?path=models') && r.status() === 200) served.push(decodeURIComponent(new URL(r.url()).searchParams.get('path')!)); });
+    await openFromTree(page, file);
+    const pane = modelPane(page, file);
+    await expect(pane).toHaveAttribute('data-model-ready', 'true');
+    await expect(pane.locator('[data-model-info]')).toContainText(/KB · 1 mesh · 12 triangles · 1 material · 1 animation$/);
+    if (file.endsWith('.gltf')) expect(served).toEqual(expect.arrayContaining(['models/ext/box.gltf', 'models/ext/box.bin', 'models/ext/tex.png']));
+
+    // the canvas is drawn: more than one flat colour, and the model covers a real part of it
+    const canvas = pane.locator('canvas');
+    await expect(canvas).toHaveCount(1);
+    await expect.poll(async () => (await canvasColours(canvas)).distinct).toBeGreaterThan(3);
+    expect((await canvasColours(canvas)).unlike).toBeGreaterThan(0.02);
+
+    // zoom changes the camera; the Reset view button and a double click bring it back
+    const cam = () => pane.getAttribute('data-model-camera');
+    const home = await cam();
+    expect(home).toBeTruthy();
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -500);
+    await expect.poll(cam).not.toBe(home);
+    await pane.getByRole('button', { name: /Reset view|Сбросить вид/ }).click();
+    await expect.poll(cam).toBe(home);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); // the click left the pointer on the button
+    await page.mouse.wheel(0, 500);
+    await expect.poll(cam).not.toBe(home);
+    await canvas.dblclick();
+    await expect.poll(cam).toBe(home);
+
+    expect(foreign).toEqual([]);
+  });
+}
+
+test('a model with a clip: nothing plays by default, the control plays it and the picture changes @files', async ({ page }) => {
+  await start(page);
+  test.skip(!(await webGl(page)), 'needs WebGL (software or hardware) in the browser');
+  await openFromTree(page, 'models/cube.glb');
+  const pane = modelPane(page, 'models/cube.glb');
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  await expect(pane.getByRole('combobox')).toHaveValue('0');
+  await expect(pane.getByRole('combobox').locator('option')).toHaveText(['spin']);
+  const frame = () => pane.locator('canvas').evaluate((c) => (c as HTMLCanvasElement).toDataURL('image/png'));
+  const still = await frame();
+  await page.waitForTimeout(500);
+  expect(await frame()).toBe(still); // paused: not a single frame drawn
+  await pane.getByRole('button', { name: /Play|Играть/ }).click();
+  await expect.poll(frame).not.toBe(still);
+  await pane.getByRole('button', { name: /Pause|Пауза/ }).click();
+  const paused = await frame();
+  await page.waitForTimeout(500);
+  expect(await frame()).toBe(paused);
+});
+
+test('the header reload reloads a model and keeps the camera; a model tab survives switching away and back @files', async ({ page }) => {
+  await start(page);
+  test.skip(!(await webGl(page)), 'needs WebGL (software or hardware) in the browser');
+  await openFromTree(page, 'models/cube.glb');
+  const pane = modelPane(page, 'models/cube.glb');
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  const canvas = pane.locator('canvas');
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -400);
+  const zoomed = await expect.poll(() => pane.getAttribute('data-model-camera')).not.toBeNull().then(() => pane.getAttribute('data-model-camera'));
+  let gets = 0;
+  page.on('response', (r) => { if (r.url().includes('/file?path=models%2Fcube.glb')) gets++; });
+  await page.locator('[data-file-view]:not([hidden])').getByRole('button', { name: /Reload|Перезагрузить/ }).click();
+  await expect.poll(() => gets).toBeGreaterThan(0);
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  expect(await pane.getAttribute('data-model-camera')).toBe(zoomed);
+  await chatTab(page).click();
+  await expect(pane).toBeHidden();
+  await tabOf(page, 'models/cube.glb').click();
+  await expect(pane).toBeVisible();
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  expect(await pane.getAttribute('data-model-camera')).toBe(zoomed);
+});
