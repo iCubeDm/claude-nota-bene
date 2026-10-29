@@ -15,6 +15,9 @@ export type SendResult = 'empty' | 'sent' | 'offline' | 'switching';
 /** A file source as the batch and the card name it: `path`, or `path @ ref` for another branch or worktree (M3-16). */
 export const whereOfFile = (src: Extract<AnchorSource, { kind: 'file' }>): string => (src.ref ? `${src.path} @ ${src.ref}` : src.path);
 
+/** A media comment sends its frame only (images[0]); old comments stored layer.png as a second id, which stays on disk. */
+const mediaImages = (c: Comment): string[] => (isMediaAnchor(c.anchor) ? (c.images ?? []).slice(0, 1) : c.images ?? []);
+
 /** Where a comment's fragment lives, for the batch line: the reply label, "my message", or the file. */
 export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0]): string {
   const src = c.anchor.source;
@@ -41,7 +44,7 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
   if ((!body && !pending.length && !own.length) || selectUploading(st)) return 'empty';
   const lang = getLang();
   const images: ImageRef[] = own.map((im, k) => ({ ...im, label: tIn(lang, 'imgLabel', k + 1) }));
-  const refs = pending.map((c, i) => (c.images ?? []).map((id) => {
+  const refs = pending.map((c, i) => mediaImages(c).map((id) => {
     images.push({ id, mediaType: mediaTypeOf(id), label: tIn(lang, 'imgLabelC', images.length + 1, i + 1) });
     return images.length;
   }));

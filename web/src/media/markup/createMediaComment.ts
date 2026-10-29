@@ -49,8 +49,7 @@ function frameReady(v: HTMLVideoElement): Promise<void> {
 }
 
 /**
- * Renders, uploads the natural-size files to /marks/<id>/…, uploads downscaled copies to /attach; returns the ids
- * (frame first) and the anchor patch. On any failure deletes /marks/<id> and rejects. Sequential on purpose: a DELETE
+ * Renders, uploads the natural-size files to /marks/<id>/…, uploads the downscaled frame (not layer.png: the shapes are in the text) to /attach; returns its id and the anchor patch. On any failure deletes /marks/<id> and rejects. Sequential on purpose: a DELETE
  * after a failure must not overtake a write still in flight.
  * - A video is paused, waited for until it has the current frame (FRAME_WAIT_MS, then an error), and its time read
  *   right before the frame is drawn (an OS media key may have resumed it).
@@ -74,7 +73,6 @@ export async function prepareMediaComment(
     await putMark(id, 'frame.jpg', frame);
     await putMark(id, 'layer.png', layer);
     const f = await uploadImage(await prepareImage(frame));
-    const l = await uploadImage(await prepareImage(layer));
     if (o.version) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const version = await Promise.race([
@@ -84,7 +82,7 @@ export async function prepareMediaComment(
       clearTimeout(timer);
       if (version !== undefined) patch.version = version;
     }
-    return { images: [f.id, l.id], anchor: patch };
+    return { images: [f.id], anchor: patch };
   } catch (e) {
     await deleteMarks(id);
     throw e;

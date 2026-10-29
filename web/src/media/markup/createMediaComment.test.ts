@@ -39,18 +39,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it('prepare uploads frame and layer to /marks/<id>/ and both copies to /attach, frame first', async () => {
+it('prepare uploads frame and layer to /marks/<id>/ and only the frame copy to /attach', async () => {
   const out = await prepareMediaComment(ID, src, anchor);
   expect(renderMarks).toHaveBeenCalledWith(src, 1000, 500, anchor.shapes);
   expect(calls.map((c) => `${c.method} ${c.url} ${c.type}`)).toEqual([
     `POST /marks/${ID}/frame.jpg image/jpeg`,
     `POST /marks/${ID}/layer.png image/png`,
     'POST /attach image/jpeg',
-    'POST /attach image/png',
   ]);
   // the project files are the natural-size renders, the attachments the downscaled copies
-  expect(calls.map((c) => c.body)).toEqual([frame, layer, small.jpeg, small.png]);
-  expect(out).toEqual({ images: ['f'.repeat(64), 'a'.repeat(64)], anchor: {} }); // unscaled, no video, no version
+  expect(calls.map((c) => c.body)).toEqual([frame, layer, small.jpeg]);
+  expect(out).toEqual({ images: ['f'.repeat(64)], anchor: {} }); // unscaled, no video, no version
 });
 
 it('a failed upload deletes /marks/<id> and rejects', async () => {

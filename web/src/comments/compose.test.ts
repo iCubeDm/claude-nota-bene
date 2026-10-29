@@ -54,21 +54,21 @@ const media = (id: string, text: string, o: Partial<MediaAnchor> = {}): Comment 
 const mwhere = () => 'media/scene_v6.png · 1920×1080';
 
 it('a media comment: shape lines, image labels, files', () => {
-  const out = composeBatch('', [media('m1', 'The character sits here')], 'en', none, mwhere, () => undefined, [[4, 5]]);
+  const out = composeBatch('', [media('m1', 'The character sits here')], 'en', none, mwhere, () => undefined, [[4]]);
   expect(out).toBe(
     'Comments on fragments:\n\n1. [media/scene_v6.png · 1920×1080]\n' +
     '> rect x=0.42 y=0.4 w=0.16 h=0.24 (px 806,432 307×259)\n' +
     '> pen 2 pts, bbox x=0.3 y=0.5 w=0.1 h=0.08 (px 576,540 192×86)\n' +
     '→ The character sits here\n' +
-    '📎 images: 4 (frame with marks), 5 (marks only, transparent)\n' +
+    '📎 images: 4 (frame with marks)\n' +
     '   files: .nota-bene/marks/m1/frame.jpg, .nota-bene/marks/m1/layer.png',
   );
 });
 
 it('media: scaled files, changed file line, pasted images after the labelled ones; ru keeps the format', () => {
   const out = composeBatch('', [media('m1', 'x', { scale: 0.75 })], 'en', none, mwhere, () => undefined, [[1, 2, 3]], () => true);
-  expect(out).toContain('📎 images: 1 (frame with marks), 2 (marks only, transparent), 3\n');
+  expect(out).toContain('📎 images: 1 (frame with marks), 2, 3\n');
   expect(out).toContain('   files: .nota-bene/marks/m1/frame.jpg (scaled ×0.75), .nota-bene/marks/m1/layer.png (scaled ×0.75)\n   (marked on an earlier version of the file; the frame shows it)');
-  const ru = composeBatch('', [media('m1', 'x', { scale: 0.75 })], 'ru', none, mwhere, () => undefined, [[4, 5]], () => true);
-  expect(ru).toContain('📎 картинки: 4 (кадр с разметкой), 5 (только разметка, прозрачный)\n   файлы: .nota-bene/marks/m1/frame.jpg (уменьшен ×0.75), .nota-bene/marks/m1/layer.png (уменьшен ×0.75)\n   (отмечено на более ранней версии файла; кадр это показывает)');
+  const ru = composeBatch('', [media('m1', 'x', { scale: 0.75 })], 'ru', none, mwhere, () => undefined, [[4]], () => true);
+  expect(ru).toContain('📎 картинки: 4 (кадр с разметкой)\n   файлы: .nota-bene/marks/m1/frame.jpg (уменьшен ×0.75), .nota-bene/marks/m1/layer.png (уменьшен ×0.75)\n   (отмечено на более ранней версии файла; кадр это показывает)');
 });

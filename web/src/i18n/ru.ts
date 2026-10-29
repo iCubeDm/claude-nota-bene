@@ -246,7 +246,7 @@ export const ru = {
   imgLabel: (k: number) => `[изображение ${k}]`,
   imgLabelC: (k: number, ci: number) => `[изображение ${k} · к комментарию ${ci}]`,
   imgRef: (ks: number[]) => `📎 изображения: ${ks.join(', ')}`,
-  imgRefMedia: (ks: number[]) => `📎 картинки: ${ks.map((k, i) => (i === 0 ? `${k} (кадр с разметкой)` : i === 1 ? `${k} (только разметка, прозрачный)` : String(k))).join(', ')}`,
+  imgRefMedia: (ks: number[]) => `📎 картинки: ${ks.map((k, i) => (i === 0 ? `${k} (кадр с разметкой)` : String(k))).join(', ')}`,
   filesLine: (files: string[]) => `   файлы: ${files.join(', ')}`,
   scaledSfx: (f: number) => ` (уменьшен ×${f})`,
   markStale: '   (отмечено на более ранней версии файла; кадр это показывает)',

@@ -301,7 +301,7 @@ it('the echo ends the wait: a later send-refused with that id restores nothing',
   expect(box.value).toBe('');
 });
 
-it('send numbers a media comment\'s images frame-then-layer within the global numbering; the header names file, time and size', async () => {
+it('send numbers a media comment\'s images frame only (an old comment layer is not sent) within the global numbering; the header names file, time and size', async () => {
   setLang('en');
   const A = 'a'.repeat(64), B = 'b'.repeat(64);
   const F = 'f'.repeat(64) + '.jpg', L = 'e'.repeat(64) + '.png';
@@ -313,9 +313,9 @@ it('send numbers a media comment\'s images frame-then-layer within the global nu
   act(() => void store.dispatch(addImage({ id: A, mediaType: 'image/png' })));
   await userEvent.type(box, 'go{Enter}');
   const msg = sentOf(sent[0]!);
-  expect(msg.images?.map((i) => i.label)).toEqual(['[image 1]', '[image 2 · for comment 1]', '[image 3 · for comment 2]', '[image 4 · for comment 2]']);
+  expect(msg.images?.map((i) => i.label)).toEqual(['[image 1]', '[image 2 · for comment 1]', '[image 3 · for comment 2]']);
   expect(msg.text).toContain('2. [media/clip.mp4 @ 0:04.240 · 1280×720]\n> rect');
-  expect(msg.text).toContain('📎 images: 3 (frame with marks), 4 (marks only, transparent)');
+  expect(msg.text).toContain('📎 images: 3 (frame with marks)');
 
 });
 
