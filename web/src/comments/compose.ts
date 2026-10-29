@@ -20,6 +20,8 @@ export function composeBatch(
   refs: number[][] = [],
   /** media comments only: the file has changed since the mark was drawn (known current version differs) */
   staleOf: (c: Comment) => boolean = () => false,
+  /** shared[i] = for a comment whose image is a composite shared with others: that image's number and all the sharing comments' numbers */
+  shared: ({ k: number; cs: number[] } | undefined)[] = [],
 ): string {
   if (!items.length) return general;
   const blocks = items.map((c, i) => {
@@ -31,7 +33,8 @@ export function composeBatch(
     if (isMediaAnchor(a)) {
       const sfx = a.scale ? tIn(lang, 'scaledSfx', a.scale) : '';
       const dir = `.nota-bene/marks/${c.id}`;
-      if (refs[i]?.length) tail += '\n' + tIn(lang, 'imgRefMedia', refs[i]);
+      if (shared[i]) tail += '\n' + tIn(lang, 'imgRefShared', shared[i].k, shared[i].cs);
+      else if (refs[i]?.length) tail += '\n' + tIn(lang, 'imgRefMedia', refs[i]);
       tail += '\n' + tIn(lang, 'filesLine', [`${dir}/frame.jpg${sfx}`, `${dir}/layer.png${sfx}`]);
       if (staleOf(c)) tail += '\n' + tIn(lang, 'markStale');
     } else if (refs[i]?.length) tail = '\n' + tIn(lang, 'imgRef', refs[i]);

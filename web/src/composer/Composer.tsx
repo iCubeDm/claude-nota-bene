@@ -112,7 +112,7 @@ export function Composer() {
   const submit = (force: boolean) => {
     if (uploading || switching) return;
     const r = dispatch(sendBatch(force));
-    if (r === 'empty' || r === 'switching') return;
+    if (r === 'empty' || r === 'switching' || r === 'building') return;
     setFailed(r === 'offline');
     if (r === 'sent') ref.current?.focus();
   };

@@ -247,6 +247,9 @@ export const en: Dict = {
   remove: 'Remove',
   imgLabel: (k: number) => `[image ${k}]`,
   imgLabelC: (k: number, ci: number) => `[image ${k} · for comment ${ci}]`,
+  imgLabelG: (k: number, cs: number[]) => `[image ${k} · for comments ${cs.join(', ')}]`,
+  imgRefShared: (k: number, cs: number[]) => `📎 image ${k} (shared by comments ${cs.join(', ')}; every mark carries a badge with its comment number)`,
+  groupFail: 'Not sent: could not prepare the combined image',
   imgRef: (ks: number[]) => `📎 images: ${ks.join(', ')}`,
   // a media comment (markup on an image / video frame): the frame and the layer are labelled, pasted ones follow bare
   imgRefMedia: (ks: number[]) => `📎 images: ${ks.map((k, i) => (i === 0 ? `${k} (frame with marks)` : String(k))).join(', ')}`,
