@@ -1,7 +1,10 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { refClick } from '@/refs/refs.ts';
 import { selectFeed, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import type { FeedState } from '@/store/feed.ts';
+import { isAgentTool } from '@/subagent/slice.ts';
+import { FeedScope } from './scope.ts';
 import { Markdown } from './Markdown.tsx';
 import { CompactingLine, DoneLine, IdleCompactLine, MarkerLine, NoticeLine } from './DoneLine.tsx';
 import { EarlierButton } from './EarlierButton.tsx';
@@ -21,9 +24,16 @@ const ANCHOR_MS = 1000;
 type Anchor = { el: HTMLElement; offset: number };
 const offsetIn = (pane: HTMLElement, el: HTMLElement) => el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
 
-/** The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. */
-export function Feed() {
-  const { items, compacting, busy, epoch, earlier } = useAppSelector(selectFeed);
+/**
+ * The chat transcript: one element per FeedItem, auto-scrolling only while the reader is at the bottom. With `feed` it
+ * draws that feed instead (a subagent's tab: `agent` is its Agent call's id, `running` whether it still works); that
+ * one has no archive, so no «earlier» button.
+ */
+export function Feed({ feed, agent, running }: { feed?: FeedState; agent?: string; running?: boolean } = {}) {
+  const main = useAppSelector(selectFeed);
+  const { items, compacting, epoch, earlier } = feed ?? main;
+  const busy = agent ? !!running : main.busy;
+  const scope = useMemo(() => ({ agent, busy: agent ? !!running : undefined }), [agent, running]);
   const t = useT();
   const dispatch = useAppDispatch();
   const root = useRef<HTMLDivElement>(null);
@@ -126,9 +136,10 @@ export function Feed() {
   };
 
   return (
+    <FeedScope.Provider value={scope}>
     <div ref={root} onClick={(e) => refClick(e, dispatch)}>
       {/* keyed by the feed's epoch: a replay or /clear starts it afresh (no loading or failure left over) */}
-      <EarlierButton key={epoch} beforePrepend={beforePrepend} />
+      {!agent && <EarlierButton key={epoch} beforePrepend={beforePrepend} />}
       {items.length === 0 && (
         <div data-kind="empty" className="py-6 text-center text-sm text-muted-foreground">
           {t('emptyChat')}
@@ -137,9 +148,11 @@ export function Feed() {
       {items.map((it, i) => {
         if (it.kind === 'tool') {
           // a run of consecutive actions is drawn once, by its first item; one action alone stays a plain line
-          if (items[i - 1]?.kind === 'tool') return null;
+          // a subagent's call is a card of its own: it never folds into a run of actions
+          if (isAgentTool(it.name)) return <ToolLine key={`tool:${it.id}`} item={it} />;
+          if (items[i - 1]?.kind === 'tool' && !isAgentCall(items[i - 1]!)) return null;
           let end = i + 1;
-          while (items[end]?.kind === 'tool') end++;
+          while (items[end]?.kind === 'tool' && !isAgentCall(items[end]!)) end++;
           if (end - i === 1) return <ToolLine key={`tool:${it.id}`} item={it} />;
           const run = items.slice(i, end) as Extract<typeof it, { kind: 'tool' }>[];
           return <ToolGroup key={`group:${it.id}`} items={run} live={busy && end === items.length} />;
@@ -181,5 +194,8 @@ export function Feed() {
         </div>
       )}
     </div>
+    </FeedScope.Provider>
   );
 }
+
+const isAgentCall = (it: FeedState['items'][number]): boolean => it.kind === 'tool' && isAgentTool(it.name);

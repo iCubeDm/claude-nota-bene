@@ -12,6 +12,7 @@ import { labelsFor, labelText } from './labels.ts';
 import { LabelTip } from './LabelTip.tsx';
 import { addComment, setPanelOpen } from './slice.ts';
 import { editable } from '@/lib/editable.ts';
+import { AGENT_PROTOCOL } from '@/subagent/slice.ts';
 
 /** What the popup (M1-10) needs: where the text is anchored and where to put the popup; `text` is what was typed to open it. */
 export type PendingSelection = { anchor: Anchor; rect: DOMRect; text?: string };
@@ -31,19 +32,24 @@ const activePane = (): HTMLElement | null =>
  * chat item (a user message, a FINAL assistant reply, a plan or an action's panel); in a file tab its text root, the OUTERMOST `data-file-path`
  * in the pane (FileView sets it on the pane while it shows text; one inside rendered markdown is file content).
  */
-function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | null {
+function rootOf(start: Element, agentsOk: boolean): { root: HTMLElement; source: AnchorSource } | null {
   const pane = activePane();
   if (!pane?.contains(start)) return null;
   if (pane.matches('[data-chat-pane]')) {
-    if (!start.closest('#items')) return null;
+    // a subagent's tab (`data-agent`, M2): its items are the chat's kinds, named by the Agent call. A server older than
+    // protocol 7 would drop the name and file the comment under the main chat: no comments there
+    const agent = pane.dataset.agent;
+    if (agent && !agentsOk) return null;
+    if (!start.closest('#items, [data-items]')) return null;
     const root = start.closest<HTMLElement>('[data-item-id]');
     const id = root?.dataset.itemId;
     if (!root || !id || !pane.contains(root)) return null;
     if (id.startsWith('stream:')) return null; // an interrupted reply keeps its per-run id, unstable across restarts: a comment on it would orphan
     const kind = root.dataset.kind;
+    if (agent && kind === 'user') return null; // the prompt the subagent was given: not a reply, not an action
     // an agent action's open panel is a root too (`tool:<id>`, R-M7-18): its command and output
     if (!(kind === 'user' || kind === 'plan' || kind === 'tool-panel' || (kind === 'assistant' && root.dataset.final === 'true'))) return null;
-    return { root, source: { kind: 'message', id } };
+    return { root, source: agent ? { kind: 'message', id, agent } : { kind: 'message', id } };
   }
   let root: HTMLElement | null = null;
   for (let e: HTMLElement | null = start.closest<HTMLElement>('[data-file-path]'); e && pane.contains(e); e = e.parentElement?.closest<HTMLElement>('[data-file-path]') ?? null) root = e;
@@ -54,12 +60,12 @@ function rootOf(start: Element): { root: HTMLElement; source: AnchorSource } | n
 }
 
 /** The selection inside one commentable root, clipped to that root. */
-function readSelection(): PendingSelection | null {
+function readSelection(agentsOk: boolean): PendingSelection | null {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
   const range = sel.getRangeAt(0);
   const start = elementOf(range.startContainer);
-  const hit = start && rootOf(start);
+  const hit = start && rootOf(start, agentsOk);
   if (!hit) return null;
   const { root, source } = hit;
 
@@ -95,6 +101,8 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
   const t = useT();
   const dispatch = useAppDispatch();
   const protocol = useAppSelector((s) => s.controls.protocol);
+  const agentsOkNow = useRef(false);
+  agentsOkNow.current = protocol >= AGENT_PROTOCOL;
   const barLabels = labelsFor(protocol).filter((l) => BAR.includes(l.id));
   const [sel, setSel] = useState<PendingSelection | null>(null);
   const selNow = useRef<PendingSelection | null>(null);
@@ -120,7 +128,7 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
       if ((e.target as Element | null)?.closest?.('[role="dialog"]')) return;
       dismissed.current = false;
       // the browser updates the selection after mouseup, so read it one tick later
-      setTimeout(() => setSel(switchingNow.current ? null : readSelection()));
+      setTimeout(() => setSel(switchingNow.current ? null : readSelection(agentsOkNow.current)));
     };
     const hide = () => setSel(null);
     // capture phase + preventDefault: Esc that dismisses the button must not also interrupt the agent (Composer skips defaultPrevented)
@@ -149,7 +157,7 @@ export function SelectionButton({ onComment }: { onComment: (s: PendingSelection
       if (dismissed.current) return;
       const pane = activePane();
       if (!pane || !(e.target instanceof Node) || !pane.contains(e.target)) return;
-      const next = readSelection();
+      const next = readSelection(agentsOkNow.current);
       const view = viewOf();
       setSel(next && attachedInside(next.rect, view) ? next : null);
     };

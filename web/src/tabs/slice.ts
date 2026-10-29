@@ -1,4 +1,5 @@
 import { createAction, createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import { TOOL_USE_ID } from '@nota-bene/shared';
 import type { RootState } from '../store/store.ts';
 import type { DiagramLang } from '../diagram/render.ts';
 import { sha1 } from '../diagram/sha1.ts';
@@ -7,8 +8,13 @@ import { sha1 } from '../diagram/sha1.ts';
 export type FileTab = { id: `file:${string}`; kind: 'file'; path: string; src: string; ref?: string };
 /** One rendered diagram (M7-01, R-M7-12): it holds its source, so it survives a reload and needs no file. */
 export type DiagramTab = { id: `diagram:${string}`; kind: 'diagram'; source: string; lang: DiagramLang; title: string };
+/**
+ * A subagent's conversation (M2 step 1), read-only: `tool` is the tool-use id of the Agent call that started it. The id
+ * is built from it (never parsed back); `title` is the Agent call's description, kept so a restored tab has a name before it loads.
+ */
+export type AgentTab = { id: `agent:${string}`; kind: 'agent'; tool: string; title: string };
 /** `settings`: the one Settings tab (M6-15, R-M6-4); not saved with the file tabs. */
-export type Tab = { id: 'chat'; kind: 'chat' } | { id: 'settings'; kind: 'settings' } | FileTab | DiagramTab;
+export type Tab = { id: 'chat'; kind: 'chat' } | { id: 'settings'; kind: 'settings' } | FileTab | DiagramTab | AgentTab;
 /**
  * open[0] is always the chat. `root`: the project the file tabs belong to (null until the first session event).
  * `rootGen`: bumped on every root change after the first, so views keyed by it remount (the same path in another root
@@ -35,6 +41,9 @@ const fileTab = (a: FileArg): FileTab => {
   const f = fileArg(a);
   return { id: fileTabId(f.path, f.src), kind: 'file', ...f };
 };
+
+export const agentTabId = (tool: string) => `agent:${tool}` as const;
+const agentTab = ({ tool, title }: SavedAgent): AgentTab => ({ id: agentTabId(tool), kind: 'agent', tool, title });
 
 /** The title of a diagram tab: the first line of its source, up to 40 characters. */
 const DIAGRAM_TITLE_MAX = 40;
@@ -77,6 +86,19 @@ export const tabsSlice = createSlice({
       const tab = diagramTab(a.payload);
       if (idx(s, tab.id) < 0) s.open.push(tab);
       s.active = tab.id;
+    },
+    /** Opens (once per Agent call) and activates a subagent's tab; an empty title keeps the one it has. */
+    openAgent: (s, a: PayloadAction<SavedAgent>) => {
+      const tab = agentTab(a.payload);
+      const i = idx(s, tab.id);
+      if (i < 0) s.open.push(tab);
+      else if (tab.title && s.open[i]!.kind === 'agent') (s.open[i] as AgentTab).title = tab.title;
+      s.active = tab.id;
+    },
+    /** The subagent's real description arrived: it names its tab (a restored tab had the saved one). */
+    setAgentTitle: (s, a: PayloadAction<SavedAgent>) => {
+      const t = s.open[idx(s, agentTabId(a.payload.tool))];
+      if (t?.kind === 'agent' && a.payload.title && t.title !== a.payload.title) t.title = a.payload.title;
     },
     activate: (s, a: PayloadAction<Tab['id']>) => {
       if (idx(s, a.payload) >= 0) s.active = a.payload;
@@ -139,12 +161,12 @@ function remember(s: TabsState, tabs: Tab[]): void {
 
 function restore(s: TabsState, saved: SavedTabs, merge: boolean): void {
   const have = new Set(merge ? s.open.map((t) => t.id) : ['chat']);
-  const restored = saved.tabs.map((t) => ('file' in t ? fileTab(t.file) : diagramTab(t.diagram))).filter((t) => !have.has(t.id) && have.add(t.id));
+  const restored = saved.tabs.map((t) => ('file' in t ? fileTab(t.file) : 'agent' in t ? agentTab(t.agent) : diagramTab(t.diagram))).filter((t) => !have.has(t.id) && have.add(t.id));
   s.open = [CHAT, ...restored, ...(merge ? s.open.slice(1) : [])];
   if (idx(s, saved.active) >= 0) s.active = saved.active as Tab['id'];
 }
 
-export const { openFile, openSettings, openDiagram, activate, closeTab, closeOthers, closeRight, closeAll, reopenClosed, restoreTabs } = tabsSlice.actions;
+export const { openFile, openSettings, openDiagram, openAgent, setAgentTitle, activate, closeTab, closeOthers, closeRight, closeAll, reopenClosed, restoreTabs } = tabsSlice.actions;
 
 export const selectTabs = (s: RootState): TabsState => s.tabs;
 export const selectActiveTab = (s: RootState): Tab => s.tabs.open.find((t) => t.id === s.tabs.active) ?? CHAT;
@@ -153,8 +175,10 @@ export const selectActiveTab = (s: RootState): Tab => s.tabs.open.find((t) => t.
 export type SavedFile = { path: string; src?: string; ref?: string };
 /** A saved diagram tab: its source and language (the id and title are made from them). */
 export type SavedDiagram = { source: string; lang: DiagramLang };
+/** A saved subagent tab: the Agent call's tool-use id and the title it had. */
+export type SavedAgent = { tool: string; title: string };
 /** One saved tab, in strip order. */
-export type SavedTab = { file: SavedFile } | { diagram: SavedDiagram };
+export type SavedTab = { file: SavedFile } | { diagram: SavedDiagram } | { agent: SavedAgent };
 export type SavedTabs = { tabs: SavedTab[]; active: string };
 
 /**
@@ -166,6 +190,7 @@ export const serializeTabs = (s: TabsState): SavedTabs => ({
   tabs: s.open.flatMap((t): SavedTab[] =>
     t.kind === 'file' ? [{ file: t.src === 'here' ? { path: t.path } : { path: t.path, src: t.src, ref: t.ref } }]
     : t.kind === 'diagram' ? [{ diagram: { source: t.source, lang: t.lang } }]
+    : t.kind === 'agent' ? [{ agent: { tool: t.tool, title: t.title } }]
     : []),
   active: s.active,
 });
@@ -177,10 +202,14 @@ const isSavedDiagram = (d: unknown): d is SavedDiagram => {
   const o = d as SavedDiagram;
   return !!o && typeof o.source === 'string' && (o.lang === 'mermaid' || o.lang === 'svg');
 };
+const isSavedAgent = (a: unknown): a is SavedAgent => {
+  const o = a as SavedAgent;
+  return !!o && typeof o.tool === 'string' && TOOL_USE_ID.test(o.tool) && typeof o.title === 'string';
+};
 const isSavedTab = (t: unknown): t is SavedTab => {
   if (!t || typeof t !== 'object') return false;
   const o = t as Record<string, unknown>;
-  return ('file' in o && isSavedFile(o.file)) || ('diagram' in o && isSavedDiagram(o.diagram));
+  return ('file' in o && isSavedFile(o.file)) || ('diagram' in o && isSavedDiagram(o.diagram)) || ('agent' in o && isSavedAgent(o.agent));
 };
 /** Reads `{ tabs, active }`, or the older `{ files, active }`, or the older `{ paths, active }` (this folder only). */
 export function readSavedTabs(root: string): SavedTabs | null {

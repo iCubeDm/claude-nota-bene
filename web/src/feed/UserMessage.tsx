@@ -4,7 +4,9 @@ import { getLang, useT } from '@/i18n/index.ts';
 import { en } from '@/i18n/en.ts';
 import { ru } from '@/i18n/ru.ts';
 import { mediaTime } from '@/media/markup/geometry.ts';
+import { useContext } from 'react';
 import { Markdown } from './Markdown.tsx';
+import { FeedScope } from './scope.ts';
 import { escapeMentions } from '@/refs/refs.ts';
 import { labelOf } from '@/comments/labels.ts';
 import { selectSentFor } from '@/comments/slice.ts';
@@ -20,6 +22,7 @@ const BATCH_RE = new RegExp(`(?:^|\\n\\n)(?:${esc(ru.batchHead)}|${esc(en.batchH
 
 export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }> }) {
   const t = useT();
+  const inAgent = !!useContext(FeedScope).agent; // a subagent's tab: the first message is the prompt it was given, not the user's
   const sent = useAppSelector((s) => selectSentFor(s, item.id));
   // replayed transcript events carry ts 0: historic bubbles show no time
   const time = item.ts === 0 ? '' : ' · ' + timeOf(item.ts);
@@ -34,7 +37,7 @@ export function UserMessage({ item }: { item: Extract<FeedItem, { kind: 'user' }
       className="my-2.5 rounded-[10px] border border-border-soft bg-muted/55 px-3 py-2"
     >
       <div data-anchor-skip className="mb-0.5 font-mono text-[10.5px] text-muted-foreground">
-        {t('you')}
+        {inAgent ? t('agentPrompt') : t('you')}
         {time}
         {mode}
       </div>

@@ -15,6 +15,7 @@ import { markupSlice } from '../media/markup/slice.ts';
 import { treeSlice } from '../tree/slice.ts';
 import { statsSlice } from '../stats/slice.ts';
 import { tasksSlice } from '../tasks/slice.ts';
+import { agentName, itemsOf, subagentsSlice } from '../subagent/slice.ts';
 import { toast } from '../shell/toast.ts';
 import { recordCompactMs } from '../feed/compactTiming.ts';
 import { feedUiSlice, TOOL_SRC } from '../feed/uiSlice.ts';
@@ -147,7 +148,7 @@ export function makeStore(o: {
   const persist = createListenerMiddleware<PersistState>();
   persistListeners(persist);
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer, feedUi: feedUiSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer, feedUi: feedUiSlice.reducer, subagents: subagentsSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send, takeOver } satisfies Extra } }).prepend(controlsListener.middleware, persist.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });
@@ -218,7 +219,8 @@ const ARG_CUT = 60;
  * assistant items in feed order), "my message" for a user item, "<name> command (arg)" for an action, null otherwise; `plain` (the batch text) names a reply just "reply", no number. The feed keeps no time per assistant
  * item, so the " · time" part of `reply` is dropped rather than invented.
  */
-export const selectReplyLabel = (s: RootState, messageId: string, plain = false): string | null => {
+export const selectReplyLabel = (s: RootState, messageId: string, plain = false, agent?: string): string | null => {
+  if (agent) return agentLabel(s, messageId, agent);
   if (messageId.startsWith(TOOL_SRC)) {
     // an agent action's command or output (R-M7-20): "Bash command (npm test)", the arg cut to 60 characters
     const id = messageId.slice(TOOL_SRC.length);
@@ -238,3 +240,20 @@ export const selectReplyLabel = (s: RootState, messageId: string, plain = false)
   }
   return null;
 };
+
+/**
+ * The label of a place inside a subagent's conversation (no numbers, like the plain `reply`; the quote is the locator):
+ * "subagent reply «description»", and for an action "Bash command (npm test) · subagent «description»". An action the
+ * conversation does not (yet) hold is unknown (null); a reply is named even before the conversation is loaded, so a
+ * batch never calls it a chat message.
+ */
+function agentLabel(s: RootState, messageId: string, agent: string): string | null {
+  const name = agentName(s, agent);
+  if (messageId.startsWith(TOOL_SRC)) {
+    const id = messageId.slice(TOOL_SRC.length);
+    const it = itemsOf(s, agent)?.find((x) => x.kind === 'tool' && x.id === id);
+    if (it?.kind !== 'tool') return null;
+    return t('srcAgentTool', t('srcTool', it.name, it.arg.length > ARG_CUT ? `${it.arg.slice(0, ARG_CUT)}…` : it.arg), name);
+  }
+  return t('srcAgentReply', name);
+}

@@ -63,6 +63,22 @@ export const ru = {
   commentsLc: 'комментарии',
   srcChat: 'чат',
   srcTool: (name: string, arg: string) => (arg ? `команда ${name} (${arg})` : `команда ${name}`), // a comment on an agent action (M7-17)
+  // беседа субагента в своей вкладке (M2, шаг 1)
+  srcAgentReply: (d: string) => (d ? `ответ субагента «${d}»` : 'ответ субагента'),
+  srcAgentTool: (what: string, d: string) => (d ? `${what} · субагент «${d}»` : `${what} · субагент`),
+  agentOpen: 'открыть',
+  agentOpenTip: 'Открыть беседу субагента во вкладке',
+  agentRunning: 'работает',
+  agentDone: 'готово',
+  agentError: 'ошибка',
+  agentStopped: 'остановлен',
+  agentTab: 'Субагент',
+  agentReadOnly: 'Беседа субагента, только чтение. Комментарии к его ответам уходят в основную сессию.',
+  agentLoading: 'Загружаю субагента…',
+  agentGone: 'Этого субагента нет в текущей сессии.',
+  agentFailed: (m: string) => `Не удалось загрузить субагента: ${m}`,
+  agentPrompt: 'промпт',
+  agentNoComment: 'Комментировать здесь можно после перезапуска сервера (код обновлён).',
   batchHead: 'Комментарии к фрагментам:',
   resumed: (id: string) => `↻ продолжение сессии ${id}`,
   // quick labels (M1-08)

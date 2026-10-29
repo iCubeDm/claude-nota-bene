@@ -34,7 +34,7 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
   const input = useRef<HTMLInputElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
 
-  const label = (tab: Tab) => (tab.kind === 'chat' ? title || t('chat') : tab.kind === 'settings' ? t('settings') : tab.kind === 'diagram' ? tab.title || t('diagramTab') : tab.path.split('/').pop() || tab.path);
+  const label = (tab: Tab) => (tab.kind === 'chat' ? title || t('chat') : tab.kind === 'settings' ? t('settings') : tab.kind === 'diagram' ? tab.title || t('diagramTab') : tab.kind === 'agent' ? tab.title || t('agentTab') : tab.path.split('/').pop() || tab.path);
   const needle = q.trim().toLowerCase();
   const match = (tab: Tab) => !needle || (tab.kind === 'file' ? tab.path : label(tab)).toLowerCase().includes(needle);
   // no query: the hidden ones, then all; a query: every match once
@@ -116,6 +116,7 @@ export function TabsMenu({ strip }: { strip: RefObject<HTMLElement | null> }) {
                     <TabIcon tab={tab} />
                     <span className={`truncate ${tab.id === active ? 'font-semibold text-primary' : ''}`}>{label(tab)}</span>
                     {tab.kind === 'diagram' && <span className="min-w-0 flex-1 truncate text-right text-[10.5px] text-muted-foreground">{t('diagramTab')}</span>}
+                    {tab.kind === 'agent' && <span className="min-w-0 flex-1 truncate text-right text-[10.5px] text-muted-foreground">{t('agentTab')}</span>}
                     {tab.kind === 'file' && <span className="min-w-0 flex-1 truncate text-right font-mono text-[10.5px] text-muted-foreground">{dirOf(tab.path)}{tab.ref ? ` @ ${tab.ref}` : ''}</span>}
                   </button>
                 );

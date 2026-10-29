@@ -32,9 +32,12 @@ type Source = Comment['anchor']['source'];
 /** The file a file pane shows: its path and, for another source, the ref (M3-16). undefined = the chat. */
 type PaneFile = { path: string; ref?: string } | undefined;
 
-/** Whether a source lives in this pane: message sources in the chat, a file source in the tab of that path AND ref. */
-const inPane = (src: Source, file: PaneFile): boolean =>
-  file === undefined ? src.kind === 'message' : src.kind === 'file' && src.path === file.path && (src.ref ?? '') === (file.ref ?? '');
+/**
+ * Whether a source lives in this pane: message sources in the chat (those of a subagent's conversation in that
+ * subagent's tab: `agent`), a file source in the tab of that path AND ref.
+ */
+const inPane = (src: Source, file: PaneFile, agent?: string): boolean =>
+  file === undefined ? src.kind === 'message' && src.agent === agent : src.kind === 'file' && src.path === file.path && (src.ref ?? '') === (file.ref ?? '');
 
 /**
  * The commentable roots inside a pane, keyed by source: the chat's items (by id), or the file view's own text root:
@@ -44,7 +47,7 @@ const inPane = (src: Source, file: PaneFile): boolean =>
 function rootsIn(pane: HTMLElement, file: PaneFile | null): Map<string, HTMLElement> {
   const roots = new Map<string, HTMLElement>();
   if (file === undefined) {
-    for (const e of pane.querySelectorAll<HTMLElement>('#items [data-item-id]')) if (e.dataset.itemId) roots.set(`m:${e.dataset.itemId}`, e);
+    for (const e of pane.querySelectorAll<HTMLElement>('#items [data-item-id], [data-items] [data-item-id]')) if (e.dataset.itemId) roots.set(`m:${e.dataset.itemId}`, e);
   } else if (file && pane.dataset.filePath === file.path && (pane.dataset.fileRef ?? '') === (file.ref ?? '')) {
     roots.set(`f:${fileKey(file.path, file.ref)}`, pane);
   }
@@ -118,12 +121,15 @@ export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
     const tab = s.tabs.open.find((t) => t.id === paneId);
     return tab?.kind === 'file' ? tab.ref : undefined;
   });
-  const file: PaneFile | null = useMemo(() => (paneId === 'chat' ? undefined : path === undefined ? null : { path, ref }), [paneId, path, ref]);
-  const comments = useMemo(() => (file === null ? [] : all.filter((c) => inPane(c.anchor.source, file))), [all, file]);
-  // what moves this pane's text: the feed for the chat; a settled (re)load for a file tab
-  const content = useAppSelector((s) => (paneId === 'chat' ? s.feed : path === undefined ? undefined : s.files.load[fileKey(path, ref)]));
+  // a subagent's tab (`agent:<toolUseId>`) draws its conversation like the chat; its comments carry `source.agent`
+  const agent = paneId.startsWith('agent:') ? paneId.slice('agent:'.length) : undefined;
+  const asChat = paneId === 'chat' || agent !== undefined;
+  const file: PaneFile | null = useMemo(() => (asChat ? undefined : path === undefined ? null : { path, ref }), [asChat, path, ref]);
+  const comments = useMemo(() => (file === null ? [] : all.filter((c) => inPane(c.anchor.source, file, agent))), [all, file, agent]);
+  // what moves this pane's text: the feed for the chat (the subagent's entry for its tab); a settled (re)load for a file tab
+  const content = useAppSelector((s) => (agent ? s.subagents.byTool[agent] : paneId === 'chat' ? s.feed : path === undefined ? undefined : s.files.load[fileKey(path, ref)]));
   // the chat's action panels open and close without a feed change (their roots come and go)
-  const folds = useAppSelector((s) => (paneId === 'chat' ? s.feedUi : undefined));
+  const folds = useAppSelector((s) => (asChat ? s.feedUi : undefined));
   const state = useRef({ comments, active, file });
   state.current = { comments, active, file };
 
@@ -168,7 +174,7 @@ export function HighlightLayer({ pane: paneId = 'chat' }: { pane?: string }) {
     };
 
     observe(pane);
-    const items = pane.querySelector('#items');
+    const items = pane.querySelector('#items, [data-items]');
     if (items) observe(items);
     const onLoad = () => paint.current(); // images / video change layout once loaded
     pane.addEventListener('load', onLoad, true);

@@ -10,6 +10,7 @@ import { selectFileVersion } from '../files/slice.ts';
 import { mediaTime } from '../media/markup/geometry.ts';
 import { activate } from '../tabs/slice.ts';
 import { toast } from '../shell/toast.ts';
+import { agentName } from '../subagent/slice.ts';
 import { buildComposites, frameGroups, type FrameGroup } from './frameGroups.ts';
 
 /** 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). 'changed': the comments or the session changed during that wait, nothing was sent. */
@@ -33,6 +34,8 @@ export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0])
   if (isMediaAnchor(a)) return `${whereOfFile(a.source)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${a.width}×${a.height}`;
   if (src.kind === 'file') return whereOfFile(src);
   // the batch text names a reply plainly: its number is the index in the CURRENT feed (restarts after a compaction, shifts when earlier history is shown); the quote is the locator
+  // a subagent's reply or action is named with the subagent (no numbers); one the loaded conversation does not hold still is not "chat"
+  if (src.agent) return (st && selectReplyLabel(st, src.id, true, src.agent)) ?? t('srcAgentReply', st ? agentName(st, src.agent) : '');
   return (st && selectReplyLabel(st, src.id, true)) ?? t('srcChat');
 }
 

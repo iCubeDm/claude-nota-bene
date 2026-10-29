@@ -1,6 +1,7 @@
 import { createSelector, createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { AppThunk, RootState } from '../store/store.ts';
 import type { FeedItem } from '../store/feed.ts';
+import { isAgentTool, itemsOf } from '../subagent/slice.ts';
 
 /**
  * Which action groups and tool panels are open (R-M7-19). In the store, not in the components, so a jump from a comment
@@ -41,16 +42,19 @@ export const toolSrcId = (toolId: string): string => TOOL_SRC + toolId;
 export function groupOf(items: FeedItem[], toolId: string): string | null {
   const i = items.findIndex((it) => it.kind === 'tool' && it.id === toolId);
   if (i < 0) return null;
+  // a subagent's call is a card of its own (Feed): it is in no run and ends the runs beside it
+  const grouped = (it: FeedItem | undefined): boolean => it?.kind === 'tool' && !isAgentTool(it.name);
+  if (!grouped(items[i])) return null;
   let first = i;
-  while (items[first - 1]?.kind === 'tool') first--;
+  while (grouped(items[first - 1])) first--;
   let end = i + 1;
-  while (items[end]?.kind === 'tool') end++;
+  while (grouped(items[end])) end++;
   return end - first > 1 ? (items[first] as Extract<FeedItem, { kind: 'tool' }>).id : null;
 }
 
 /** Opens an action's panel and its group, read from the feed at call time (a jump from a comment card); an action not in the feed opens nothing. */
-export const revealToolOf = (toolId: string): AppThunk => (d, getState) => {
-  const items = getState().feed.items;
+export const revealToolOf = (toolId: string, agent?: string): AppThunk => (d, getState) => {
+  const items = itemsOf(getState(), agent) ?? [];
   if (!items.some((it) => it.kind === 'tool' && it.id === toolId)) return;
   d(revealTool({ tool: toolId, group: groupOf(items, toolId) }));
 };
