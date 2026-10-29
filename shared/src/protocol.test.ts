@@ -235,3 +235,11 @@ test('a message anchor may name a subagent; the field survives, unknown keys do 
 test('an old message anchor without agent is unchanged', () => {
   expect(toAnchor(anchor as never)).toEqual(anchor);
 });
+
+import { reduceTasks } from './tasks.ts';
+test('a task keeps the call id of its start, and is gone with its end', () => {
+  const started = { kind: 'agent', ts: 5, e: { t: 'task', id: 'k', phase: 'started', desc: 'd', type: 'local_agent', call: 'toolu_A' } } as never;
+  const s = reduceTasks({}, started);
+  expect(s.k).toMatchObject({ call: 'toolu_A' });
+  expect(reduceTasks(s, { kind: 'agent', ts: 6, e: { t: 'task', id: 'k', phase: 'done' } } as never)).toEqual({});
+});

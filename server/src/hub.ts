@@ -1,4 +1,4 @@
-import type { ServerEvent } from '@nota-bene/shared';
+import { reduceTasks, type ServerEvent } from '@nota-bene/shared';
 
 type Sock = { send(data: string): void };
 
@@ -29,6 +29,16 @@ export class EventHub {
         this.socks.delete(s);
       }
     }
+  }
+
+  /**
+   * What the history says of the Agent call `tool`: whether a task started by it is still live (a task event with
+   * `call`, not yet done) and whether its tool_result has arrived. The subagent route's `running` and its cached 404 read it.
+   */
+  callState(tool: string): { live: boolean; hasResult: boolean } {
+    const live = Object.values(reduceTasks({}, { kind: 'replay', events: this.history, ts: 0 } as ServerEvent)).some((t) => t.call === tool);
+    const hasResult = this.history.some((ev) => ev.kind === 'agent' && ev.e.t === 'tool-update' && ev.e.id === tool);
+    return { live, hasResult };
   }
 
   /** Attached sockets. */

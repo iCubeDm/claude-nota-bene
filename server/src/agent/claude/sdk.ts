@@ -4,7 +4,7 @@ import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
-import { agentIdFromResult, findSubagentMeta, toolCallIn } from './subagents.ts';
+import { agentIdFromResult, findSubagentMeta, isRunning, toolCallIn } from './subagents.ts';
 import { defaultProjectsDir } from '../../sessions.ts';
 import { UsageUnavailableError, mapContextUsage, mapUsage } from '../../stats.ts';
 
@@ -166,6 +166,9 @@ class SdkSession implements AgentSession {
   }
 }
 
+/** (session, call, hasResult) the main transcript has no agent for: not parsed again until the call's result arrives. */
+const noMeta = new Set<string>();
+
 export function sdkBackend(): AgentBackend {
   return {
     capabilities: CLAUDE_CAPABILITIES,
@@ -173,21 +176,26 @@ export function sdkBackend(): AgentBackend {
     listSessions: () => listSessions({ limit: 300 }),
     sessionInfo: async (id, dir) => (await getSessionInfo(id, { dir })) ?? null,
     history: async (sessionId, cwd, attachments, onError) => transcriptToEvents(await getSessionMessages(sessionId, { dir: cwd }), attachments, onError),
-    subagent: async (sessionId, cwd, toolUseId, attachments, onError) => {
+    subagent: async (sessionId, cwd, toolUseId, attachments, onError, call) => {
       const ids = await listSubagents(sessionId, { dir: cwd });
       const meta = findSubagentMeta(defaultProjectsDir(), sessionId, toolUseId);
       let agentId = meta && ids.includes(meta.agentId) ? meta.agentId : null;
       let type = meta?.type ?? '', description = meta?.description ?? '';
-      let running = meta?.running ?? false;
+      // no live task and no fresh transcript: whatever the meta lacks, it is not running (see isRunning)
+      let running = meta ? isRunning(meta, call?.live ?? false) : false;
       if (!agentId) {
-        // no meta (an older CLI): the Agent call in the main transcript names it, `agentId: …` in its result
-        const call = toolCallIn(await getSessionMessages(sessionId, { dir: cwd }), toolUseId);
-        const id = call?.result ? agentIdFromResult(call.result) : null;
-        if (!call || !id || !ids.includes(id)) return null;
+        // no meta (an older CLI): the Agent call in the main transcript names it, `agentId: …` in its result. The answer
+        // changes only when the call's result arrives, so a miss is remembered per (session, call, hasResult): a poll
+        // does not parse the whole main transcript again
+        const key = `${sessionId}\0${toolUseId}\0${call?.hasResult ?? ''}`;
+        if (noMeta.has(key)) return null;
+        const found = toolCallIn(await getSessionMessages(sessionId, { dir: cwd }), toolUseId);
+        const id = found?.result ? agentIdFromResult(found.result) : null;
+        if (!found || !id || !ids.includes(id)) return (noMeta.add(key), null);
         agentId = id;
-        type = String(call.input.subagent_type ?? '');
-        description = String(call.input.description ?? '');
-        running = call.result === undefined;
+        type = String(found.input.subagent_type ?? '');
+        description = String(found.input.description ?? '');
+        running = false; // found through its result: an older CLI's agent, which reads as finished
       }
       return { events: transcriptToEvents(await getSubagentMessages(sessionId, agentId, { dir: cwd }), attachments, onError, { subagent: true }), running, type, description };
     },

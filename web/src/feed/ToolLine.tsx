@@ -5,6 +5,7 @@ import { ARG_KEYS, type FeedItem } from '@/store/feed.ts';
 import { collapsedLength, rawIndexOf } from '@/anchors/text.ts';
 import { openAgent } from '@/tabs/slice.ts';
 import { isAgentTool, selectSubagent } from '@/subagent/slice.ts';
+import { selectLiveCalls } from '@/tasks/slice.ts';
 import { FeedScope } from './scope.ts';
 import { selectToolAnchorEnds, selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
 
@@ -104,10 +105,11 @@ function AgentCard({ item, open, panelId, comments, onToggle }: { item: Tool; op
   const mainBusy = useAppSelector(selectBusy);
   const busy = scope.agent ? !!scope.busy : mainBusy;
   const sub = useAppSelector((s) => selectSubagent(s, item.id));
+  // a task of this call is still live: a background agent answers at once ("launched") and goes on
+  const live = useAppSelector((s) => selectLiveCalls(s).has(item.id));
   const type = str(item.input.subagent_type) || sub?.type || 'general-purpose';
   const description = str(item.input.description) || sub?.description || '';
-  // the call's result is what its tool_result says; a background agent answers at once and goes on, so a loaded view that says it still runs wins
-  const status = item.result ? (item.result.isError ? 'error' : sub?.running ? 'running' : 'done') : busy ? 'running' : 'stopped';
+  const status = item.result?.isError ? 'error' : live ? 'running' : item.result ? 'done' : busy ? 'running' : 'stopped';
   const color = status === 'error' ? 'text-destructive' : status === 'running' ? 'text-nb-accent' : 'text-muted-foreground';
   return (
     <div

@@ -211,6 +211,12 @@ describe('mapSdk: commands, compaction, reset, mode', () => {
 
 describe('mapSdk: tasks, suggestion, rate limit', () => {
   const sys = (subtype: string, rest: object) => map({ type: 'system', subtype, ...rest });
+  it('task_started carries the Agent call id as `call` (foreground or background alike); an odd id is left out', () => {
+    expect(sys('task_started', { task_id: 't', description: 'D', tool_use_id: 'toolu_A', is_backgrounded: true })[0]).toMatchObject({ call: 'toolu_A' });
+    expect(sys('task_started', { task_id: 't', description: 'D', tool_use_id: 'toolu_B', is_backgrounded: false })[0]).toMatchObject({ call: 'toolu_B' });
+    expect(sys('task_started', { task_id: 't', description: 'D' })[0]).not.toHaveProperty('call');
+    expect(sys('task_started', { task_id: 't', description: 'D', tool_use_id: '../x' })[0]).not.toHaveProperty('call');
+  });
   it('task_started: description, else subagent_type, task_type, "task"', () => {
     expect(sys('task_started', { task_id: 't', description: 'D', task_type: 'local_agent' })).toEqual([{ t: 'task', id: 't', phase: 'started', desc: 'D', type: 'local_agent' }]);
     expect(sys('task_started', { task_id: 't', subagent_type: 'Explore' })[0]).toMatchObject({ desc: 'Explore', type: '' });

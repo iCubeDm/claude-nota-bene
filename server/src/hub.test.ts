@@ -245,3 +245,17 @@ describe('guard', () => {
     expect(JSON.parse(s.frames[1]!)).toEqual({ kind: 'server-error', where: 'where', message: 'bad' });
   });
 });
+
+describe('callState', () => {
+  const task = (e: object) => ({ kind: 'agent' as const, e: { t: 'task', ...e } as never });
+  it('a call is live from its task start to its end, and has a result once its tool-update is in', () => {
+    const hub = new EventHub();
+    expect(hub.callState('toolu_A')).toEqual({ live: false, hasResult: false });
+    hub.emit(task({ id: 'k', phase: 'started', desc: 'd', type: 'local_agent', call: 'toolu_A' }));
+    expect(hub.callState('toolu_A')).toEqual({ live: true, hasResult: false });
+    expect(hub.callState('toolu_B').live).toBe(false);
+    hub.emit({ kind: 'agent', e: { t: 'tool-update', id: 'toolu_A', text: 'x', isError: false } });
+    hub.emit(task({ id: 'k', phase: 'done' }));
+    expect(hub.callState('toolu_A')).toEqual({ live: false, hasResult: true });
+  });
+});

@@ -5,7 +5,8 @@ import { HighlightLayer } from '@/comments/HighlightLayer.tsx';
 import { Feed } from '@/feed/Feed.tsx';
 import { useAppDispatch, useAppSelector, type AppStore } from '@/store/store.ts';
 import { setAgentTitle, type AgentTab } from '@/tabs/slice.ts';
-import { AGENT_PROTOCOL, fetchSubagent, selectSubagent } from './slice.ts';
+import { selectLiveCalls } from '@/tasks/slice.ts';
+import { AGENT_PROTOCOL, fetchSubagent, selectSubagent, selectToolResulted } from './slice.ts';
 
 /** How often a running subagent is read again while its tab is the visible one. */
 export const POLL_MS = 1500;
@@ -26,6 +27,11 @@ export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
   // protocol 0: no `hello` yet, nothing to claim
   const noComment = useAppSelector((s) => s.controls.protocol > 0 && s.controls.protocol < AGENT_PROTOCOL);
   const { tool } = tab;
+  // keep reading only while something says it works: a live task of its call, or the call has no result yet. The
+  // server's `running` alone is not enough (a meta without `finished` proves nothing)
+  const live = useAppSelector((s) => selectLiveCalls(s).has(tool));
+  const resulted = useAppSelector((s) => selectToolResulted(s, tool));
+  const pollable = live || !resulted;
 
   useEffect(() => {
     if (!session) return; // the conversation is not known yet: the read waits for it
@@ -34,17 +40,18 @@ export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
     if (!active && have) return;
     const ctl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let fails = 0; // a read that failed is tried again, 3 s, 6 s, … up to 30 s: one blip must not freeze a running agent's pane
     const tick = async () => {
       const r = await dispatch(fetchSubagent(tool, ctl.signal));
       if (ctl.signal.aborted) return;
-      if (r === 'running' && active) timer = setTimeout(() => void tick(), POLL_MS);
+      if (active && pollable && (r === 'running' || r === 'error')) timer = setTimeout(() => void tick(), r === 'error' ? Math.min(30_000, (fails = fails ? fails * 2 : POLL_MS * 2)) : ((fails = 0), POLL_MS));
     };
     void tick();
     return () => {
       ctl.abort();
       clearTimeout(timer);
     };
-  }, [tool, session, active, dispatch, store]);
+  }, [tool, session, active, pollable, dispatch, store]);
 
   // the real description names the tab (a restored one had the saved title)
   const name = entry?.description || entry?.type || '';

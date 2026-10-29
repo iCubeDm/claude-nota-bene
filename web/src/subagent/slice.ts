@@ -108,6 +108,12 @@ export const AGENT_PROTOCOL = 7;
 /** Any Agent / Task call is a subagent's: `Agent` in current Claude Code, `Task` in older ones. */
 export const isAgentTool = (name: string): boolean => name === 'Agent' || name === 'Task';
 
+/** Whether the Agent call has its tool_result, looked up in the chat and in every loaded subagent's feed (a nested call is in its parent's). */
+export const selectToolResulted = (s: RootState, tool: string): boolean => {
+  const has = (items: FeedItem[]) => items.some((it) => it.kind === 'tool' && it.id === tool && !!it.result);
+  return has(s.feed.items) || Object.values(s.subagents.byTool).some((e) => has(e.feed.items));
+};
+
 /** What names a subagent in a batch line or a tab: its description, else the tab's title, else its type. */
 export const agentName = (s: RootState, tool: string): string => {
   const e = selectSubagent(s, tool);

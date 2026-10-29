@@ -1,7 +1,7 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 // the fake backend speaks SDK frames through this mapper (R-M7-13); it takes the frame type from here, not the SDK
 export type { SDKMessage };
-import { MODES } from '@nota-bene/shared';
+import { MODES, TOOL_USE_ID } from '@nota-bene/shared';
 import type { AgentEvent, Mode, WireAgentEvent } from '@nota-bene/shared';
 
 /**
@@ -27,7 +27,7 @@ type Frame = {
   compact_metadata?: { pre_tokens?: number; duration_ms?: number };
   new_conversation_id?: unknown;
   // tasks
-  task_id?: string; description?: string; subagent_type?: string; task_type?: string; ambient?: boolean; skip_transcript?: boolean;
+  task_id?: string; tool_use_id?: string; description?: string; subagent_type?: string; task_type?: string; ambient?: boolean; skip_transcript?: boolean;
   usage?: { total_tokens?: number }; last_tool_name?: string; summary?: string;
   patch?: { status?: string; description?: string };
   // prompt_suggestion, rate_limit_event
@@ -114,7 +114,7 @@ function task(m: Frame): AgentEvent[] {
     case 'task_started':
       // ambient tasks and the ones kept out of the transcript are not shown
       if (m.ambient || m.skip_transcript) return [];
-      return [{ t: 'task', id, phase: 'started', desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type ?? '' }];
+      return [{ t: 'task', id, phase: 'started', desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type ?? '', ...(typeof m.tool_use_id === 'string' && TOOL_USE_ID.test(m.tool_use_id) ? { call: m.tool_use_id } : {}) }];
     case 'task_progress':
       return [{ t: 'task', id, phase: 'progress', tokens: m.usage?.total_tokens || 0, tool: m.last_tool_name || '', summary: m.summary || '' }];
     case 'task_updated': {

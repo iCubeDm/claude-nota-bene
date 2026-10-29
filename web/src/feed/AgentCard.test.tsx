@@ -67,6 +67,16 @@ describe('the Agent call as a card', () => {
     expect([status('one'), status('two'), status('three')]).toEqual(['running', 'error', 'done']);
   });
 
+  it('a background agent: "launched" result but its task is live -> running; the task ends -> done', () => {
+    const store = setup([call('t1', 'Agent', { description: 'bg' }), result('t1', 'Async agent launched. agentId: x')]);
+    const status = () => (document.querySelector('[data-kind="agent-card"]') as HTMLElement).dataset.status;
+    expect(status()).toBe('done');
+    act(() => void store.dispatch(serverEvent(ev({ t: 'task', id: 'k', phase: 'started', desc: 'bg', type: 'local_agent', call: 't1' }))));
+    expect(status()).toBe('running');
+    act(() => void store.dispatch(serverEvent(ev({ t: 'task', id: 'k', phase: 'done' }))));
+    expect(status()).toBe('done');
+  });
+
   it('a call with no result in a feed that is not working is stopped, not running forever', () => {
     setup([call('t1', 'Agent', { description: 'one' })]);
     expect((document.querySelector('[data-kind="agent-card"]') as HTMLElement).dataset.status).toBe('stopped');

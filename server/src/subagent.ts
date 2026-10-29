@@ -29,7 +29,7 @@ export function subagentRoutes(o: {
       const tool = q.get('tool') ?? '';
       if (!SAFE_SESSION_ID.test(session) || !TOOL_USE_ID.test(tool)) return text(res, 400, 'bad request');
       if (session !== o.current()) return text(res, 409, 'not the current session');
-      o.backend.subagent(session, o.root(), tool, o.attachments, (e) => reportError(o.hub, 'attach', e)).then(
+      o.backend.subagent(session, o.root(), tool, o.attachments, (e) => reportError(o.hub, 'attach', e), o.hub.callState(tool)).then(
         (view) => {
           if (!view) return text(res, 404, 'no such subagent');
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });

@@ -114,6 +114,38 @@ describe('the subagent tab', () => {
     expect(screen.getByText('more 1')).toBeInTheDocument();
   });
 
+  it('stops polling when the call has its result and no task is live, even if the server still says running', async () => {
+    vi.useFakeTimers();
+    answer = () => json(view({ running: true }));
+    const { store } = setup();
+    act(() => {
+      store.dispatch(serverEvent(ev({ t: 'tool-call', id: TOOL, name: 'Agent', input: {}, sub: false })));
+      store.dispatch(serverEvent(ev({ t: 'tool-update', id: TOOL, text: 'agentId: a', isError: false })));
+    });
+    await flush(0);
+    const n = calls.length;
+    await flush(POLL_MS * 4);
+    expect(calls.length).toBeLessThanOrEqual(n + 1); // at most the one read the change itself caused
+    const after = calls.length;
+    act(() => void store.dispatch(serverEvent(ev({ t: 'task', id: 'k', phase: 'started', desc: 'bg', type: 'local_agent', call: TOOL }))));
+    await flush(POLL_MS * 3);
+    expect(calls.length).toBeGreaterThan(after + 1); // a live task of the call: polled again
+  });
+
+  it('a failed read of a running agent is tried again with a backoff, not given up', async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    answer = () => (++n < 3 ? new Response('x', { status: 500 }) : json(view({ running: true })));
+    setup();
+    await flush(0);
+    expect(calls).toHaveLength(1);
+    await flush(3000);
+    expect(calls).toHaveLength(2);
+    await flush(6000);
+    expect(calls).toHaveLength(3);
+    expect(screen.getByText('hello brave world')).toBeInTheDocument();
+  });
+
   it('does not poll while the tab is hidden, and reads again when it is shown', async () => {
     vi.useFakeTimers();
     answer = () => json(view({ running: true }));

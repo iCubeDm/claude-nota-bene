@@ -50,5 +50,7 @@ export interface AgentBackend {
    * The conversation of the subagent the Agent call `toolUseId` started in `sessionId` (read-only; its events are the
    * subagent's own text, tool calls and results). null when no subagent matches. `running`: it has not ended.
    */
-  subagent(sessionId: string, cwd: string, toolUseId: string, attachments: AttachmentStore, onError?: (e: unknown) => void): Promise<SubagentView | null>;
+  subagent(sessionId: string, cwd: string, toolUseId: string, attachments: AttachmentStore, onError?: (e: unknown) => void,
+    /** what the server knows of the call: a live task of this process, and whether its tool_result is in (see EventHub.callState) */ call?: { live: boolean; hasResult: boolean },
+  ): Promise<SubagentView | null>;
 }

@@ -4,19 +4,66 @@ import { TOOL_USE_ID } from '@nota-bene/shared';
 import { SAFE_SESSION_ID } from '../../comments.ts';
 
 /** What Claude Code writes beside a subagent's transcript: `agent-<agentId>.meta.json`. Not an SDK API: read in one place. */
-export type SubagentMeta = { agentId: string; type: string; description: string; toolUseId: string; running: boolean };
+export type SubagentMeta = {
+  agentId: string; type: string; description: string; toolUseId: string;
+  /** the CLI's own word: not ended (`finished` absent) and not stopped. Not proof of life: see `isRunning` */
+  unfinished: boolean;
+  /** when the subagent's transcript was last written (ms); 0 when it has none */
+  modified: number;
+};
 
 const AGENT_ID = /^[A-Za-z0-9]{1,64}$/;
 const META_FILE = /^agent-([A-Za-z0-9]{1,64})\.meta\.json$/;
 
+/** How long a transcript that nobody confirms as live still counts as running (a CLI that does not write `finished`). */
+export const RECENT_MS = 10 * 60_000;
+
+/**
+ * Whether the subagent is running. `finished` is a newer CLI field and an agent killed mid-run never gets it, so a missing
+ * flag proves nothing: it runs only if this process has a live task for its call, or its transcript was written a moment ago.
+ */
+export const isRunning = (m: Pick<SubagentMeta, 'unfinished' | 'modified'>, live: boolean, now = Date.now()): boolean =>
+  m.unfinished && (live || now - m.modified < RECENT_MS);
+
+// toolUseId -> where its meta lives: that mapping never changes, so a poll reads one file, not every meta of every project.
+// A miss is remembered for MISS_TTL_MS (the poll interval), so a poll that finds nothing does not rescan on every request.
+const MISS_TTL_MS = 1500;
+const where = new Map<string, { dir: string; agentId: string }>();
+const missed = new Map<string, number>();
+
+function readMeta(dir: string, agentId: string, toolUseId: string): SubagentMeta | null {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(dir, `agent-${agentId}.meta.json`), 'utf8')) as Record<string, unknown>;
+    if (v.toolUseId !== toolUseId) return null;
+    let modified = 0;
+    try { modified = fs.statSync(path.join(dir, `agent-${agentId}.jsonl`)).mtimeMs; } catch { /* no transcript yet */ }
+    return {
+      agentId, toolUseId, modified,
+      type: typeof v.agentType === 'string' ? v.agentType : '',
+      description: typeof v.description === 'string' ? v.description : '',
+      unfinished: v.finished !== true && v.stoppedByUser !== true,
+    };
+  } catch {
+    return null; // a torn or foreign file: not this one
+  }
+}
+
 /**
  * The meta of the subagent that the Agent call `toolUseId` started in `sessionId`, or null (no such file, an unreadable
  * or odd one). Looks in every project under `projectsDir` (a session id is unique, and it avoids re-deriving the CLI's
- * folder naming). `running`: the CLI sets `finished` when the agent ends; a stopped one (`stoppedByUser`) never does.
- * Both ids are checked before they touch a path.
+ * folder naming), once; later calls read only the matching meta. Both ids are checked before they touch a path.
  */
-export function findSubagentMeta(projectsDir: string, sessionId: string, toolUseId: string): SubagentMeta | null {
+export function findSubagentMeta(projectsDir: string, sessionId: string, toolUseId: string, now = Date.now()): SubagentMeta | null {
   if (!SAFE_SESSION_ID.test(sessionId) || !TOOL_USE_ID.test(toolUseId)) return null;
+  const key = `${projectsDir}\0${sessionId}\0${toolUseId}`;
+  const hit = where.get(key);
+  if (hit) {
+    const m = readMeta(hit.dir, hit.agentId, toolUseId);
+    if (m) return m;
+    where.delete(key); // moved or deleted: look again
+  }
+  const miss = missed.get(key);
+  if (miss !== undefined && now - miss < MISS_TTL_MS) return null;
   let projects: string[];
   try {
     projects = fs.readdirSync(projectsDir);
@@ -32,23 +79,24 @@ export function findSubagentMeta(projectsDir: string, sessionId: string, toolUse
       continue;
     }
     for (const n of names) {
-      const m = META_FILE.exec(n);
-      if (!m) continue;
-      try {
-        const v = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')) as Record<string, unknown>;
-        if (v.toolUseId !== toolUseId) continue;
-        return {
-          agentId: m[1]!, toolUseId,
-          type: typeof v.agentType === 'string' ? v.agentType : '',
-          description: typeof v.description === 'string' ? v.description : '',
-          running: v.finished !== true && v.stoppedByUser !== true,
-        };
-      } catch {
-        // a torn or foreign file: not this one
+      const id = META_FILE.exec(n)?.[1];
+      if (!id) continue;
+      const m = readMeta(dir, id, toolUseId);
+      if (m) {
+        where.set(key, { dir, agentId: id });
+        missed.delete(key);
+        return m;
       }
     }
   }
+  missed.set(key, now);
   return null;
+}
+
+/** Forgets what was found and what was missed (tests). */
+export function resetSubagentCache(): void {
+  where.clear();
+  missed.clear();
 }
 
 /** The fallback: the Agent tool's result text names the agent (`agentId: a1b2…`). */

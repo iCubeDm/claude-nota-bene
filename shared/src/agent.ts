@@ -18,7 +18,7 @@ export type AgentEvent =
   | { t: 'reset'; newId?: string }                           // /clear: a new conversation
   | { t: 'init'; sessionId?: string; model?: string; mode?: Mode }    // server-internal: never sent to clients
   | { t: 'mode'; mode: Mode }                                // ACP current_mode_update
-  | { t: 'task'; id: string; phase: 'started' | 'progress' | 'updated' | 'done'; desc?: string; type?: string; tokens?: number; tool?: string; summary?: string }
+  | { t: 'task'; id: string; phase: 'started' | 'progress' | 'updated' | 'done'; desc?: string; type?: string; /** `started`: the id of the Agent / Task tool call that started it (the card's join key) */ call?: string; tokens?: number; tool?: string; summary?: string }
   | { t: 'suggestion'; text: string }
   | { t: 'rate-limit'; info: unknown };                      // server-internal (stats)
 
