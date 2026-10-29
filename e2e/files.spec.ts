@@ -642,6 +642,11 @@ test('mark up a paused video frame: the time is in the batch; the mark shows onl
   const bar = page.locator('[data-player-bar]');
   const seekLine = page.getByRole('slider', { name: /^(Seek|Перемотка)$/ });
   await expect(bar).toBeVisible();
+  // the bar follows the resized picture on a ResizeObserver tick: measure only once it sits on the picture's bottom edge
+  await expect.poll(async () => {
+    const [pb, vb] = [(await bar.boundingBox())!, await contentBoxOf(video)];
+    return Math.round(pb.y + pb.height - (vb.y + vb.height));
+  }).toBe(0);
   const tl = (await seekLine.boundingBox())!;
   const lineY = tl.y + tl.height / 2;
 
