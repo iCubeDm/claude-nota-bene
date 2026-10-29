@@ -186,14 +186,18 @@ export class BlendConverter {
     const bin = this.o.blender();
     if (!bin) throw new BlendError(501, 'no-blender');
     const version = await this.version(bin);
-    const hash = 'file' in input ? await sha256Of(input.file) : crypto.createHash('sha256').update(input.bytes).digest('hex');
+    const content = 'file' in input ? await sha256Of(input.file) : crypto.createHash('sha256').update(input.bytes).digest('hex');
+    // what the outside-refs check depended on is part of the key: the same bytes in another project or folder are checked again
+    const where = 'file' in input
+      ? `${await fs.promises.realpath(input.base)}\0${await fs.promises.realpath(path.dirname(input.file))}` : '';
+    const hash = crypto.createHash('sha256').update(`${content}\0${where}`).digest('hex');
     const dir = this.dir();
     const hit = path.join(dir, `${hash}-${version}.glb`);
     if (fs.existsSync(hit)) return { glb: hit, hash };
     const key = `${hash}-${version}`;
     let p = this.inflight.get(key);
     if (!p) {
-      p = this.enqueue(() => this.run(bin, version, input, hash, dir)).finally(() => this.inflight.delete(key));
+      p = this.enqueue(() => this.run(bin, version, input, hash, content, dir)).finally(() => this.inflight.delete(key));
       this.inflight.set(key, p);
     }
     return p;
@@ -205,7 +209,7 @@ export class BlendConverter {
     return next;
   }
 
-  private async run(bin: string, version: string, input: BlendInput, hash: string, dir: string): Promise<Converted> {
+  private async run(bin: string, version: string, input: BlendInput, hash: string, content: string, dir: string): Promise<Converted> {
     const hit = path.join(dir, `${hash}-${version}.glb`);
     if (fs.existsSync(hit)) return { glb: hit, hash }; // an earlier job of the queue made it
     if (this.disposed) throw new BlendError(503, 'closing', 'the server is stopping');
@@ -228,7 +232,7 @@ export class BlendConverter {
       try { st = await fs.promises.stat(out); } catch { /* no output */ }
       if (!st?.isFile() || st.size === 0) throw new BlendError(422, 'export-failed', 'Blender produced no output');
       // the file may have changed while Blender read it: then the result is served but not cached under the old hash
-      if ('file' in input && (await sha256Of(input.file, true)) !== hash) {
+      if ('file' in input && (await sha256Of(input.file, true)) !== content) {
         const tmp = path.join(dir, `tmp-${crypto.randomBytes(8).toString('hex')}.glb`);
         await fs.promises.rename(out, tmp);
         return { glb: tmp, hash: crypto.randomBytes(16).toString('hex'), transient: true };

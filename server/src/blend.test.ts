@@ -89,6 +89,24 @@ describe('BlendConverter', () => {
     delete process.env.NB_TEST_SECRET;
   });
 
+  it('the same bytes at another location or in another project are converted (and checked) again', async () => {
+    const c = conv();
+    fs.mkdirSync(path.join(dir, 'locA'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'locB'), { recursive: true });
+    const a = path.join(dir, 'locA', 'same.blend');
+    const b = path.join(dir, 'locB', 'same.blend');
+    fs.writeFileSync(a, 'same bytes');
+    fs.writeFileSync(b, 'same bytes');
+    const before = spawns().length;
+    const r1 = await c.convert({ file: a, base: dir });
+    const r2 = await c.convert({ file: b, base: dir }); // another folder
+    const r3 = await c.convert({ file: a, base: path.join(dir, 'locA') }); // another project root
+    expect(new Set([r1.hash, r2.hash, r3.hash]).size).toBe(3);
+    expect(spawns().slice(before)).toHaveLength(3);
+    await c.convert({ file: a, base: dir }); // the same place again: a hit
+    expect(spawns().slice(before)).toHaveLength(3);
+  });
+
   it('identical requests in flight share one spawn; different ones run one at a time', async () => {
     const c = conv();
     const before = spawns().length;
