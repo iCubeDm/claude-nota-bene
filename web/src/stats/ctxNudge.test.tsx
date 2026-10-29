@@ -93,3 +93,20 @@ it('dismissed per session: another session still reminds', async () => {
   b.ctx(30);
   expect(b.nudge()).not.toBeNull();
 });
+
+it('?nudge shows it at any fill, with the real %; × hides it until a reload', async () => {
+  history.replaceState(null, '', '/?nudge');
+  try {
+    const { ctx, nudge } = setup();
+    ctx(12.4);
+    expect(nudge()).toHaveTextContent('Context 12% · compact');
+    await userEvent.click(screen.getByRole('button', { name: 'Remind me at the next step' }));
+    expect(nudge()).toBeNull();
+    cleanup();
+    const again = setup();
+    again.ctx(12.4);
+    expect(again.nudge()).not.toBeNull();
+  } finally {
+    history.replaceState(null, '', '/');
+  }
+});
