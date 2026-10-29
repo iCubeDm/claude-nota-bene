@@ -5,6 +5,7 @@ import { ARG_KEYS, type FeedItem } from '@/store/feed.ts';
 import { collapsedLength, rawIndexOf } from '@/anchors/text.ts';
 import { openAgent } from '@/tabs/slice.ts';
 import { isAgentTool, selectSubagent } from '@/subagent/slice.ts';
+import { CardMenu } from '@/tasks/CardMenu.tsx';
 import { selectLiveCalls } from '@/tasks/slice.ts';
 import { FeedScope } from './scope.ts';
 import { scopedId, selectToolAnchorEnds, selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
@@ -130,6 +131,7 @@ function AgentCard({ item, open, panelId, comments, onToggle }: { item: Tool; op
         {!open && comments > 0 && <span className="text-nb-accent"> · {t('nComments', comments)}</span>}
       </button>
       <span data-anchor-skip data-agent-status className={color}>{t(status === 'running' ? 'agentRunning' : status === 'error' ? 'agentError' : status === 'stopped' ? 'agentStopped' : 'agentDone')}</span>
+      <CardMenu call={item.id} />
       <button
         type="button"
         data-anchor-skip

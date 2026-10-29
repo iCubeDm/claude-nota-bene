@@ -14,7 +14,7 @@ import { filesSlice } from '../files/slice.ts';
 import { markupSlice } from '../media/markup/slice.ts';
 import { treeSlice } from '../tree/slice.ts';
 import { statsSlice } from '../stats/slice.ts';
-import { tasksSlice } from '../tasks/slice.ts';
+import { tasksSlice, tasksUiSlice } from '../tasks/slice.ts';
 import { agentName, itemsOf, subagentsSlice } from '../subagent/slice.ts';
 import { toast } from '../shell/toast.ts';
 import { recordCompactMs } from '../feed/compactTiming.ts';
@@ -148,7 +148,7 @@ export function makeStore(o: {
   const persist = createListenerMiddleware<PersistState>();
   persistListeners(persist);
   const store = configureStore({
-    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, markup: markupSlice.reducer, feedUi: feedUiSlice.reducer, subagents: subagentsSlice.reducer },
+    reducer: { feed: feedSlice.reducer, conn: connSlice.reducer, comments: commentsSlice.reducer, composer: composerSlice.reducer, tabs: tabsSlice.reducer, tree: treeSlice.reducer, files: filesSlice.reducer, controls: controlsSlice.reducer, stats: statsSlice.reducer, tasks: tasksSlice.reducer, tasksUi: tasksUiSlice.reducer, markup: markupSlice.reducer, feedUi: feedUiSlice.reducer, subagents: subagentsSlice.reducer },
     middleware: (gdm) => gdm({ thunk: { extraArgument: { send, takeOver } satisfies Extra } }).prepend(controlsListener.middleware, persist.middleware).concat(toastMiddleware, compactTimingMiddleware, refusedMiddleware, mediaMiddleware(media)),
     devTools: devToolsEnabled(),
   });

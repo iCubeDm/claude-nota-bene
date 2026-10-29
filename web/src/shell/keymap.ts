@@ -4,6 +4,7 @@ import { wrapLines } from '@/files/wrap.ts';
 import type { ru } from '@/i18n/ru.ts';
 import { selectConn, type AppStore } from '@/store/store.ts';
 import { activate, closeTab, reopenClosed } from '@/tabs/slice.ts';
+import { toggleDrawer } from '@/tasks/slice.ts';
 import { revealFile, setTreeOpen } from '@/tree/slice.ts';
 import { editable } from '@/lib/editable.ts';
 
@@ -66,6 +67,8 @@ export const BINDINGS: Binding[] = [
   { id: 'hk_files', codes: ['KeyF'], mods: { mod: true, shift: true }, inFields: true, run: ({ store }) => void store.dispatch(setTreeOpen(!store.getState().tree.open)) },
   { id: 'hk_comments', codes: ['KeyC'], mods: { mod: true, shift: true }, inFields: true,
     run: ({ store }) => void store.dispatch(setPanelOpen(!store.getState().comments.ui.panelOpen)) },
+  // Alt+T, in a field too (also on a Mac, where Option+T is the † key): the drawer of background tasks. Alt+Shift+T is the reopen above
+  { id: 'hk_tasks', codes: ['KeyT'], mods: { alt: true }, inFields: true, run: ({ store }) => void store.dispatch(toggleDrawer()) },
   { id: 'hk_wrap', codes: ['KeyZ'], mods: { alt: true }, inFields: 'notMac', run: () => wrapLines.toggle() },
   { id: 'hk_reveal', codes: ['F1'], mods: { alt: true }, inFields: true,
     run: ({ store }) => {

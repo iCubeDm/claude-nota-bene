@@ -28,7 +28,7 @@ export function favState(s: RootState, unseen: Unseen): FavState {
   if (s.conn.state === 'occupied' || s.conn.state === 'taken') return 'idle';
   if (s.conn.state === 'closed') return 'error';
   if (s.feed.items.some((it) => it.kind === 'permission' && it.answer === undefined)) return 'ask';
-  if (s.feed.busy || Object.keys(s.tasks).length > 0) return 'work';
+  if (s.feed.busy || Object.values(s.tasks).some((t) => t.status === 'running')) return 'work';
   return unseen ?? 'idle';
 }
 

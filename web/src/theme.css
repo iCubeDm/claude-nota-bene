@@ -92,6 +92,11 @@
 @keyframes nb-flash { from { background-color: oklch(0.88 0.18 95 / 0.35); } to { background-color: transparent; } }
 .nb-flash { animation: nb-flash 1.2s ease-out; }
 
+/* the tasks drawer slides up over the feed */
+@keyframes nb-drawer { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+.nb-drawer { animation: nb-drawer 0.16s ease-out; }
+@media (prefers-reduced-motion: reduce) { .nb-drawer { animation: none; } }
+
 /* the context reminder above the input (CtxNudge): blinks until pressed or dismissed; a soft glow without motion */
 @keyframes nb-blink { 50% { background-color: color-mix(in oklch, var(--nb-blink) 32%, transparent); box-shadow: 0 0 0 4px color-mix(in oklch, var(--nb-blink) 30%, transparent); } }
 .nb-blink { box-shadow: 0 0 0 0 color-mix(in oklch, var(--nb-blink) 30%, transparent); animation: nb-blink 1.4s ease-in-out infinite; }

@@ -4,6 +4,7 @@ import { DiagramView } from '@/diagram/DiagramView.tsx';
 import { FileView } from '@/files/FileView.tsx';
 import { SettingsView } from '@/settings/SettingsView.tsx';
 import { AgentView } from '@/subagent/AgentView.tsx';
+import { ShellView } from '@/tasks/ShellView.tsx';
 import { selectTabs } from './slice.ts';
 
 /**
@@ -24,6 +25,7 @@ export function Panes({ chat }: { chat: ReactNode }) {
               <SettingsView active={active === 'settings'} />
             </div>
           ) : tab.kind === 'agent' ? <AgentView key={`${rootGen}:${tab.id}`} tab={tab} active={active === tab.id} />
+          : tab.kind === 'shell' ? <ShellView key={`${rootGen}:${tab.id}`} tab={tab} active={active === tab.id} />
           : tab.kind === 'diagram' ? <DiagramView key={`${rootGen}:${tab.id}`} tab={tab} active={active === tab.id} />
           : null,
       )}

@@ -13,6 +13,7 @@ import { FileTree } from './files/FileTree.tsx';
 import { Feed } from './feed/Feed.tsx';
 import { Footer } from './shell/Footer.tsx';
 import { useActivity } from './controls/useActivity.ts';
+import { TasksDrawer } from './tasks/TasksDrawer.tsx';
 import { Panes } from './tabs/Panes.tsx';
 import { TabStrip } from './tabs/TabStrip.tsx';
 import { Header } from './shell/Header.tsx';
@@ -64,6 +65,7 @@ export function App() {
                 </>
               }
             />
+            <TasksDrawer />
           </div>
           <Footer />
         </div>

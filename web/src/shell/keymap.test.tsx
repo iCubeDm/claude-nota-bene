@@ -115,7 +115,7 @@ it('/ and Esc on empty space focus the composer; not inside a field, and not whe
 
 it('the ? help lists every hotkey with its keys', () => {
   expect(BINDINGS.map(keysLabel)).toEqual([
-    'Alt+W', 'Alt+Shift+T', 'Alt+←', 'Alt+→', 'Alt+1…9', 'Alt+E', 'Ctrl+Shift+F', 'Ctrl+Shift+C', 'Alt+Z', 'Alt+F1', '/, Esc',
+    'Alt+W', 'Alt+Shift+T', 'Alt+←', 'Alt+→', 'Alt+1…9', 'Alt+E', 'Ctrl+Shift+F', 'Ctrl+Shift+C', 'Alt+T', 'Alt+Z', 'Alt+F1', '/, Esc',
   ]);
 });
 
