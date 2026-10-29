@@ -38,7 +38,12 @@ export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0])
 
 /** What one click on Send takes: the session, the draft (text and images) and the pending comments with a fingerprint each. */
 type Snapshot = { sid: string | null | undefined; draft: string; body: string; own: ImageEntry[]; pending: Comment[]; prints: string[] };
-const printOf = (c: Comment): string => JSON.stringify([c.text, c.label, c.anchor, c.images, c.genImages]);
+// keys sorted: the client and the server's echo build the same anchor with its keys in a different order
+const stable = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(stable)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable((v as Record<string, unknown>)[k])]))
+  : v;
+const printOf = (c: Comment): string => JSON.stringify(stable([c.text, c.label, c.anchor, c.images, c.genImages]));
 const snapshotOf = (st: RootState): Snapshot => {
   const pending = selectPending(st), draft = selectDraft(st);
   return { sid: st.feed.session?.id, draft, body: draft.trim(), own: selectImages(st), pending, prints: pending.map(printOf) };
@@ -104,6 +109,9 @@ const sendNow = (snap: Snapshot, composites: Map<string, string>, force: boolean
   return 'sent';
 };
 
+/** How long building the shared images may take before the send goes on with each comment's own frame. */
+export const COMPOSITE_MS = 15_000;
+
 /** After the async part: anything but 'sent' is told to the user, never silent. */
 const tell = (r: SendResult): void => {
   if (r === 'offline') toast(t('offline'), '');
@@ -127,8 +135,21 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
   const groups = frameGroups(snap.pending);
   if (!groups.length || st.conn.state !== 'open') return d(sendNow(snap, new Map(), force));
   d(setBuilding(true));
-  void buildComposites(snap.pending, groups)
+  // a stalled /attach must not keep Send off for good: past COMPOSITE_MS the groups fall back to their own frames
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, no) => { timer = setTimeout(() => no(new Error('composite timeout')), COMPOSITE_MS); });
+  void Promise.race([buildComposites(snap.pending, groups), late])
     .catch(() => new Map<string, string>())
-    .then((c) => { d(setBuilding(false)); tell(d(sendNow(snap, c, force))); });
+    .then((c) => {
+      clearTimeout(timer);
+      d(setBuilding(false));
+      try {
+        tell(d(sendNow(snap, c, force)));
+      } catch (e) {
+        d(unmarkSending(snap.pending.map((x) => x.id))); // the comments go back to pending, nothing lost
+        console.error('send after the composite failed', e);
+        toast(t('sendFailedRetry'), '');
+      }
+    });
   return 'building';
 };

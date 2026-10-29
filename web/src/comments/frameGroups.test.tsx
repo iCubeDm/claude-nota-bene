@@ -196,3 +196,41 @@ it('drawBadges: one disc per comment, inside the picture, not on top of each oth
   expect(centres[0][1]).toBeGreaterThan(0);
   expect(Math.hypot(centres[0][0] - centres[1][0], centres[0][1] - centres[1][1])).toBeGreaterThan(20);
 });
+
+it('the echo of a comment with its anchor keys in another order is not a change: the send goes out', async () => {
+  const done = gate();
+  const c1 = mc('c1'), c2 = mc('c2');
+  const { sent, store } = setup([c1, c2]);
+  act(() => void store.dispatch(sendBatch(false)));
+  // the server's echo: same comment, the anchor's keys rebuilt in a different order
+  const reorder = (c: Comment): Comment => ({ ...c, anchor: Object.fromEntries(Object.entries(c.anchor).reverse()) as Comment['anchor'] });
+  act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [reorder(c1), reorder(c2)] })));
+  await done(new Map([['1:c1,2:c2', COMP]]));
+  expect(sends(sent)).toHaveLength(1);
+  expect(getToasts()).toEqual([]);
+});
+
+it('a send that throws after the build puts the comments back as pending and says so', async () => {
+  const done = gate();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const { store } = setup([mc('c1'), mc('c2')]);
+  act(() => void store.dispatch(sendBatch(false)));
+  const spy = vi.spyOn(crypto, 'randomUUID').mockImplementation(() => { throw new Error('boom'); });
+  await done(new Map([['1:c1,2:c2', COMP]]));
+  spy.mockRestore();
+  expect(store.getState().comments.sendingIds).toEqual([]);
+  expect(store.getState().comments.items.map((c) => c.status)).toEqual(['pending', 'pending']);
+  expect(getToasts().map((x) => x.title)).toEqual(['Sending failed; the comments are still here, send again']);
+});
+
+it('a build that never finishes: past COMPOSITE_MS the comments go with their own frames', async () => {
+  vi.useFakeTimers();
+  try {
+    build.mockReturnValue(new Promise(() => {}));
+    const { sent, store } = setup([mc('c1'), mc('c2')]);
+    act(() => void store.dispatch(sendBatch(false)));
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(sentOf(sends(sent)[0]!).images?.map((i) => i.id)).toEqual([h('a') + '.jpg', h('a') + '.jpg']);
+    expect(store.getState().composer.building).toBe(false);
+  } finally { vi.useRealTimers(); }
+});

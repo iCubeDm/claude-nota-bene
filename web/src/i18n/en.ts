@@ -261,6 +261,7 @@ export const en: Dict = {
   uploadWait: 'Wait for the image to finish uploading',
   buildingImage: 'Building the image…',
   changedWhileSending: 'The comments changed during sending: nothing was sent, send again',
+  sendFailedRetry: 'Sending failed; the comments are still here, send again',
   attachHere: 'Attach an image (or paste / drop here)',
   imgFail: 'Could not read the image',
   // permission mode (M4-06)
