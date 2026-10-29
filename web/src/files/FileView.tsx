@@ -95,7 +95,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
       {kind === 'model' ? (
-        <ModelPane path={path} src={src} tabId={tabId} active={active} reloadKey={load.bust} />
+        <ModelPane path={path} src={src} tabId={tabId} active={active} reloadKey={load.bust} srcGone={srcGone} />
       ) : media ? (
         <MediaBody
           kind={kind} path={path} fileRef={ref} tabId={tabId} active={active} marking={marking} natural={natural}

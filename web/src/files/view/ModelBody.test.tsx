@@ -1,21 +1,22 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '@/i18n/index.ts';
 import type { ModelViewer, ViewerOptions } from '@/model/api.ts';
 import { getModelViewer } from '@/model/registry.ts';
-import { ModelBody } from './ModelBody.tsx';
+import { ModelBody, fetchModel } from './ModelBody.tsx';
 
 // jsdom has no WebGL: the whole 3D module is replaced by a recording fake
 const calls: string[] = [];
 let opts: ViewerOptions;
-let loadImpl: () => Promise<{ meshes: number; triangles: number; materials: number; clips: string[] }>;
+let loadImpl: (d: ArrayBuffer) => Promise<{ meshes: number; triangles: number; materials: number; clips: string[]; refused?: number }>;
+let loadData: ArrayBuffer[];
 let loadArgs: { keepView: boolean; resolve: (u: string) => string | null }[];
 const fake = (): ModelViewer => ({
-  load: vi.fn(async (_d, o) => { calls.push('load'); loadArgs.push(o); return loadImpl(); }),
+  load: vi.fn(async (d, o) => { calls.push('load'); loadArgs.push(o); loadData.push(d); return loadImpl(d); }),
   clear: vi.fn(() => void calls.push('clear')),
   resetView: vi.fn(() => void calls.push('reset')),
-  getPose: vi.fn(() => ({ position: [0, 0, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 50 })),
-  setPose: vi.fn(),
+  getPose: vi.fn(() => ({ position: [0, 0, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 77 })),
+  setPose: vi.fn((p) => void calls.push(`pose:${p.fov}`)),
   setClip: vi.fn((i) => void calls.push(`clip:${i}`)),
   setPlaying: vi.fn((p) => void calls.push(`playing:${p}`)),
   setBackground: vi.fn(),
@@ -24,30 +25,39 @@ const fake = (): ModelViewer => ({
   dispose: vi.fn(() => void calls.push('dispose')),
 });
 let created: ModelViewer[];
+let createThrows: string | null = null;
 vi.mock('@/model/viewer.ts', () => ({
-  createViewer: (_h: HTMLElement, o: ViewerOptions) => { opts = o; const v = fake(); created.push(v); return v; },
+  createViewer: (_h: HTMLElement, o: ViewerOptions) => {
+    if (createThrows) throw new Error(createThrows);
+    opts = o; const v = fake(); created.push(v); return v;
+  },
 }));
 
+let fetchGate: Promise<void> | null;
+let pulls: number;
 let fetchSpec: { etag?: string; status?: number; size?: number; bytes?: number; noLength?: boolean };
 let fetched: string[];
 beforeEach(() => {
   setLang('en');
-  calls.length = 0; created = []; loadArgs = []; fetched = [];
+  calls.length = 0; created = []; loadArgs = []; loadData = []; fetched = []; fetchGate = null; pulls = 0; createThrows = null;
   fetchSpec = { bytes: 2048 };
   loadImpl = async () => ({ meshes: 3, triangles: 12, materials: 2, clips: [] });
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     fetched.push(url);
+    if (fetchGate) await fetchGate;
     const status = fetchSpec.status ?? 200;
     if (status !== 200) return new Response('no', { status });
     const headers: Record<string, string> = {};
     if (fetchSpec.etag) headers.etag = fetchSpec.etag;
     if (!fetchSpec.noLength) headers['content-length'] = String(fetchSpec.size ?? fetchSpec.bytes ?? 0);
-    return new Response(new Uint8Array(fetchSpec.bytes ?? 0), { status, headers });
+    // a stream that counts how often the body is pulled: a body that was not read is 0
+    const body = new ReadableStream<Uint8Array>({ pull(c) { pulls++; c.enqueue(new Uint8Array(fetchSpec.bytes ?? 0)); c.close(); } }, { highWaterMark: 0 });
+    return new Response(body, { status, headers });
   }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-const ui = (p: Partial<{ path: string; src: string; active: boolean; reloadKey: number }> = {}) => (
+const ui = (p: Partial<{ path: string; src: string; active: boolean; reloadKey: number; releaseAfterMs: number }> = {}) => (
   <ModelBody path="models/car/car.glb" src="here" tabId="file:models/car/car.glb" active reloadKey={0} {...p} />
 );
 const ready = (c: HTMLElement) => c.querySelector('[data-model-ready]');
@@ -145,11 +155,116 @@ it('unmount disposes the viewer and forgets it', async () => {
 });
 
 it('a lost WebGL context shows a message', async () => {
-  const { container } = render(ui());
+  const { container, rerender } = render(ui());
   await waitFor(() => expect(ready(container)).toBeTruthy());
+  fetchSpec = { bytes: 2048, etag: '"same"' };
   act(() => opts.onContextLost());
   expect(screen.getByRole('alert').textContent).toContain('WebGL');
   expect(ready(container)).toBeNull();
+  expect(created[0]!.dispose).toHaveBeenCalledTimes(1); // the dead viewer is gone, its canvas with it
+  // ↻ makes a new viewer and parses again, whatever the ETag says
+  rerender(ui({ reloadKey: 1 }));
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(created.length).toBe(2);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(getModelViewer('file:models/car/car.glb')).toBe(created[1]);
+});
+
+it('a viewer that cannot be made (no WebGL) is a visible line, not "loading" for ever', async () => {
+  createThrows = 'Error creating WebGL context.';
+  const { container } = render(ui());
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('WebGL'));
+  expect(screen.queryByText(/Loading/)).toBeNull();
+  expect(ready(container)).toBeNull();
+  expect(fetched).toEqual([]);
+});
+
+it('a superseded load never replaces the newer one: the info line is the newer file\'s', async () => {
+  const waits: ((v: { meshes: number; triangles: number; materials: number; clips: string[] }) => void)[] = [];
+  loadImpl = () => new Promise((ok) => void waits.push(ok));
+  const { container, rerender } = render(ui());
+  await waitFor(() => expect(waits.length).toBe(1));
+  rerender(ui({ reloadKey: 1 }));
+  await waitFor(() => expect(waits.length).toBe(2));
+  await act(async () => waits[1]!({ meshes: 7, triangles: 70, materials: 7, clips: [] }));
+  await act(async () => waits[0]!({ meshes: 1, triangles: 10, materials: 1, clips: [] }));
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(screen.getByText(/7 meshes · 70 triangles/)).toBeTruthy();
+});
+
+it('switching to another tab mid-download does not restart it', async () => {
+  let release!: () => void;
+  fetchGate = new Promise((ok) => { release = ok; });
+  const { container, rerender } = render(ui());
+  await waitFor(() => expect(fetched.length).toBe(1));
+  rerender(ui({ active: false }));
+  rerender(ui({ active: true }));
+  release();
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(fetched.length).toBe(1);
+});
+
+it('a reload key that arrives while the tab is hidden waits for the tab to be shown', async () => {
+  const { container, rerender } = render(ui());
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  rerender(ui({ active: false, reloadKey: 1 }));
+  await act(async () => {});
+  expect(fetched.length).toBe(1);
+  rerender(ui({ active: true, reloadKey: 1 }));
+  await waitFor(() => expect(fetched.length).toBe(2));
+});
+
+it('an unchanged file (same ETag) is not read at all: the body is cancelled after the headers', async () => {
+  fetchSpec = { bytes: 64, etag: '"a"' };
+  const { container, rerender } = render(ui());
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  const first = pulls;
+  rerender(ui({ reloadKey: 1 }));
+  await waitFor(() => expect(fetched.length).toBe(2));
+  await act(async () => {});
+  expect(pulls).toBe(first);
+  expect(calls.filter((c) => c === 'load').length).toBe(1);
+});
+
+it('a tab hidden for a while gives its WebGL context back, and comes back with the same camera and bytes', async () => {
+  {
+    fetchSpec = { bytes: 64, etag: '"a"' };
+    const { container, rerender } = render(ui({ releaseAfterMs: 30 }));
+    await waitFor(() => expect(ready(container)).toBeTruthy());
+    rerender(ui({ active: false, releaseAfterMs: 30 }));
+    await waitFor(() => expect(created[0]!.dispose).toHaveBeenCalledTimes(1));
+    expect(getModelViewer('file:models/car/car.glb')).toBeUndefined();
+    rerender(ui({ active: true, releaseAfterMs: 30 }));
+    await waitFor(() => expect(created.length).toBe(2));
+    await waitFor(() => expect(loadData.length).toBe(2));
+    await waitFor(() => expect(calls).toContain('pose:77')); // the camera it had
+    expect(loadData.length).toBe(2);
+    expect(loadData[1]!.byteLength).toBe(64); // parsed from the kept bytes
+    expect(pulls).toBe(1); // not downloaded again
+  }
+});
+
+it('fetchModel stops reading at the cap even when the server gives no length', async () => {
+  const chunk = new Uint8Array(8);
+  let sent = 0;
+  const body = new ReadableStream<Uint8Array>({ pull(c) { sent++; c.enqueue(chunk); } }, { highWaterMark: 0 });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })));
+  await expect(fetchModel('/f', new AbortController().signal, null, () => {}, 20)).rejects.toMatchObject({ size: 24 });
+  expect(sent).toBe(3);
+});
+
+it('the info line says how many external resources were refused', async () => {
+  loadImpl = async () => ({ meshes: 1, triangles: 12, materials: 1, clips: [], refused: 2 });
+  const { container } = render(ui());
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(screen.getByText(/2 external resources not loaded/)).toBeTruthy();
+});
+
+it('sizes follow the language', async () => {
+  setLang('ru');
+  const { container } = render(ui());
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(screen.getByText(/^2,0 КБ|^2\.0 КБ/)).toBeTruthy();
 });
 
 it('animations: a clip select and a play button; nothing plays by default', async () => {
@@ -171,4 +286,7 @@ it('Reset view and a double click reset the camera', async () => {
   await waitFor(() => expect(ready(container)).toBeTruthy());
   act(() => screen.getByRole('button', { name: 'Reset view' }).click());
   expect(calls.at(-1)).toBe('reset');
+  calls.length = 0;
+  fireEvent.doubleClick(container.querySelector('[data-model-host]')!);
+  expect(calls).toEqual(['reset']);
 });

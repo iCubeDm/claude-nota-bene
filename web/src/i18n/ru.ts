@@ -267,6 +267,10 @@ export const ru = {
   modelLost: 'Контекст WebGL потерян: браузер забрал видеокарту. Перезагрузите вкладку (↻)',
   modelInfo: (size: string, meshes: number, tris: number, mats: number, anims: number) =>
     `${size} · мешей: ${meshes} · треугольников: ${tris} · материалов: ${mats} · анимаций: ${anims}`,
+  modelNoWebgl: 'WebGL недоступен в этом браузере: модель не показать',
+  modelRefused: (uri: string) => `Модель ссылается на внешний ресурс, он не загружается: ${uri}`,
+  modelRefusedN: (n: number) => `внешних ресурсов не загружено: ${n}`,
+  sizeB: 'Б', sizeKB: 'КБ', sizeMB: 'МБ', sizeGB: 'ГБ',
   modelReset: 'Сбросить вид',
   modelResetTip: 'Сбросить вид (двойной клик)',
   modelClip: 'Анимация',

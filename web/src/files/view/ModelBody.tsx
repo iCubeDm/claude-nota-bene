@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import type { CameraPose, ModelStats, ModelViewer, ViewerModule } from '@/model/api.ts';
 import { registerModelViewer, unregisterModelViewer } from '@/model/registry.ts';
-import { resolveModelUrl } from '@/model/resolve.ts';
+import { RefusedResource, resolveModelUrl } from '@/model/resolve.ts';
 import { fileUrl } from '../kinds.ts';
 
 /** Above this a model is not fetched at all: the whole file lives in memory twice (bytes, then the parsed scene). */
@@ -14,14 +14,20 @@ type Status =
   | { s: 'tooBig'; size: number }
   | { s: 'gone' }
   | { s: 'lost' }
+  | { s: 'noGl' }
+  | { s: 'refused'; uri: string }
   | { s: 'error'; message: string };
 
-export function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+type Tr = ReturnType<typeof useT>;
+export function fmtSize(n: number, t: Tr): string {
+  if (n < 1024) return `${n} ${t('sizeB')}`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} ${t('sizeKB')}`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} ${t('sizeMB')}`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} ${t('sizeGB')}`;
 }
+
+/** A hidden model tab gives its WebGL context back after this long (browsers allow about 16 contexts per page). */
+export const RELEASE_AFTER_MS = 20_000;
 
 // the whole 3D module (three and its loaders) is one lazy chunk, fetched when the first model tab is shown
 let viewerP: Promise<ViewerModule> | undefined;
@@ -38,18 +44,27 @@ class TooBig extends Error {
   constructor(size: number) { super('too big'); this.size = size; }
 }
 
-/** The file as bytes, with progress. The size is known from the headers before any body is read. */
-async function fetchModel(url: string, signal: AbortSignal, onProgress: (pct: number | null) => void): Promise<{ bytes: ArrayBuffer; etag: string | null }> {
+/**
+ * The file as bytes, with progress. The size and ETag are known from the headers before any body is read: with the
+ * ETag the caller already has (`known`) the body is cancelled unread and `same` is true.
+ */
+export async function fetchModel(
+  url: string, signal: AbortSignal, known: string | null, onProgress: (pct: number | null) => void, max = MODEL_MAX_BYTES,
+): Promise<{ bytes: ArrayBuffer | null; etag: string | null; same: boolean }> {
   const res = await fetch(url, { signal });
   if (res.status === 404) throw new Gone();
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`.trim());
+  const etag = res.headers.get('etag');
+  if (known && etag === known) {
+    void res.body?.cancel();
+    return { bytes: null, etag, same: true };
+  }
   const total = Number(res.headers.get('content-length') ?? 0);
-  if (total > MODEL_MAX_BYTES) {
+  if (total > max) {
     void res.body?.cancel();
     throw new TooBig(total);
   }
-  const etag = res.headers.get('etag');
-  if (!res.body) return { bytes: await res.arrayBuffer(), etag };
+  if (!res.body) return { bytes: await res.arrayBuffer(), etag, same: false };
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let got = 0;
@@ -59,7 +74,7 @@ async function fetchModel(url: string, signal: AbortSignal, onProgress: (pct: nu
     if (done) break;
     chunks.push(value);
     got += value.length;
-    if (got > MODEL_MAX_BYTES) {
+    if (got > max) {
       void reader.cancel();
       throw new TooBig(got);
     }
@@ -69,7 +84,7 @@ async function fetchModel(url: string, signal: AbortSignal, onProgress: (pct: nu
   const out = new Uint8Array(got);
   let at = 0;
   for (const c of chunks) { out.set(c, at); at += c.length; }
-  return { bytes: out.buffer, etag };
+  return { bytes: out.buffer, etag, same: false };
 }
 
 /** The css colour behind the pane, read again when the app's theme changes (class / style on <html>, or the OS scheme). */
@@ -89,10 +104,14 @@ function useBackground(el: React.RefObject<HTMLElement | null>, onChange: (css: 
 /**
  * The pane of a .glb / .gltf: a view-only 3D viewer (orbit, zoom), with reset view, animation clips and an info line.
  * All the 3D code is in the lazy `@/model/viewer.ts`; this component fetches the bytes (size cap, progress), owns the
- * states and the viewer's lifetime. Nothing is created or fetched until the tab is first shown. `reloadKey`: ↻ / a
- * finished turn; a reload keeps the camera.
+ * states and the viewer's lifetime. Nothing is created or fetched until the tab is first shown; after that a download
+ * goes on while the tab is hidden. `reloadKey`: ↻ / a finished turn; a reload keeps the camera, and a file with the same
+ * ETag is not even read. A lost WebGL context disposes the viewer; ↻ makes a new one and parses the kept bytes again.
+ * A tab hidden for RELEASE_AFTER_MS gives its context back and gets a new viewer (same camera) when shown.
  */
-export function ModelBody({ path, src, tabId, active, reloadKey }: { path: string; src: string; tabId: string; active: boolean; reloadKey: number }) {
+export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs = RELEASE_AFTER_MS }: {
+  path: string; src: string; tabId: string; active: boolean; reloadKey: number; releaseAfterMs?: number;
+}) {
   const t = useT();
   const pane = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -102,87 +121,136 @@ export function ModelBody({ path, src, tabId, active, reloadKey }: { path: strin
   const [status, setStatus] = useState<Status>({ s: 'loading', pct: null });
   const [clip, setClip] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [lost, setLost] = useState(false);
+  const [released, setReleased] = useState(false);
   const bgRef = useRef<string>('');
+  const file = `${path}\0${src}`;
 
-  // the viewer: made on first show, disposed on close (or when the file is another one)
+  // what outlives a viewer (its recreation after a loss or a release, not a change of file)
+  const loaded = useRef<string | null>(null); // the key (file + reloadKey) the viewer shows
+  const hadModel = useRef(false);
+  const lastEtag = useRef<string | null>(null);
+  const bytes = useRef<ArrayBuffer | null>(null); // the file as fetched: re-parsed into a new viewer without a download
+  const pose = useRef<{ file: string; pose: CameraPose } | null>(null);
+  const inflight = useRef<{ key: string; ac: AbortController } | null>(null);
+  const bound = useRef(file);
+
+  // the viewer: made on first show, disposed on close, on a lost context, when released, or when the file is another one
   useEffect(() => {
-    if (!started || !host.current) return;
+    if (!started || released || lost || !host.current) return;
+    if (bound.current !== file) {
+      bound.current = file;
+      lastEtag.current = null;
+      bytes.current = null;
+      pose.current = null;
+    }
+    loaded.current = null;
+    hadModel.current = false;
     let dead = false;
     let v: ModelViewer | undefined;
     loadViewerModule().then((m) => {
       if (dead || !host.current) return;
       const background = getComputedStyle(host.current).backgroundColor;
       bgRef.current = background;
-      v = m.createViewer(host.current, {
-        background,
-        onContextLost: () => !dead && setStatus({ s: 'lost' }),
-        onView: (p: CameraPose) => { if (pane.current) pane.current.dataset.modelCamera = [...p.position, ...p.target].map((x) => x.toFixed(3)).join(' '); },
-      });
+      try {
+        v = m.createViewer(host.current, {
+          background,
+          onContextLost: () => { if (!dead) { setLost(true); setStatus({ s: 'lost' }); } },
+          onView: (p: CameraPose) => { if (pane.current) pane.current.dataset.modelCamera = [...p.position, ...p.target].map((x) => x.toFixed(3)).join(' '); },
+        });
+      } catch {
+        setStatus({ s: 'noGl' }); // no WebGL, a blocklisted GPU, or the context cap
+        return;
+      }
       registerModelViewer(tabId, v);
       setViewer(v);
     }, (e: unknown) => !dead && setStatus({ s: 'error', message: e instanceof Error ? e.message : String(e) }));
     return () => {
       dead = true;
+      inflight.current?.ac.abort();
+      inflight.current = null;
       if (v) {
+        try { pose.current = { file, pose: v.getPose() }; } catch { /* keep the older one */ }
         unregisterModelViewer(tabId, v);
         v.dispose();
       }
       setViewer(null);
     };
-  }, [started, tabId, path, src]);
+  }, [started, released, lost, tabId, file]);
+
+  // ↻ on a lost context: a new viewer (the load effect then parses the kept bytes, whatever the ETag says)
+  useEffect(() => void setLost(false), [reloadKey]);
+  // a hidden tab gives its context back after a while (not in the middle of a download); showing it again recreates it
+  useEffect(() => {
+    if (active) return void setReleased(false);
+    if (!viewer) return;
+    const id = setTimeout(() => { if (!inflight.current) setReleased(true); }, releaseAfterMs);
+    return () => clearTimeout(id);
+  }, [active, viewer, releaseAfterMs]);
 
   useBackground(host, (css) => { if (css !== bgRef.current) { bgRef.current = css; viewer?.setBackground(css); } });
   useEffect(() => void viewer?.setVisible(active), [viewer, active]);
 
-  // load: when the viewer exists and the tab is shown, once per (file, reloadKey); an interrupted load runs again
-  const loaded = useRef<string | null>(null);
-  const hadModel = useRef(false);
-  const lastEtag = useRef<string | null>(null);
+  // load: when the viewer exists, once per (file, reloadKey). It goes on while the tab is hidden; a new reload key that
+  // arrives while hidden waits for the tab to be shown
   useEffect(() => {
-    if (!viewer || !active) return;
-    const key = `${path}\0${src}\0${reloadKey}`;
-    if (loaded.current === key) return;
+    if (!viewer) return;
+    const key = `${file}\0${reloadKey}`;
+    if (loaded.current === key || inflight.current?.key === key) return;
+    if (!active && loaded.current !== null) return;
+    inflight.current?.ac.abort();
     const ac = new AbortController();
+    inflight.current = { key, ac };
     const slash = path.lastIndexOf('/');
     const baseDir = slash > 0 ? path.slice(0, slash) : undefined;
+    const settle = () => { if (inflight.current?.ac === ac) inflight.current = null; };
     const fail = (e: unknown) => {
       if (ac.signal.aborted) return;
+      settle();
       loaded.current = key;
       viewer.clear();
       hadModel.current = false;
       lastEtag.current = null;
+      bytes.current = null;
       if (e instanceof Gone) setStatus({ s: 'gone' });
       else if (e instanceof TooBig) setStatus({ s: 'tooBig', size: e.size });
+      else if (e instanceof RefusedResource) setStatus({ s: 'refused', uri: e.uri });
       else setStatus({ s: 'error', message: e instanceof Error ? e.message : String(e) });
     };
     // a reload of a model on screen keeps showing it (no flash of "loading") until the new bytes are in
     if (!hadModel.current) setStatus({ s: 'loading', pct: null });
     void (async () => {
       try {
-        const { bytes, etag } = await fetchModel(fileUrl(path, undefined, src), ac.signal, (pct) => !ac.signal.aborted && !hadModel.current && setStatus({ s: 'loading', pct }));
+        const known = bytes.current ? lastEtag.current : null;
+        const r = await fetchModel(fileUrl(path, undefined, src), ac.signal, known, (pct) => !ac.signal.aborted && !hadModel.current && setStatus({ s: 'loading', pct }));
         if (ac.signal.aborted) return;
-        // a finished turn reloads every open file: the same file (same ETag) is not parsed again
-        if (hadModel.current && etag && etag === lastEtag.current) {
+        // the same file (same ETag): nothing to parse when it is on screen, else the bytes we kept go to the new viewer
+        if (r.same && hadModel.current) {
+          settle();
           loaded.current = key;
           return;
         }
-        lastEtag.current = etag;
+        const data = r.same ? bytes.current! : r.bytes!;
         viewer.clear();
         const keepView = hadModel.current;
-        const stats = await viewer.load(bytes, { resolve: (uri) => resolveModelUrl(uri, baseDir, src), keepView });
+        const stats = await viewer.load(data, { resolve: (uri) => resolveModelUrl(uri, baseDir, src), keepView });
         if (ac.signal.aborted) return;
+        settle();
+        bytes.current = data;
+        lastEtag.current = r.etag; // only for a file that really is on screen
         loaded.current = key;
         hadModel.current = true;
+        if (pose.current?.file === file) viewer.setPose(pose.current.pose); // back from a release or a loss: the camera it had
+        pose.current = null;
         setClip(0);
         setPlaying(false);
         if (stats.clips.length) viewer.setClip(0);
-        setStatus({ s: 'ready', size: bytes.byteLength, stats });
+        setStatus({ s: 'ready', size: data.byteLength, stats });
       } catch (e) {
         fail(e);
       }
     })();
-    return () => ac.abort();
-  }, [viewer, active, path, src, reloadKey]);
+  }, [viewer, active, file, path, src, reloadKey]);
 
   const ready = status.s === 'ready' ? status : null;
   const note = (text: string, alert = false) => <p role={alert ? 'alert' : undefined} className="absolute inset-x-0 top-0 p-4 text-sm text-muted-foreground">{text}</p>;
@@ -197,13 +265,16 @@ export function ModelBody({ path, src, tabId, active, reloadKey }: { path: strin
       <div ref={host} data-model-host className="absolute inset-0 bg-background" onDoubleClick={() => viewer?.resetView()} />
       {status.s === 'loading' && note(t('modelLoading', status.pct))}
       {status.s === 'gone' && note(t('fileGone'))}
-      {status.s === 'tooBig' && note(t('modelTooBig', fmtSize(status.size)))}
+      {status.s === 'tooBig' && note(t('modelTooBig', fmtSize(status.size, t)))}
       {status.s === 'error' && note(t('modelFailed', status.message), true)}
       {status.s === 'lost' && note(t('modelLost'), true)}
+      {status.s === 'noGl' && note(t('modelNoWebgl'), true)}
+      {status.s === 'refused' && note(t('modelRefused', status.uri), true)}
       {ready && (
         <div data-anchor-skip className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 border-t border-border-soft bg-chrome px-3 py-1 font-mono text-[11.5px] text-muted-foreground backdrop-blur">
           <span data-model-info className="min-w-0 flex-1 truncate">
-            {t('modelInfo', fmtSize(ready.size), ready.stats.meshes, ready.stats.triangles, ready.stats.materials, ready.stats.clips.length)}
+            {t('modelInfo', fmtSize(ready.size, t), ready.stats.meshes, ready.stats.triangles, ready.stats.materials, ready.stats.clips.length)}
+            {ready.stats.refused ? ` · ${t('modelRefusedN', ready.stats.refused)}` : ''}
           </span>
           {ready.stats.clips.length > 0 && (
             <>

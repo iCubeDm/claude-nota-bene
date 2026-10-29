@@ -269,6 +269,10 @@ export const en: Dict = {
   modelLost: 'The WebGL context was lost: the browser took the GPU back. Reload the tab (↻)',
   modelInfo: (size, meshes, tris, mats, anims) =>
     `${size} · ${meshes} mesh${meshes === 1 ? '' : 'es'} · ${tris} triangle${tris === 1 ? '' : 's'} · ${mats} material${mats === 1 ? '' : 's'} · ${anims} animation${anims === 1 ? '' : 's'}`,
+  modelNoWebgl: 'WebGL is not available in this browser: the model cannot be shown',
+  modelRefused: (uri) => `The model refers to an external resource, which is not loaded: ${uri}`,
+  modelRefusedN: (n) => `${n} external resource${n === 1 ? '' : 's'} not loaded`,
+  sizeB: 'B', sizeKB: 'KB', sizeMB: 'MB', sizeGB: 'GB',
   modelReset: 'Reset view',
   modelResetTip: 'Reset view (double click)',
   modelClip: 'Animation',

@@ -7,6 +7,8 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { createLatest } from './latest.ts';
+import { RefusedResource } from './resolve.ts';
 import type { CameraPose, LoadOptions, ModelStats, ModelViewer, ViewerOptions } from './api.ts';
 
 /**
@@ -58,7 +60,8 @@ function statsOf(gltf: GLTF): ModelStats {
     if (!m.isMesh) return;
     meshes++;
     const g = m.geometry;
-    triangles += (g.index ? g.index.count : (g.attributes.position?.count ?? 0)) / 3;
+    const inst = (m as { isInstancedMesh?: boolean; count?: number }).isInstancedMesh ? ((m as { count?: number }).count ?? 1) : 1;
+    triangles += ((g.index ? g.index.count : (g.attributes.position?.count ?? 0)) / 3) * inst;
     for (const mat of Array.isArray(m.material) ? m.material : [m.material]) materials.add(mat);
   });
   return { meshes, triangles: Math.floor(triangles), materials: materials.size, clips: gltf.animations.map((a) => a.name) };
@@ -100,8 +103,10 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
   let raf = 0;
   // seconds since the previous animation frame (THREE.Clock is deprecated); reset when playing (re)starts
   let last = performance.now();
-  const tick = () => { const now = performance.now(); const dt = (now - last) / 1000; last = now; return dt; };
+  const tick = () => { const now = performance.now(); const dt = Math.min((now - last) / 1000, 0.1); // a tab in the background pauses rAF: no jump by the time away
+     last = now; return dt; };
   const home = { position: new Vector3(0, 0, 3), target: new Vector3() };
+  const latest = createLatest(); // a parse that was superseded (or outlived the viewer) is dropped, never shown
   const draco = new DRACOLoader(); // its decoder (wasm + js) is a hashed asset of our own build, fetched on the first compressed file
 
   const pose = (): CameraPose => ({
@@ -178,6 +183,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
 
   const api: ModelViewer = {
     async load(data, lo: LoadOptions) {
+      const my = latest.next();
       const refused: string[] = [];
       const manager = new LoadingManager();
       manager.setURLModifier((url) => {
@@ -190,10 +196,13 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
       try {
         gltf = await new Promise<GLTF>((ok, bad) => loader.parse(data, '', ok, (e) => bad(e instanceof Error ? e : new Error(String((e as { message?: string }).message ?? e)))));
       } catch (e) {
-        if (refused.length) throw new Error(`refused an external resource: ${refused[0]}`);
+        if (refused.length) throw new RefusedResource(refused[0]!);
         throw e;
       }
-      if (disposed) { disposeObject(gltf.scene); return statsOf(gltf); }
+      if (disposed || !latest.current(my)) {
+        disposeObject(gltf.scene);
+        throw new Error('superseded'); // the caller has moved on and ignores this
+      }
       api.clear();
       model = gltf.scene;
       scene.add(model);
@@ -201,9 +210,10 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
       mixer = clips.length ? new AnimationMixer(model) : null;
       fit(model, lo.keepView);
       requestRender();
-      return statsOf(gltf);
+      return { ...statsOf(gltf), refused: refused.length };
     },
     clear() {
+      latest.invalidate(); // a parse still running will find it is no longer wanted
       action = null;
       playing = false;
       if (mixer && model) { mixer.stopAllAction(); mixer.uncacheRoot(model); }

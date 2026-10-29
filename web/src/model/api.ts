@@ -1,6 +1,10 @@
 /** What the lazily loaded 3D code (viewer.ts, three) offers the rest of the app. Types only: importing this costs nothing. */
 
-export type ModelStats = { meshes: number; triangles: number; materials: number; clips: string[] };
+export type ModelStats = {
+  meshes: number; triangles: number; materials: number; clips: string[];
+  /** How many external resources (a texture at an http(s) url, say) the viewer refused to fetch. */
+  refused?: number;
+};
 
 /** The camera: where it is, what it looks at, its vertical field of view (degrees). */
 export type CameraPose = { position: [number, number, number]; target: [number, number, number]; fov: number };

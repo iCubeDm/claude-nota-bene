@@ -34,6 +34,6 @@ it('an absolute http(s) or protocol-relative uri is refused: nothing leaves our 
   expect(resolveModelUrl('//evil.example/t.png', 'm')).toBeNull();
 });
 
-it('a leading slash is the project-relative path the server will judge, like fileUrl', () => {
+it('a leading slash is passed on as is, like fileUrl (the server answers 403: an absolute path is outside the project)', () => {
   expect(resolveModelUrl('/abs/t.png', 'm')).toBe(u('/abs/t.png'));
 });
