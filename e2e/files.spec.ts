@@ -1184,6 +1184,61 @@ test('the header reload reloads a model and keeps the camera; a model tab surviv
   expect(await pane.getAttribute('data-model-camera')).toBe(zoomed);
 });
 
+// ---- KTX2 textures: models/ktx2.glb (e2e/fixtures/make-ktx2.mjs) is a quad textured through KHR_texture_basisu. Before step C
+// the viewer had no KTX2Loader and refused it. (The fixture's KTX2 is uncompressed: no Basis encoder offline.)
+test('a model with a KTX2 texture renders instead of an error, with both texture colours on the canvas @files', async ({ page }) => {
+  await start(page);
+  test.skip(!(await webGl(page)), 'needs WebGL (software or hardware) in the browser');
+  const foreign: string[] = [];
+  page.on('request', (r) => { if (!/^(data:|blob:|http:\/\/127\.0\.0\.1:4794\/)/.test(r.url())) foreign.push(r.url()); });
+  await openFromTree(page, 'models/ktx2.glb');
+  const pane = modelPane(page, 'models/ktx2.glb');
+  await expect(pane).toHaveAttribute('data-model-ready', 'true');
+  await expect(pane.locator('[data-model-info]')).toContainText(/1 mesh · 2 triangles · 1 material · 0 animations$/);
+  await expect(pane.getByRole('alert')).toHaveCount(0);
+  const canvas = pane.locator('canvas');
+  await expect.poll(async () => (await canvasColours(canvas)).distinct).toBeGreaterThan(3);
+  expect(foreign).toEqual([]);
+});
+
+// ---- .blend: models/scene.blend (e2e/fixtures/make-blend.mjs, made by the real Blender) is converted by the server's Blender.
+const hasBlender = (page: Page) => page.request.get('/info').then((r) => r.json()).then((j: { blender?: boolean }) => !!j.blender);
+
+test('a .blend opens as a 3D view through /model: converted note, drawn pixels, a comment on it names the camera @files', async ({ page }) => {
+  const frames = sentFrames(page);
+  await start(page);
+  test.skip(!(await hasBlender(page)), 'needs Blender (NOTA_BENE_BLENDER, blender on PATH or /Applications/Blender.app)');
+  test.skip(!(await webGl(page)), 'needs WebGL (software or hardware) in the browser');
+  await clearPending(page);
+  const path = 'models/scene.blend';
+  const requested: string[] = [];
+  page.on('response', (r) => { if (r.url().includes('/model?') && r.status() === 200) requested.push(r.headers()['content-type'] ?? ''); });
+  await openFromTree(page, path);
+  const pane = modelPane(page, path);
+  await expect(pane).toHaveAttribute('data-model-ready', 'true', { timeout: 60_000 });
+  expect(requested).toEqual(['model/gltf-binary']);
+  await expect(pane.locator('[data-model-info]')).toContainText(/1 mesh · 12 triangles · 1 material/);
+  await expect(pane.locator('[data-model-note]')).toContainText(/converted by Blender|сконвертировано Blender/);
+  const canvas = pane.locator('canvas');
+  await expect.poll(async () => (await canvasColours(canvas)).distinct).toBeGreaterThan(3);
+  expect((await canvasColours(canvas)).unlike).toBeGreaterThan(0.02);
+
+  // comment on it like on a glb (a click on the view gives the keyboard to the page, as the glb test's orbit does)
+  await canvas.click();
+  await page.keyboard.press('n');
+  const layer = markupLayer(page, path);
+  await expect(layer).toBeVisible();
+  const cb = (await canvas.boundingBox())!;
+  await drag(page, at(cb, 0.3, 0.3), at(cb, 0.6, 0.6));
+  await expect(layer.locator('[data-shape="rect"]')).toHaveCount(1);
+  const text = uniq('blend');
+  await addMarkComment(page, text);
+  await page.keyboard.press('Escape');
+  await sendAndSettle(page);
+  await expect.poll(() => batchText(frames, text)).toBeTruthy();
+  expect(batchText(frames, text)!).toMatch(/\[models\/scene\.blend · \d+×\d+ · camera \([^)]*\) → \([^)]*\), fov 50°\]/);
+});
+
 // ---- Margin comments on a 3D view (step B): the frame is the canvas at the camera's pose, the batch names the camera.
 test('mark up a model: orbit, N, rect, comment, send (camera line + frame); orbit away hides the mark, the view chip brings the camera back, a reload and the jump restore it @files', async ({ page }) => {
   const frames = sentFrames(page);
