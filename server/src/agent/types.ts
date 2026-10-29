@@ -1,4 +1,4 @@
-import type { AgentEvent, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, Stats } from '@nota-bene/shared';
+import type { AgentEvent, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, Stats, SubagentView } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
@@ -46,4 +46,9 @@ export interface AgentBackend {
   sessionInfo(id: string, dir: string): Promise<SessionInfo | null>;
   /** The replay of a stored session: `user` events and `agent` events (message, tool-call, tool-update), ts 0. */
   history(sessionId: string, cwd: string, attachments: AttachmentStore, onError?: (e: unknown) => void): Promise<ServerEvent[]>;
+  /**
+   * The conversation of the subagent the Agent call `toolUseId` started in `sessionId` (read-only; its events are the
+   * subagent's own text, tool calls and results). null when no subagent matches. `running`: it has not ended.
+   */
+  subagent(sessionId: string, cwd: string, toolUseId: string, attachments: AttachmentStore, onError?: (e: unknown) => void): Promise<SubagentView | null>;
 }

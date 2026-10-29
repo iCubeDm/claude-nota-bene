@@ -8,6 +8,7 @@ import type { ClientMessage, Comment } from '@nota-bene/shared';
 import type { AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { HistoryArchive, historyRoutes } from './archive.ts';
+import { subagentRoutes } from './subagent.ts';
 import { AttachmentStore, attachmentRoutes } from './attachments.ts';
 import { MarkFiles, markRoutes } from './marks.ts';
 import { CommentStore } from './comments.ts';
@@ -141,6 +142,8 @@ export async function startServer(o: {
         ...attachmentRoutes(attachments, hub),
         // only the current conversation's archive: a page of another one (before a switch or a /clear) gets 409
         ...historyRoutes(archive, () => manager.archiveId(), hub),
+        // a subagent's conversation (protocol 7); same rule: only the current conversation's
+        ...subagentRoutes({ backend: o.backend, attachments, hub, current: () => manager.archiveId(), root }),
         ...markRoutes(marks, hub, {
           isSent: (id) => store.get(manager.info().id).some((c) => c.id === id && c.status === 'sent'),
         }),

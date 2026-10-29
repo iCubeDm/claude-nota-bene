@@ -1,7 +1,10 @@
 import type { WireAgentEvent } from './agent.ts';
 
+/** A tool-use id as the wire carries it (the Agent call's id, `agent` of a source, `tool` of `/subagent`): ids only, never path pieces. */
+export const TOOL_USE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
-export type AnchorSource = { kind: 'message'; id: string } | { kind: 'file'; path: string; ref?: string };
+export type AnchorSource = { kind: 'message'; id: string; /** the toolUseId of the subagent whose conversation holds the item (protocol 7); absent: the main chat */ agent?: string } | { kind: 'file'; path: string; ref?: string };
 export type FileSource = Extract<AnchorSource, { kind: 'file' }>;
 export const MARK_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff'] as const;
 export type MarkColor = (typeof MARK_COLORS)[number];
@@ -65,9 +68,10 @@ export const generatedImages = (c: Comment): number => (isMediaAnchor(c.anchor) 
  * (`occupied`, `taken-over`, the client's `takeover`, close code 4001, `?tab=` and `?passive=1` on the ws url);
  * `hello.capabilities`;
  * 6: the model and effort switch: the client's `model` (ids answered with `ack`), the server's `model` and `models` events,
- * `capabilities.models`.
+ * `capabilities.models`;
+ * 7: a message anchor may name a subagent (`source.agent`, the Agent call's tool-use id) and `GET /subagent` serves its conversation.
  */
-export const PROTOCOL = 6;
+export const PROTOCOL = 7;
 
 /** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
 export const TAKEN_OVER_CODE = 4001;
@@ -242,7 +246,7 @@ function isAnchor(v: unknown): v is Anchor {
   if (v.kind === 'media') return isMediaAnchorShape(v);
   if (!isObj(v.source)) return false;
   const s = v.source;
-  const sourceOk = (s.kind === 'message' && typeof s.id === 'string') || isFileSource(s);
+  const sourceOk = (s.kind === 'message' && typeof s.id === 'string' && (s.agent === undefined || (typeof s.agent === 'string' && TOOL_USE_ID.test(s.agent)))) || isFileSource(s);
   return sourceOk && isOffset(v.start) && isOffset(v.end) && v.end >= v.start
     && typeof v.quote === 'string' && typeof v.prefix === 'string' && typeof v.suffix === 'string';
 }
@@ -268,7 +272,7 @@ const isEffort = (v: unknown): v is EffortLevel => (EFFORT_LEVELS as readonly un
 const isSessionId = (v: unknown): v is string => typeof v === 'string' && SESSION_ID.test(v);
 
 function toSource(s: AnchorSource): AnchorSource {
-  if (s.kind === 'message') return { kind: 'message', id: s.id };
+  if (s.kind === 'message') return s.agent === undefined ? { kind: 'message', id: s.id } : { kind: 'message', id: s.id, agent: s.agent };
   return s.ref === undefined ? { kind: 'file', path: s.path } : { kind: 'file', path: s.path, ref: s.ref };
 }
 
@@ -373,3 +377,6 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
 
 export type { AgentEvent, StopReason, WireAgentEvent } from './agent.ts';
 export { reduceTasks, type Task, type TasksState } from './tasks.ts';
+
+/** `GET /subagent` (protocol 7): a subagent's conversation as feed events, whether it still runs, and what the Agent call named it. */
+export type SubagentView = { events: ServerEvent[]; running: boolean; type: string; description: string };

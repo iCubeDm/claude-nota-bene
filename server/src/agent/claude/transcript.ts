@@ -17,14 +17,17 @@ function agent(out: ServerEvent[], frame: Record<string, unknown>): void {
 }
 
 /** Ports the prototype's "rebuild the feed from the transcript" block; pasted images go into `attachments`. */
-export function transcriptToEvents(msgs: SessionMessage[], attachments: AttachmentStore, onError?: (e: unknown) => void): ServerEvent[] {
+export function transcriptToEvents(msgs: SessionMessage[], attachments: AttachmentStore, onError?: (e: unknown) => void, opts: { subagent?: boolean } = {}): ServerEvent[] {
+  // A subagent's own file (getSubagentMessages) tags every message with the parent Agent call's id; that tag is what makes
+  // the live mapper treat a frame as a nested one (no text). In its own view the messages are the conversation itself.
+  const own = !!opts.subagent;
   let reported = false;
   const out: ServerEvent[] = [];
   for (const sm of msgs) {
     if (sm.type === 'assistant') {
       // through the live mapper, so a replayed message has the id and the shape the live one had
-      agent(out, { type: 'assistant', message: sm.message, parent_tool_use_id: sm.parent_tool_use_id, uuid: sm.uuid });
-    } else if (sm.type === 'user' && !sm.parent_tool_use_id) {
+      agent(out, { type: 'assistant', message: sm.message, parent_tool_use_id: own ? null : sm.parent_tool_use_id, uuid: sm.uuid });
+    } else if (sm.type === 'user' && (own || !sm.parent_tool_use_id)) {
       // subagent turns live in separate files (getSubagentMessages), so skipping parent_tool_use_id here is consistent
       const content = (sm.message as { content?: string | Block[] } | undefined)?.content;
       if (Array.isArray(content) && content.some((b) => b.type === 'tool_result')) {
@@ -50,6 +53,7 @@ export function transcriptToEvents(msgs: SessionMessage[], attachments: Attachme
         }
       });
       const text = blocks.filter((b, i) => b.type === 'text' && !labels.has(i)).map((b) => b.text ?? '').join('\n');
+      if (own && !images.length && text.trimStart().startsWith('<system-reminder>')) continue; // the harness's note to the subagent, not part of the talk
       if (text.trim() || images.length) out.push({ kind: 'user', id: sm.uuid, text, historic: true, ts: TS, ...(images.length ? { images } : {}) });
     }
   }

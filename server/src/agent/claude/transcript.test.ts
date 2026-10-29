@@ -108,3 +108,27 @@ describe('transcriptToEvents', () => {
     expect(errors).toHaveLength(1);
   });
 });
+
+describe('transcriptToEvents of a subagent', () => {
+  // getSubagentMessages tags every message with the Agent call's id
+  const P = 'toolu_parent';
+  const sub = [
+    { type: 'user', uuid: 's-u1', parent_tool_use_id: P, message: { role: 'user', content: 'Scoped re-review please' } },
+    { type: 'user', uuid: 's-u2', parent_tool_use_id: P, message: { role: 'user', content: '<system-reminder>\nhand back via X\n</system-reminder>' } },
+    { type: 'assistant', uuid: 's-a1', parent_tool_use_id: P, message: { role: 'assistant', content: [{ type: 'text', text: 'Looking.' }, { type: 'tool_use', id: 'toolu_in1', name: 'Read', input: { file_path: 'a.md' } }] } },
+    { type: 'user', uuid: 's-u3', parent_tool_use_id: P, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_in1', content: 'hello' }] } },
+    { type: 'assistant', uuid: 's-a2', parent_tool_use_id: P, message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } },
+  ] as unknown as SessionMessage[];
+
+  it('the subagent view gets its own text, tool calls and results', () => {
+    const evs = transcriptToEvents(sub, store(), undefined, { subagent: true });
+    expect(evs.map((e) => (e.kind === 'user' ? `user:${e.id}` : e.kind === 'agent' ? e.e.t : e.kind))).toEqual(['user:s-u1', 'message', 'tool-call', 'tool-update', 'message']);
+    expect(evs.find((e) => e.kind === 'agent' && e.e.t === 'tool-call')).toMatchObject({ e: { id: 'toolu_in1', sub: false } });
+    expect(evs.find((e) => e.kind === 'agent' && e.e.t === 'message')).toMatchObject({ e: { id: 's-a1:0', text: 'Looking.' } });
+  });
+
+  it('the main feed output for the same frames is unchanged: nested text and bubbles stay out', () => {
+    const evs = transcriptToEvents(sub, store());
+    expect(evs.map((e) => (e.kind === 'agent' ? `${e.e.t}${e.e.t === 'tool-call' ? `:sub=${e.e.sub}` : ''}` : e.kind))).toEqual(['tool-call:sub=true']);
+  });
+});

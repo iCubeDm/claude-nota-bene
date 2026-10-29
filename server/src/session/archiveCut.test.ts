@@ -32,7 +32,7 @@ function pushed(history: ServerEvent[] = []) {
   const starts: { resume?: string; fork?: boolean }[] = [];
   let push: (e: AgentEvent) => void = () => {};
   const backend: AgentBackend = {
-    capabilities: CLAUDE_CAPABILITIES, listSessions: async () => [], sessionInfo: async () => null,
+    capabilities: CLAUDE_CAPABILITIES, listSessions: async () => [], sessionInfo: async () => null, subagent: async () => null,
     history: async () => history,
     start: (o) => {
       starts.push({ ...(o.resume ? { resume: o.resume } : {}), ...(o.fork ? { fork: true } : {}) });

@@ -1,9 +1,11 @@
-import { getSessionInfo, getSessionMessages, listSessions, query } from '@anthropic-ai/claude-agent-sdk';
+import { getSessionInfo, getSessionMessages, getSubagentMessages, listSessions, listSubagents, query } from '@anthropic-ai/claude-agent-sdk';
 import type { ModelInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type ModelOption } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
+import { agentIdFromResult, findSubagentMeta, toolCallIn } from './subagents.ts';
+import { defaultProjectsDir } from '../../sessions.ts';
 import { UsageUnavailableError, mapContextUsage, mapUsage } from '../../stats.ts';
 
 const APPEND = `
@@ -171,5 +173,23 @@ export function sdkBackend(): AgentBackend {
     listSessions: () => listSessions({ limit: 300 }),
     sessionInfo: async (id, dir) => (await getSessionInfo(id, { dir })) ?? null,
     history: async (sessionId, cwd, attachments, onError) => transcriptToEvents(await getSessionMessages(sessionId, { dir: cwd }), attachments, onError),
+    subagent: async (sessionId, cwd, toolUseId, attachments, onError) => {
+      const ids = await listSubagents(sessionId, { dir: cwd });
+      const meta = findSubagentMeta(defaultProjectsDir(), sessionId, toolUseId);
+      let agentId = meta && ids.includes(meta.agentId) ? meta.agentId : null;
+      let type = meta?.type ?? '', description = meta?.description ?? '';
+      let running = meta?.running ?? false;
+      if (!agentId) {
+        // no meta (an older CLI): the Agent call in the main transcript names it, `agentId: …` in its result
+        const call = toolCallIn(await getSessionMessages(sessionId, { dir: cwd }), toolUseId);
+        const id = call?.result ? agentIdFromResult(call.result) : null;
+        if (!call || !id || !ids.includes(id)) return null;
+        agentId = id;
+        type = String(call.input.subagent_type ?? '');
+        description = String(call.input.description ?? '');
+        running = call.result === undefined;
+      }
+      return { events: transcriptToEvents(await getSubagentMessages(sessionId, agentId, { dir: cwd }), attachments, onError, { subagent: true }), running, type, description };
+    },
   };
 }

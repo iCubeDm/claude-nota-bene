@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type EffortLevel, type Mode, type ModelOption, type ServerEvent, type Stats } from '@nota-bene/shared';
+import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { isWire, mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
+import { transcriptToEvents } from './claude/transcript.ts';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
@@ -10,7 +12,7 @@ export type FakeTurn = {
   chunk?: number;
   delayMs?: number;
   /** `output` becomes the tool_result the CLI would stream back (default empty) */
-  tools?: { name: string; input: Record<string, unknown>; output?: string; isError?: boolean }[];
+  tools?: { /** default `fake-tool-<turn>-<k>`; a script names it to point a subagent at the call */ id?: string; name: string; input: Record<string, unknown>; output?: string; isError?: boolean }[];
   /** `onAllow`: the `permissionMode` the CLI drops to once this is allowed (a `status` frame), e.g. 'default' after ExitPlanMode */
   ask?: { toolName: string; input: Record<string, unknown>; onAllow?: Mode };
   crash?: boolean;
@@ -56,12 +58,44 @@ export type FakeSessionScript = {
   history?: { role: 'user' | 'assistant'; text: string }[];
 };
 
+/**
+ * A scripted subagent, found by the tool-use id of the Agent call that started it (any session). Its `messages` become the
+ * transcript the real backend would read (a user prompt, assistant texts and tool calls with their results) and go through
+ * the same `transcriptToEvents`. `running`: it has not ended (default false).
+ */
+export type FakeSubagent = {
+  toolUseId: string; type?: string; description: string; running?: boolean;
+  messages: { role: 'user' | 'assistant'; text?: string; tools?: { id?: string; name: string; input: Record<string, unknown>; output?: string; isError?: boolean }[] }[];
+};
+
+function subagentMessages(a: FakeSubagent): SessionMessage[] {
+  const out: Record<string, unknown>[] = [];
+  a.messages.forEach((m, i) => {
+    const base = { parent_tool_use_id: a.toolUseId, session_id: 'fake' };
+    if (m.role === 'user') return void out.push({ ...base, type: 'user', uuid: `${a.toolUseId}-m${i}`, message: { role: 'user', content: m.text ?? '' } });
+    const tools = (m.tools ?? []).map((t, k) => ({ ...t, id: t.id ?? `${a.toolUseId}-t${i}-${k}` }));
+    out.push({
+      ...base, type: 'assistant', uuid: `${a.toolUseId}-m${i}`,
+      message: { role: 'assistant', content: [...(m.text ? [{ type: 'text', text: m.text }] : []), ...tools.map((t) => ({ type: 'tool_use', id: t.id, name: t.name, input: t.input }))] },
+    });
+    if (tools.length) {
+      out.push({
+        ...base, type: 'user', uuid: `${a.toolUseId}-r${i}`,
+        message: { role: 'user', content: tools.map((t) => ({ type: 'tool_result', tool_use_id: t.id, content: t.output ?? '', ...(t.isError ? { is_error: true } : {}) })) },
+      });
+    }
+  });
+  return out as unknown as SessionMessage[];
+}
+
 /** A --fake script: the turns alone (the M0-M3 format), or the turns and a session list. */
 export type FakeScript = FakeTurn[] | {
   turns: FakeTurn[]; sessions?: FakeSessionScript[]; historyDelayMs?: number;
   /** what the fake agent can do; default: Claude's full set */ capabilities?: Partial<Capabilities>;
   /** the models it offers (default none); with any, every init reports the running one (the first until one is picked) */
   models?: ModelOption[];
+  /** the subagents the Agent calls of the script started (`GET /subagent`) */
+  subagents?: FakeSubagent[];
 };
 
 /** What a fake agent knows of its model: the list, the one running, and what was asked of it (shared by the backend's tests). */
@@ -291,7 +325,7 @@ class FakeSession implements FakeAgentSession {
             role: 'assistant',
             content: [
               { type: 'text', text: t.text },
-              ...(t.tools ?? []).map((tool, k) => ({ type: 'tool_use', id: `fake-tool-${n}-${k}`, name: tool.name, input: tool.input })),
+              ...(t.tools ?? []).map((tool, k) => ({ type: 'tool_use', id: tool.id ?? `fake-tool-${n}-${k}`, name: tool.name, input: tool.input })),
             ],
           },
         });
@@ -301,7 +335,7 @@ class FakeSession implements FakeAgentSession {
             message: {
               role: 'user',
               content: t.tools.map((tool, k) => ({
-                type: 'tool_result', tool_use_id: `fake-tool-${n}-${k}`, content: tool.output ?? '',
+                type: 'tool_result', tool_use_id: tool.id ?? `fake-tool-${n}-${k}`, content: tool.output ?? '',
                 ...(tool.isError ? { is_error: true } : {}),
               })),
             },
@@ -351,7 +385,7 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[] } = {},
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; subagents?: FakeSubagent[] } = {},
 ): Omit<AgentBackend, 'start'> & {
   start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[];
   /** every setModel / setEffort call, in order */
@@ -394,6 +428,10 @@ export function fakeBackend(
       const x = sessions.find((e) => e.id === id && cwdOf(e) !== undefined && real(cwdOf(e)!) === real(dir));
       return x ? { ...titles(x), cwd: cwdOf(x)! } : null;
     },
+    subagent: async (_session, _cwd, toolUseId, attachments, onError) => {
+      const a = (o.subagents ?? []).find((x) => x.toolUseId === toolUseId);
+      return a ? { events: transcriptToEvents(subagentMessages(a), attachments, onError, { subagent: true }), running: a.running ?? false, type: a.type ?? '', description: a.description } : null;
+    },
     history: async (id) => {
       await sleepFor(o.historyDelayMs ?? 0); // e2e: a switch that visibly takes time
       return (sessions.find((e) => e.id === id)?.history ?? []).flatMap((h, i): ServerEvent[] => (h.role === 'user'
@@ -408,5 +446,5 @@ export function fakeBackend(
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
   return Array.isArray(script)
     ? fakeBackend(script, { base })
-    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}) });
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.subagents ? { subagents: script.subagents } : {}) });
 }

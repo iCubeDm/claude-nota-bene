@@ -94,6 +94,7 @@ function scripted() {
     capabilities: CLAUDE_CAPABILITIES,
     listSessions: async () => [],
     sessionInfo: async () => null,
+    subagent: async () => null,
     history: async () => [],
     start: () => {
       const q: object[] = [];

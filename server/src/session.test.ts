@@ -42,7 +42,7 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
   }
 }
 
-const noSessions = { capabilities: CLAUDE_CAPABILITIES, listSessions: async () => [], sessionInfo: async () => null };
+const noSessions = { capabilities: CLAUDE_CAPABILITIES, listSessions: async () => [], sessionInfo: async () => null, subagent: async () => null };
 
 type Agent = Extract<ServerEvent, { kind: 'agent' }>;
 const agentOf = (events: ServerEvent[], t: Agent['e']['t']) => events.filter((e): e is Agent => e.kind === 'agent' && e.e.t === t);

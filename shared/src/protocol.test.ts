@@ -221,3 +221,17 @@ test('a media anchor with a scale below 1 parses, and toAnchor keeps it', () => 
   expect(toAnchor(a as unknown as MediaAnchor)).toMatchObject({ scale: 0.75 });
   expect(toAnchor(mediaAnchor() as unknown as MediaAnchor)).not.toHaveProperty('scale');
 });
+
+test('a message anchor may name a subagent; the field survives, unknown keys do not, a bad id is refused', () => {
+  const c = comment({ anchor: { ...anchor, source: { kind: 'message', id: 'm1', agent: 'toolu_01AbC' } } });
+  expect(parseClientMessage(comments(c))).toEqual({ type: 'comments', sessionId: null, items: [c] });
+  const extra = comment({ anchor: { ...anchor, source: { kind: 'message', id: 'm1', agent: 'toolu_01', x: 1 } } });
+  const out = parseClientMessage(comments(extra)) as { items: { anchor: { source: unknown } }[] };
+  expect(out.items[0]!.anchor.source).toEqual({ kind: 'message', id: 'm1', agent: 'toolu_01' });
+  for (const agent of ['../x', 'a/b', '', 7, 'x'.repeat(200)]) {
+    expect(parseClientMessage(comments(comment({ anchor: { ...anchor, source: { kind: 'message', id: 'm1', agent } } })))).toHaveProperty('error');
+  }
+});
+test('an old message anchor without agent is unchanged', () => {
+  expect(toAnchor(anchor as never)).toEqual(anchor);
+});
