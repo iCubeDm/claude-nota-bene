@@ -15,7 +15,7 @@ const fake = (): ModelViewer => ({
   load: vi.fn(async (d, o) => { calls.push('load'); loadArgs.push(o); loadData.push(d); return loadImpl(d); }),
   clear: vi.fn(() => void calls.push('clear')),
   resetView: vi.fn(() => void calls.push('reset')),
-  getPose: vi.fn(() => ({ position: [0, 0, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 77 })),
+  getPose: vi.fn(() => ({ position: [0, 0, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: poseFov })),
   setPose: vi.fn((p) => void calls.push(`pose:${p.fov}`)),
   setClip: vi.fn((i) => void calls.push(`clip:${i}`)),
   setPlaying: vi.fn((p) => void calls.push(`playing:${p}`)),
@@ -26,6 +26,7 @@ const fake = (): ModelViewer => ({
 });
 let created: ModelViewer[];
 let createThrows: string | null = null;
+let poseFov = 77;
 vi.mock('@/model/viewer.ts', () => ({
   createViewer: (_h: HTMLElement, o: ViewerOptions) => {
     if (createThrows) throw new Error(createThrows);
@@ -39,7 +40,7 @@ let fetchSpec: { etag?: string; status?: number; size?: number; bytes?: number; 
 let fetched: string[];
 beforeEach(() => {
   setLang('en');
-  calls.length = 0; created = []; loadArgs = []; loadData = []; fetched = []; fetchGate = null; pulls = 0; createThrows = null;
+  calls.length = 0; created = []; loadArgs = []; loadData = []; fetched = []; fetchGate = null; pulls = 0; poseFov = 77; createThrows = null;
   fetchSpec = { bytes: 2048 };
   loadImpl = async () => ({ meshes: 3, triangles: 12, materials: 2, clips: [] });
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -289,4 +290,36 @@ it('Reset view and a double click reset the camera', async () => {
   calls.length = 0;
   fireEvent.doubleClick(container.querySelector('[data-model-host]')!);
   expect(calls).toEqual(['reset']);
+});
+
+it('a viewer disposed before its parse finished does not overwrite the saved camera with its default', async () => {
+  const { container, rerender } = render(ui({ releaseAfterMs: 30 }));
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  rerender(ui({ active: false, releaseAfterMs: 30 }));
+  await waitFor(() => expect(created[0]!.dispose).toHaveBeenCalledTimes(1)); // saved fov 77
+  poseFov = 5; // what a viewer that never showed a model would report
+  let finish!: (s: { meshes: number; triangles: number; materials: number; clips: string[] }) => void;
+  loadImpl = () => new Promise((ok) => { finish = ok; });
+  rerender(ui({ active: true, releaseAfterMs: 30 }));
+  await waitFor(() => expect(calls).toContain('load'));
+  act(() => opts.onContextLost()); // disposed with its parse pending
+  loadImpl = async () => ({ meshes: 1, triangles: 1, materials: 1, clips: [] });
+  rerender(ui({ reloadKey: 1, releaseAfterMs: 30 }));
+  await waitFor(() => expect(ready(container)).toBeTruthy());
+  expect(calls).toContain('pose:77');
+  expect(calls).not.toContain('pose:5');
+  void finish;
+});
+
+it('the hidden-release timer starts again when the download that blocked it finishes while still hidden', async () => {
+  let release!: () => void;
+  fetchGate = new Promise((ok) => { release = ok; });
+  const { container, rerender } = render(ui({ releaseAfterMs: 30 }));
+  await waitFor(() => expect(fetched.length).toBe(1));
+  rerender(ui({ active: false, releaseAfterMs: 30 }));
+  await new Promise((r) => setTimeout(r, 90));
+  expect(created[0]!.dispose).not.toHaveBeenCalled(); // blocked by the download
+  release();
+  await waitFor(() => expect(created[0]!.dispose).toHaveBeenCalledTimes(1));
+  expect(container).toBeTruthy();
 });

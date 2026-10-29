@@ -134,6 +134,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
   const pose = useRef<{ file: string; pose: CameraPose } | null>(null);
   const inflight = useRef<{ key: string; ac: AbortController } | null>(null);
   const bound = useRef(file);
+  const [idle, setIdle] = useState(0); // bumps when a download ends: re-arms the release timer
 
   // the viewer: made on first show, disposed on close, on a lost context, when released, or when the file is another one
   useEffect(() => {
@@ -170,7 +171,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
       inflight.current?.ac.abort();
       inflight.current = null;
       if (v) {
-        try { pose.current = { file, pose: v.getPose() }; } catch { /* keep the older one */ }
+        try { if (hadModel.current) pose.current = { file, pose: v.getPose() }; } catch { /* keep the older one */ }
         unregisterModelViewer(tabId, v);
         v.dispose();
       }
@@ -186,7 +187,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
     if (!viewer) return;
     const id = setTimeout(() => { if (!inflight.current) setReleased(true); }, releaseAfterMs);
     return () => clearTimeout(id);
-  }, [active, viewer, releaseAfterMs]);
+  }, [active, viewer, releaseAfterMs, idle]);
 
   useBackground(host, (css) => { if (css !== bgRef.current) { bgRef.current = css; viewer?.setBackground(css); } });
   useEffect(() => void viewer?.setVisible(active), [viewer, active]);
@@ -203,7 +204,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
     inflight.current = { key, ac };
     const slash = path.lastIndexOf('/');
     const baseDir = slash > 0 ? path.slice(0, slash) : undefined;
-    const settle = () => { if (inflight.current?.ac === ac) inflight.current = null; };
+    const settle = () => { if (inflight.current?.ac === ac) { inflight.current = null; setIdle((n) => n + 1); } };
     const fail = (e: unknown) => {
       if (ac.signal.aborted) return;
       settle();
