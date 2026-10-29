@@ -575,7 +575,47 @@ test('mark up an image: rect + pen, comment, files in the project, coordinates i
   expect(batch).toMatch(/> pen \d+ pts, bbox x=0\.1 /);
   expect(batch).toContain('📎 images: ');
   expect(batch).toContain(`files: .nota-bene/marks/${id}/frame.jpg, .nota-bene/marks/${id}/layer.png`);
-  await expect(reply(page, text)).toContainText('images: 2');
+  await expect(reply(page, text)).toContainText('images: 1');
+});
+
+test('3 marks on one image + 1 on another: the batch carries 2 images, the shared one has numbered badges @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the media fixtures with it');
+  const frames = sentFrames(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await start(page);
+  await clearPending(page);
+  const texts = [uniq('g1'), uniq('g2'), uniq('g3'), uniq('g4')];
+  const markRect = async (path: string, from: [number, number], to: [number, number], text: string) => {
+    const img = mediaPane(page, path).locator('img');
+    await expect.poll(() => img.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth)).toBeGreaterThan(0);
+    if (!(await markupLayer(page, path).count())) await markUpBtn(page).click();
+    const layer = markupLayer(page, path);
+    await expect(layer).toBeVisible();
+    const b = await contentBoxOf(img);
+    await drag(page, at(b, ...from), at(b, ...to));
+    await expect(layer.locator('[data-shape="rect"]')).toHaveCount(1);
+    await addMarkComment(page, text);
+  };
+  await openFromTree(page, 'media/wide.png');
+  await markRect('media/wide.png', [0.1, 0.2], [0.3, 0.5], texts[0]);
+  await markRect('media/wide.png', [0.5, 0.2], [0.7, 0.5], texts[1]);
+  await markRect('media/wide.png', [0.4, 0.6], [0.9, 0.9], texts[2]);
+  await page.keyboard.press('Escape');
+  await openFromTree(page, 'media/4k.png');
+  await markRect('media/4k.png', [0.2, 0.2], [0.4, 0.4], texts[3]);
+  await page.keyboard.press('Escape');
+  await page.locator('#cSend').click();
+  await expect(chatTab(page)).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => batchText(frames, texts[0])).toBeTruthy();
+  const msg = frames.map((f) => { try { return JSON.parse(f) as { type?: string; text?: string; images?: { id: string; label: string }[] }; } catch { return null; } })
+    .find((m) => m?.type === 'send' && m.text?.includes(texts[0]))!;
+  expect(msg.images).toHaveLength(2); // before: 8 (frame + layer per comment)
+  expect(msg.images!.map((i) => i.label.replace(/^\[image \d+ · /, ''))).toEqual([expect.stringMatching(/for comments 1, 2, 3\]/), expect.stringMatching(/for comment 4\]/)]);
+  expect(msg.text).toContain('(shared by comments 1, 2, 3;');
+  // the composite, for a human look (the report folder is the main checkout's)
+  const png = await page.request.get(`/attach/${msg.images![0].id}`);
+  expect(png.ok()).toBe(true);
+  if (process.env.NB_SAVE_COMPOSITE) fs.writeFileSync(process.env.NB_SAVE_COMPOSITE, await png.body());
 });
 
 test('natural size, scrolled to the bottom-right: the same mapping @files', async ({ page }) => {
