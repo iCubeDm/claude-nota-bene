@@ -11,7 +11,7 @@ You are running inside a browser-based chat window that renders GitHub-flavored 
 - Draw diagrams as \`\`\`mermaid code blocks (or \`\`\`svg blocks with a complete <svg> element). Never draw ASCII-art diagrams.
 - To show an image or video from the project, embed it with markdown image syntax and a path relative to the project root, e.g. ![frame](part_1/frames/1.01.png) or ![clip](part_1/video/1.01.mp4). Videos and audio files render as players.
 - Refer to project files as inline code with a path relative to the project root (\`media/pilot/notes.md\`, not an absolute or ~ path): the UI makes these clickable and opens them in a tab. Paths outside the project cannot be opened, so do not present them as links.
-- The user may send batched inline comments: each item quotes a fragment from the conversation or a file, followed by their comment. Address every item.`;
+- The user may send batched inline comments: each item quotes a fragment from the conversation or a file, followed by their comment. Address every item. Whatever the user read and left without a comment has no objections: treat it as accepted, do not ask about it or revisit it.`;
 
 /** the SDK's model row as the wire's; the effort levels only where the model has any */
 export function toModelOption(m: ModelInfo): ModelOption {
