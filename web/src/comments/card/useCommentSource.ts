@@ -29,8 +29,9 @@ function showAt(root: HTMLElement, c: Comment): void {
   setTimeout(() => root.classList.remove('nb-flash'), 1300);
 }
 
-const itemRoot = (id: string): HTMLElement | null =>
-  [...document.querySelectorAll<HTMLElement>('[data-item-id]')].find((e) => e.dataset.itemId === id) ?? null;
+/** The item's root in ITS pane: a subagent's tab (`agent`) or the chat (an id may sit in both, see scopedId). */
+const itemRoot = (id: string, agent?: string): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>('[data-item-id]')].find((e) => e.dataset.itemId === id && e.closest<HTMLElement>('[data-agent]')?.dataset.agent === agent) ?? null;
 /** The file tab's own text root: its pane element, carrying `data-file-path` (and `data-file-ref` for another source)
  * while it shows text. A `data-file-path` inside rendered markdown is file content, never a root. */
 const fileRoot = (path: string, ref?: string): HTMLElement | null =>
@@ -109,7 +110,7 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
     if (src?.kind === 'file') return;
     if (!c || src?.kind !== 'message' || srcState === undefined || srcState === 'streaming') return setOrphan(false);
     if (srcState === null) return setOrphan(!beforeCompact);
-    const root = itemRoot(src.id);
+    const root = itemRoot(src.id, src.agent);
     setOrphan(!!root && !rangeForAnchor(root, c.anchor));
   }, [c, srcState, beforeCompact]);
 
@@ -127,7 +128,7 @@ export function useCommentSource(c: Comment | undefined): CommentSource {
       flushSync(() => dispatch(openSubagentTab(agent)));
       const attempt = (left: number) => {
         if (tool) flushSync(() => dispatch(revealToolOf(src.id.slice(TOOL_SRC.length), agent)));
-        const root = itemRoot(src.id);
+        const root = itemRoot(src.id, agent);
         if (root) return void showAt(root, c);
         if (left > 0) setTimeout(() => attempt(left - 1), 100);
       };

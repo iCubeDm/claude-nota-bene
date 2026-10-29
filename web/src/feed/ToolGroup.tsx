@@ -2,7 +2,9 @@ import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import type { FeedItem } from '@/store/feed.ts';
 import { ToolLine } from './ToolLine.tsx';
-import { selectGroupOpen, selectToolCommentCounts, toggleGroup } from './uiSlice.ts';
+import { useContext } from 'react';
+import { FeedScope } from './scope.ts';
+import { scopedId, selectGroupOpen, selectToolCommentCounts, toggleGroup } from './uiSlice.ts';
 
 type Tool = Extract<FeedItem, { kind: 'tool' }>;
 
@@ -15,9 +17,10 @@ type Tool = Extract<FeedItem, { kind: 'tool' }>;
 export function ToolGroup({ items, live }: { items: Tool[]; live: boolean }) {
   const t = useT();
   const dispatch = useAppDispatch();
-  const open = useAppSelector((s) => selectGroupOpen(s, items[0]!.id));
+  const agent = useContext(FeedScope).agent;
+  const open = useAppSelector((s) => selectGroupOpen(s, scopedId(agent, items[0]!.id)));
   const counts = useAppSelector(selectToolCommentCounts);
-  const comments = items.reduce((n, it) => n + (counts[it.id] ?? 0), 0);
+  const comments = items.reduce((n, it) => n + (counts[scopedId(agent, it.id)] ?? 0), 0);
   const errors = items.filter((it) => it.result?.isError).length;
   const last = items[items.length - 1]!;
   return (
@@ -25,7 +28,7 @@ export function ToolGroup({ items, live }: { items: Tool[]; live: boolean }) {
       <button
         type="button"
         aria-expanded={open}
-        onClick={() => dispatch(toggleGroup(items[0]!.id))}
+        onClick={() => dispatch(toggleGroup(scopedId(agent, items[0]!.id)))}
         data-anchor-skip
         className="my-2.5 block w-full cursor-pointer truncate rounded-sm text-left font-mono text-[11.5px] leading-normal text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
       >

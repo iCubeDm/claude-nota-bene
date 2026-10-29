@@ -8,6 +8,7 @@ import { useCommentSource } from '@/comments/card/useCommentSource.ts';
 import { renderHook } from '@testing-library/react';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
+import { openAgent } from '@/tabs/slice.ts';
 import { AgentView } from '@/subagent/AgentView.tsx';
 import { Feed } from './Feed.tsx';
 
@@ -143,6 +144,54 @@ describe('jump to a subagent comment', () => {
     await vi.waitFor(() => expect(scrolled).toHaveBeenCalled());
     await vi.waitFor(() => expect(hook.result.current.orphan).toBe(false));
     expect(hook.result.current.where).toBe('subagent reply «Look around»');
+    delete (Range.prototype as Partial<Range>).getBoundingClientRect;
+  });
+});
+
+describe('the same tool id in the chat and in the subagent tab (the SDK forwards a foreground subagent\'s calls into the main stream)', () => {
+  const inner = [call('toolu_in', 'Bash', { command: 'npm test' }), result('toolu_in', 'FAIL src/a.test.ts')];
+  const cm: Comment = {
+    id: 'c1', text: 'why', status: 'sent', createdAt: 1, sentIn: 'u',
+    anchor: { source: { kind: 'message', id: 'tool:toolu_in', agent: 't1' }, start: 9, end: 13, quote: 'FAIL', prefix: 'npm test ', suffix: ' src/a.te' },
+  };
+  function both() {
+    const store = setup([
+      call('t1', 'Agent', { description: 'Look around' }), result('t1', 'ok'),
+      ev({ t: 'tool-call', id: 'toolu_in', name: 'Bash', input: { command: 'npm test' }, sub: true }), result('toolu_in', 'FAIL src/a.test.ts'),
+    ]);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.startsWith('/subagent') ? new Response(JSON.stringify({ events: inner, running: false, type: 'x', description: 'Look around' })) : new Response('', { status: 404 }))));
+    act(() => void store.dispatch(serverEvent({ kind: 'comments', items: [cm] })));
+    render(<Provider store={store}><TooltipProvider><PaneFor store={store} /></TooltipProvider></Provider>);
+    return store;
+  }
+  const mainLine = () => [...document.querySelectorAll<HTMLElement>('[data-pane="chat"] [data-kind="tool"]')].find((e) => e.textContent?.includes('Bash'))!;
+
+  it('a comment on the subagent\'s line does not count on the chat\'s line', async () => {
+    both();
+    expect(mainLine()).not.toHaveTextContent('1 comment');
+  });
+
+  it('folding one does not fold the other', async () => {
+    const store = both();
+    act(() => void store.dispatch(openAgent({ tool: 't1', title: 'x' })));
+    await vi.waitFor(() => expect(document.querySelector('[data-pane="agent:t1"] [data-kind="tool"]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-pane="agent:t1"] [data-kind="tool"] button')!);
+    expect(document.querySelector('[data-pane="agent:t1"] [data-kind="tool-panel"]')).not.toBeNull();
+    expect(document.querySelector('[data-pane="chat"] [data-kind="tool-panel"]')).toBeNull();
+  });
+
+  it('the jump opens and scrolls the subagent\'s panel, never the chat\'s', async () => {
+    const store = both();
+    const scrolled: Element[] = [];
+    Element.prototype.scrollTo = function (this: Element) { scrolled.push(this); };
+    Range.prototype.getBoundingClientRect = () => ({ left: 0, top: 0, right: 5, bottom: 5, width: 5, height: 5, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    const hook = renderHook(() => useCommentSource(cm), { wrapper: ({ children }) => <Provider store={store}>{children}</Provider> });
+    act(() => hook.result.current.jump());
+    await vi.waitFor(() => expect(scrolled.length).toBeGreaterThan(0));
+    expect(store.getState().tabs.active).toBe('agent:t1');
+    expect(document.querySelector('[data-pane="agent:t1"] [data-kind="tool-panel"]')).not.toBeNull();
+    expect(document.querySelector('[data-pane="chat"] [data-kind="tool-panel"]')).toBeNull();
+    expect(scrolled.every((e) => e.closest('[data-agent]')?.getAttribute('data-agent') === 't1')).toBe(true);
     delete (Range.prototype as Partial<Range>).getBoundingClientRect;
   });
 });

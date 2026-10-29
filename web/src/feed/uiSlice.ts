@@ -38,6 +38,13 @@ export const selectGroupOpen = (s: RootState, id: string): boolean => s.feedUi.o
 export const TOOL_SRC = 'tool:';
 export const toolSrcId = (toolId: string): string => TOOL_SRC + toolId;
 
+/**
+ * The key of a tool (or a group's first tool) in the fold state and the comment counts: its id, scoped by the subagent
+ * whose conversation it is in. The SDK forwards a foreground subagent's tool calls into the main stream too, so the same
+ * id can sit in the chat and in the agent's tab: each is its own line.
+ */
+export const scopedId = (agent: string | undefined, id: string): string => (agent ? `${agent}|${id}` : id);
+
 /** The first tool id of the run of consecutive actions holding `toolId`; null when it is alone (no group) or not in the feed. */
 export function groupOf(items: FeedItem[], toolId: string): string | null {
   const i = items.findIndex((it) => it.kind === 'tool' && it.id === toolId);
@@ -56,7 +63,8 @@ export function groupOf(items: FeedItem[], toolId: string): string | null {
 export const revealToolOf = (toolId: string, agent?: string): AppThunk => (d, getState) => {
   const items = itemsOf(getState(), agent) ?? [];
   if (!items.some((it) => it.kind === 'tool' && it.id === toolId)) return;
-  d(revealTool({ tool: toolId, group: groupOf(items, toolId) }));
+  const group = groupOf(items, toolId);
+  d(revealTool({ tool: scopedId(agent, toolId), group: group && scopedId(agent, group) }));
 };
 
 /** Comments (pending and sent) per tool id, for the folded heads: a comment inside a closed panel is never invisible. */
@@ -64,7 +72,10 @@ export const selectToolCommentCounts = createSelector([(s: RootState) => s.comme
   const m: Record<string, number> = {};
   for (const c of items) {
     const src = c.anchor.source;
-    if (src.kind === 'message' && src.id.startsWith(TOOL_SRC)) m[src.id.slice(TOOL_SRC.length)] = (m[src.id.slice(TOOL_SRC.length)] ?? 0) + 1;
+    if (src.kind === 'message' && src.id.startsWith(TOOL_SRC)) {
+      const k = scopedId(src.agent, src.id.slice(TOOL_SRC.length));
+      m[k] = (m[k] ?? 0) + 1;
+    }
   }
   return m;
 });
@@ -75,7 +86,7 @@ export const selectToolAnchorEnds = createSelector([(s: RootState) => s.comments
   for (const c of items) {
     const src = c.anchor.source;
     if (src.kind !== 'message' || !src.id.startsWith(TOOL_SRC) || !('end' in c.anchor)) continue;
-    const id = src.id.slice(TOOL_SRC.length);
+    const id = scopedId(src.agent, src.id.slice(TOOL_SRC.length));
     m[id] = Math.max(m[id] ?? 0, c.anchor.end);
   }
   return m;

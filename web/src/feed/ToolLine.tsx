@@ -7,7 +7,7 @@ import { openAgent } from '@/tabs/slice.ts';
 import { isAgentTool, selectSubagent } from '@/subagent/slice.ts';
 import { selectLiveCalls } from '@/tasks/slice.ts';
 import { FeedScope } from './scope.ts';
-import { selectToolAnchorEnds, selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
+import { scopedId, selectToolAnchorEnds, selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
 
 type Tool = Extract<FeedItem, { kind: 'tool' }>;
 
@@ -148,14 +148,15 @@ function AgentCard({ item, open, panelId, comments, onToggle }: { item: Tool; op
 export function ToolLine({ item }: { item: Tool }) {
   const t = useT();
   const dispatch = useAppDispatch();
-  const open = useAppSelector((s) => selectToolOpen(s, item.id));
-  const comments = useAppSelector((s) => selectToolCommentCounts(s)[item.id] ?? 0);
-  const end = useAppSelector((s) => selectToolAnchorEnds(s)[item.id] ?? 0);
+  const key = scopedId(useContext(FeedScope).agent, item.id); // the chat's line and a subagent's tab's line of one id are two lines
+  const open = useAppSelector((s) => selectToolOpen(s, key));
+  const comments = useAppSelector((s) => selectToolCommentCounts(s)[key] ?? 0);
+  const end = useAppSelector((s) => selectToolAnchorEnds(s)[key] ?? 0);
   const panelId = useId();
   if (isAgentTool(item.name)) {
     return (
       <div data-kind="tool">
-        <AgentCard item={item} open={open} panelId={panelId} comments={comments} onToggle={() => dispatch(toggleTool(item.id))} />
+        <AgentCard item={item} open={open} panelId={panelId} comments={comments} onToggle={() => dispatch(toggleTool(key))} />
         {open && <Panel item={item} id={panelId} end={end} />}
       </div>
     );
@@ -166,7 +167,7 @@ export function ToolLine({ item }: { item: Tool }) {
         type="button"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        onClick={() => dispatch(toggleTool(item.id))}
+        onClick={() => dispatch(toggleTool(key))}
         data-anchor-skip
         className={
           'my-2.5 block w-full cursor-pointer truncate rounded-sm text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring font-mono text-[11.5px] leading-normal ' +
