@@ -60,6 +60,33 @@ export function connect(
   };
   open();
 
+  // a page put into the back/forward cache (a navigation to another URL, e.g. adding `?nudge`) keeps its socket open:
+  // the server still sees it as the owner past the reload grace, and the next page lands on "already open". So close
+  // on the way in; a restored page reconnects as on a drop (`taken` stays down: that is the user's call)
+  const onHide = (e: PageTransitionEvent) => {
+    if (!e.persisted || stopped) return;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    const sock = ws;
+    ws = null;
+    if (sock) sock.onclose = null;
+    sock?.close();
+    hidden = true;
+  };
+  const onShow = (e: PageTransitionEvent) => {
+    if (!e.persisted || !hidden) return;
+    hidden = false;
+    if (!reportedClosed) {
+      reportedClosed = true;
+      onState('closed');
+    }
+    if (!stopped) open();
+  };
+  let hidden = false;
+  const win = typeof window === 'undefined' ? null : window;
+  win?.addEventListener('pagehide', onHide);
+  win?.addEventListener('pageshow', onShow);
+
   return {
     send(m) {
       if (!ws || ws.readyState !== WS.OPEN || (reportedClosed && m.type !== 'takeover')) return false; // not attached yet (grace, occupied): only `takeover` goes out
@@ -75,6 +102,8 @@ export function connect(
     },
     close() {
       stopped = true;
+      win?.removeEventListener('pagehide', onHide);
+      win?.removeEventListener('pageshow', onShow);
       if (timer) clearTimeout(timer);
       timer = null;
       ws?.close();

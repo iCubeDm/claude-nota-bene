@@ -140,4 +140,22 @@ describe('defaultSocketUrl', () => {
     vi.advanceTimersByTime(1000);
     expect(FakeWS.instances[1].url).toBe('ws://x/ws?n=1');
   });
+
+  it('a page put into the back/forward cache closes its socket (the next page must not wait out the owner), and reopens when restored', () => {
+    // other tests' connections stay open and hear the same window events: count only this one's sockets
+    const mine = () => FakeWS.instances.filter((w) => w.url === 'ws://bf/ws');
+    const c = connect('ws://bf/ws', () => {}, () => {}, WS);
+    mine()[0].open();
+    replay(mine()[0]);
+    dispatchEvent(Object.assign(new Event('pagehide'), { persisted: true }));
+    expect(mine()[0].readyState).toBe(3);
+    vi.advanceTimersByTime(5000);
+    expect(mine()).toHaveLength(1); // no retry from inside the cache
+    dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    expect(mine()).toHaveLength(2);
+    c.close();
+    dispatchEvent(Object.assign(new Event('pagehide'), { persisted: true }));
+    dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    expect(mine()).toHaveLength(2); // closed for good: the listeners are gone
+  });
 });
