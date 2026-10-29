@@ -14,14 +14,16 @@ export const tasksSlice = createSlice({
 /** The first protocol whose server takes `task-stop` / `task-background` and serves `/task-output`: below it the controls are absent, not disabled. */
 export const TASKS_PROTOCOL = 8;
 
-/** The drawer's state: only whether it is open (the rows come from `tasks`). */
+/** The drawer's state: whether it is open (the rows come from `tasks`), and how many task refusals the server has sent. */
 export const tasksUiSlice = createSlice({
   name: 'tasksUi',
-  initialState: { open: false },
+  initialState: { open: false, refusals: 0 },
   reducers: {
     setDrawer: (s, a: PayloadAction<boolean>) => void (s.open = a.payload),
     toggleDrawer: (s) => void (s.open = !s.open),
   },
+  // the server refused a stop / to-background (its `task` error): a button waiting for its answer may try again
+  extraReducers: (b) => b.addCase(serverEvent, (s, a) => void (a.payload.kind === 'server-error' && a.payload.where === 'task' && s.refusals++)),
 });
 export const { setDrawer, toggleDrawer } = tasksUiSlice.actions;
 export const selectDrawerOpen = (s: RootState): boolean => s.tasksUi.open;
@@ -32,8 +34,9 @@ export const selectLiveCalls = createSelector([(s: RootState) => s.tasks], (t): 
 
 export const selectTasks = (s: RootState): TasksState => s.tasks;
 /** How many tasks run (what the indicator, the pulse and the favicon count). */
-export const selectRunningCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status === 'running').length);
-export const selectFinishedCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status !== 'running').length);
+export const selectRunningCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status === 'running' && !x.ambient).length);
+/** Finished tasks, not counting watchers (`ambient`, listed in the drawer but never activity). */
+export const selectFinishedCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status !== 'running' && !x.ambient).length);
 
 export type TaskRow = { id: string; task: Task; depth: number };
 /**
@@ -42,7 +45,14 @@ export type TaskRow = { id: string; task: Task; depth: number };
  * or pushed out by the cap) stands on its own.
  */
 export const selectTaskRows = createSelector([selectTasks], (t): TaskRow[] => {
-  const ordered = orderedTasks(t);
+  // a finished parent with a running descendant is shown with the running rows (the live child must not sink into the finished block)
+  const ordered0 = orderedTasks(t);
+  const live = new Set<string>();
+  for (const [id, x] of ordered0) {
+    if (x.status !== 'running') continue;
+    for (let p: string | undefined = id, n = 0; p && !live.has(p) && n < 50; p = t[p]?.parent, n++) live.add(p);
+  }
+  const ordered = [...ordered0.filter(([id]) => live.has(id)), ...ordered0.filter(([id]) => !live.has(id))];
   const kids = new Map<string, [string, Task][]>();
   for (const e of ordered) {
     const p = e[1].parent;
@@ -60,10 +70,38 @@ export const selectTaskRows = createSelector([selectTasks], (t): TaskRow[] => {
   return rows;
 });
 
-/** The running task started by the tool call `call`, if any. */
-export const selectTaskByCall = (s: RootState, call: string): { id: string; task: Task } | undefined => {
-  const e = Object.entries(s.tasks).find(([, x]) => x.call === call && x.status === 'running');
-  return e && { id: e[0], task: e[1] };
+/** The id of the running task started by the tool call `call`, if any (a string, so a selector on it is stable). */
+export const selectTaskIdByCall = (s: RootState, call: string): string | undefined =>
+  Object.entries(s.tasks).find(([, x]) => x.call === call && x.status === 'running')?.[0];
+
+/** How the task that started the tool call `call` ended, when it ended badly (the card says so instead of "done"). */
+export const selectCallEnd = (s: RootState, call: string): 'failed' | 'stopped' | undefined => {
+  const e = Object.values(s.tasks).find((x) => x.call === call && (x.status === 'failed' || x.status === 'stopped'));
+  return e?.status === 'failed' || e?.status === 'stopped' ? e.status : undefined;
+};
+
+/** The ids of the tool calls that have their result, in the chat and in every loaded subagent feed: one scan per change, not one per button. */
+export const selectResultedIds = createSelector(
+  [(s: RootState) => s.feed.items, (s: RootState) => s.subagents.byTool],
+  (items, byTool): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    const scan = (list: typeof items) => { for (const it of list) if (it.kind === 'tool' && it.result) ids.add(it.id); };
+    scan(items);
+    for (const e of Object.values(byTool)) scan(e.feed.items);
+    return ids;
+  },
+);
+
+/**
+ * "To background" is for a running task that blocks its tool call. The CLI says so (`bg`: false); when it did not, the
+ * call having no result yet stands in, and a task of the main thread is never in the foreground once its turn is over
+ * (a blocking call cannot outlive the turn). Nothing to send without the call's id.
+ */
+export const selectForeground = (s: RootState, id: string): boolean => {
+  const x = s.tasks[id];
+  if (!x || x.status !== 'running' || !x.call) return false;
+  if (x.bg !== undefined) return !x.bg;
+  return !selectResultedIds(s).has(x.call) && (!!x.parent || s.feed.busy);
 };
 
 /** The server understands the task controls (stop, to background, shell output). */

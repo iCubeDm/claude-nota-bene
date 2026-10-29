@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { WireAgentEvent } from '@nota-bene/shared';
 import { makeStore, serverEvent } from '@/store/store.ts';
-import { selectFinishedCount, selectRunningCount, selectTaskByCall, selectTaskRows } from './slice.ts';
+import { selectFinishedCount, selectRunningCount, selectTaskIdByCall, selectTaskRows } from './slice.ts';
 
 type Task = Extract<WireAgentEvent, { t: 'task' }>;
 function setup() {
@@ -47,7 +47,15 @@ it('a finished child stays under its running parent', () => {
 it('selectTaskByCall finds the running task of a call only', () => {
   const { store, task } = setup();
   task(start('a', { call: 'toolu_A' }));
-  expect(selectTaskByCall(store.getState(), 'toolu_A')?.id).toBe('a');
+  expect(selectTaskIdByCall(store.getState(), 'toolu_A')).toBe('a');
   task(done('a'));
-  expect(selectTaskByCall(store.getState(), 'toolu_A')).toBeUndefined();
+  expect(selectTaskIdByCall(store.getState(), 'toolu_A')).toBeUndefined();
+});
+
+it('selectTaskIdByCall is a plain id: the same value while nothing changes, whatever else is dispatched', () => {
+  const { store, task } = setup();
+  task(start('a', { call: 'toolu_A' }));
+  const a = selectTaskIdByCall(store.getState(), 'toolu_A');
+  task(start('b'));
+  expect(selectTaskIdByCall(store.getState(), 'toolu_A')).toBe(a);
 });

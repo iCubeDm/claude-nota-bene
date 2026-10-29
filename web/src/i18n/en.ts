@@ -315,6 +315,7 @@ export const en: Dict = {
   taskOpen: 'open',
   taskStop: 'Stop',
   taskStopConfirm: 'Stop?',
+  taskStopping: 'Stopping…',
   taskStopTip: 'Stop the task (a second click confirms)',
   taskBackground: 'To background',
   taskBackgroundTip: 'Move the task to the background: the call returns at once, the task goes on',

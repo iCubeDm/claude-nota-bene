@@ -6,7 +6,7 @@ import { collapsedLength, rawIndexOf } from '@/anchors/text.ts';
 import { openAgent } from '@/tabs/slice.ts';
 import { isAgentTool, selectSubagent } from '@/subagent/slice.ts';
 import { CardMenu } from '@/tasks/CardMenu.tsx';
-import { selectLiveCalls } from '@/tasks/slice.ts';
+import { selectCallEnd, selectLiveCalls } from '@/tasks/slice.ts';
 import { FeedScope } from './scope.ts';
 import { scopedId, selectToolAnchorEnds, selectToolCommentCounts, selectToolOpen, toggleTool, toolSrcId } from './uiSlice.ts';
 
@@ -108,9 +108,11 @@ function AgentCard({ item, open, panelId, comments, onToggle }: { item: Tool; op
   const sub = useAppSelector((s) => selectSubagent(s, item.id));
   // a task of this call is still live: a background agent answers at once ("launched") and goes on
   const live = useAppSelector((s) => selectLiveCalls(s).has(item.id));
+  // a background agent's placeholder result says "launched"; how its task really ended is the task's word
+  const ended = useAppSelector((s) => selectCallEnd(s, item.id));
   const type = str(item.input.subagent_type) || sub?.type || 'general-purpose';
   const description = str(item.input.description) || sub?.description || '';
-  const status = item.result?.isError ? 'error' : live ? 'running' : item.result ? 'done' : busy ? 'running' : 'stopped';
+  const status = item.result?.isError || (!live && ended === 'failed') ? 'error' : live ? 'running' : ended === 'stopped' ? 'stopped' : item.result ? 'done' : busy ? 'running' : 'stopped';
   const color = status === 'error' ? 'text-destructive' : status === 'running' ? 'text-nb-accent' : 'text-muted-foreground';
   return (
     <div

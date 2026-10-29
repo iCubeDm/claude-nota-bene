@@ -312,6 +312,7 @@ export const ru = {
   taskOpen: 'открыть',
   taskStop: 'Стоп',
   taskStopConfirm: 'Стоп?',
+  taskStopping: 'Останавливаю…',
   taskStopTip: 'Остановить задачу (второй клик подтверждает)',
   taskBackground: 'В фон',
   taskBackgroundTip: 'Отправить задачу в фон: вызов вернётся сразу, задача продолжит работать',

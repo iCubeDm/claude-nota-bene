@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { useAppSelector } from '@/store/store.ts';
-import { selectTaskByCall, selectTaskControls } from './slice.ts';
+import { selectTaskControls, selectTaskIdByCall } from './slice.ts';
 import { BackgroundButton, BTN, StopButton, useForeground } from './TaskButtons.tsx';
 
 /**
@@ -10,9 +10,10 @@ import { BackgroundButton, BTN, StopButton, useForeground } from './TaskButtons.
  */
 export function CardMenu({ call }: { call: string }) {
   const t = useT();
-  const hit = useAppSelector((s) => selectTaskByCall(s, call));
+  const id = useAppSelector((s) => selectTaskIdByCall(s, call));
+  const task = useAppSelector((s) => (id ? s.tasks[id] : undefined));
   const controls = useAppSelector(selectTaskControls);
-  const foreground = useForeground(hit?.task);
+  const foreground = useForeground(id);
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -23,15 +24,15 @@ export function CardMenu({ call }: { call: string }) {
     window.addEventListener('keydown', onKey, true);
     return () => { document.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey, true); };
   }, [open]);
-  useEffect(() => { if (!hit) setOpen(false); }, [hit]);
-  if (!hit || !controls) return null;
+  useEffect(() => { if (!id) setOpen(false); }, [id]);
+  if (!id || !task || !controls) return null;
   return (
     <span ref={box} data-anchor-skip className="relative flex-none">
       <button type="button" data-agent-menu aria-haspopup="menu" aria-expanded={open} aria-label={t('taskMenu')} title={t('taskMenu')} onClick={() => setOpen((v) => !v)} className={`${BTN} px-1.5`}>⋯</button>
       {open && (
         <span role="menu" data-agent-menu-items className="absolute top-full right-0 z-[16] mt-1 flex flex-col gap-1 rounded-md border border-border-soft bg-card p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.4)]">
-          <StopButton id={hit.id} className={`${BTN} w-full text-left whitespace-nowrap`} />
-          {foreground && <BackgroundButton task={hit.task} className={`${BTN} w-full text-left whitespace-nowrap`} after={() => setOpen(false)} />}
+          <StopButton id={id} className={`${BTN} w-full text-left whitespace-nowrap`} />
+          {foreground && <BackgroundButton id={id} task={task} className={`${BTN} w-full text-left whitespace-nowrap`} after={() => setOpen(false)} />}
         </span>
       )}
     </span>

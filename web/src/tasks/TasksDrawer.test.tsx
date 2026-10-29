@@ -7,7 +7,7 @@ import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { selectTabs } from '@/tabs/slice.ts';
 import { selectDrawerOpen } from './slice.ts';
-import { STOP_CONFIRM_MS } from './TaskButtons.tsx';
+import { STOP_CONFIRM_MS, STOP_WAIT_MS } from './TaskButtons.tsx';
 
 type Task = Extract<WireAgentEvent, { t: 'task' }>;
 
@@ -200,15 +200,68 @@ describe('actions', () => {
     expect(row('a').querySelector('[data-task-stop]')).toBeNull();
   });
 
-  it('To background: only a running task whose call has no result yet; it sends task-background with the call', () => {
+  it('To background: when the CLI says bg:false it is offered, bg:true never; it sends task-background with the call', () => {
     const { sent, task, tool } = setup();
-    tool('toolu_FG', false); tool('toolu_BG', true);
-    task(start('fg', { call: 'toolu_FG' })); task(start('bg', { call: 'toolu_BG' })); task(start('nocall'));
+    tool('toolu_FG', false); tool('toolu_BG', false);
+    task(start('fg', { call: 'toolu_FG', bg: false })); task(start('bg', { call: 'toolu_BG', bg: true })); task(start('nocall', { bg: false }));
     fireEvent.click(indicator()!);
-    expect(row('bg').querySelector('[data-task-background]')).toBeNull();
+    expect(row('bg').querySelector('[data-task-background]')).toBeNull(); // in the background whatever the feed says
     expect(row('nocall').querySelector('[data-task-background]')).toBeNull();
     fireEvent.click(row('fg').querySelector('[data-task-background]')!);
     expect(sent.filter((m) => m.type === 'task-background')).toEqual([{ type: 'task-background', toolUseId: 'toolu_FG' }]);
+    // a later move to the background (task_updated) takes the button away
+    task({ t: 'task', id: 'fg', phase: 'updated', bg: true });
+    expect(row('fg').querySelector('[data-task-background]')).toBeNull();
+  });
+
+  it('bg not said by the CLI: the call having no result stands in, but a main-thread task is not foreground once the turn is over', () => {
+    const { task, tool, ev } = setup();
+    tool('toolu_A', false); tool('toolu_B', true); tool('toolu_C', false);
+    task(start('a', { call: 'toolu_A' })); task(start('b', { call: 'toolu_B' })); task(start('c', { call: 'toolu_C', parent: 'p' }));
+    task(start('p', { type: 'local_agent' }));
+    fireEvent.click(indicator()!);
+    const has = (id: string) => !!row(id).querySelector('[data-task-background]');
+    expect([has('a'), has('b'), has('c')]).toEqual([false, false, true]); // the turn is over: only the subagent's child may still block
+    ev({ kind: 'user', id: 'u1', text: 'go', ts: 1 }); // a turn is running
+    expect([has('a'), has('b'), has('c')]).toEqual([true, false, true]);
+  });
+
+  it('Stop waits for its answer: "Stopping…", disabled, no second send; a refusal from the server offers it again', () => {
+    const { sent, task, ev } = setup();
+    task(start('a'));
+    fireEvent.click(indicator()!);
+    const stop = () => row('a').querySelector<HTMLButtonElement>('[data-task-stop]')!;
+    fireEvent.click(stop()); fireEvent.click(stop());
+    expect(stop()).toHaveTextContent('Stopping…');
+    expect(stop().disabled).toBe(true);
+    fireEvent.click(stop());
+    expect(sent.filter((m) => m.type === 'task-stop')).toHaveLength(1);
+    ev({ kind: 'server-error', where: 'task', message: 'cannot stop a' });
+    expect(stop()).toHaveTextContent('Stop');
+    expect(stop().disabled).toBe(false);
+    fireEvent.click(stop()); fireEvent.click(stop());
+    expect(stop()).toHaveTextContent('Stopping…');
+    act(() => void vi.advanceTimersByTime(STOP_WAIT_MS + 10)); // no answer at all: not stuck for ever
+    expect(stop()).toHaveTextContent('Stop');
+  });
+
+  it('Open is not offered for a remote agent (it has no subagent conversation here)', () => {
+    const { task } = setup();
+    task(start('r', { type: 'remote_agent', call: 'toolu_R' })); task(start('l', { type: 'local_agent', call: 'toolu_L' }));
+    fireEvent.click(indicator()!);
+    expect(row('r').querySelector('[data-task-open]')).toBeNull();
+    expect(row('l').querySelector('[data-task-open]')).not.toBeNull();
+  });
+
+  it('a watcher (ambient shell) is listed but not counted; a running child of a finished parent stays with the running rows', () => {
+    const { task } = setup();
+    task(start('w', { ambient: true }));
+    expect(indicator()).toBeNull(); // nothing but a watcher: no indicator
+    task(start('p', { type: 'local_agent' })); task(start('k', { parent: 'p' })); task(start('o')); task({ t: 'task', id: 'p', phase: 'done' });
+    expect(indicator()).toHaveTextContent('2 tasks'); // k and o, not w
+    fireEvent.click(indicator()!);
+    // the finished parent leads its running child, and both stay above the finished block (here there is none left)
+    expect([...document.querySelectorAll('[data-task]')].map((n) => n.getAttribute('data-task'))).toEqual(['w', 'o', 'p', 'k']);
   });
 
   it('a server older than protocol 8 gets no Stop and no To background (absent, not disabled); Open of a shell is absent too', () => {
@@ -222,5 +275,22 @@ describe('actions', () => {
       expect(row('a').querySelector('[data-task-background]')).toBeNull();
       expect(row('a').querySelector('[data-task-open]')).toBeNull();
     }
+  });
+});
+
+describe('Esc and the comment popup', () => {
+  it('one Esc closes one layer: the drawer first, the draft in an open popup survives', () => {
+    const { store, task } = setup();
+    task(start('a'));
+    fireEvent.click(indicator()!);
+    const popup = document.createElement('div');
+    let popupEsc = 0;
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') popupEsc++; }); // what CommentPopup does: a document listener
+    document.body.append(popup);
+    fireEvent.keyDown(popup, { key: 'Escape', code: 'Escape', bubbles: true });
+    expect(selectDrawerOpen(store.getState())).toBe(false);
+    expect(popupEsc).toBe(0);
+    fireEvent.keyDown(popup, { key: 'Escape', code: 'Escape', bubbles: true }); // the next Esc is the popup's
+    expect(popupEsc).toBe(1);
   });
 });

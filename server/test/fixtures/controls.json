@@ -60,7 +60,7 @@
         { "type": "system", "subtype": "task_started", "task_id": "e2e-sh-run", "description": "tail -f build.log", "task_type": "local_bash" },
         { "type": "system", "subtype": "task_started", "task_id": "e2e-sh-done", "description": "npm run lint", "task_type": "local_bash" },
         { "type": "system", "subtype": "task_notification", "task_id": "e2e-sh-done", "status": "completed" },
-        { "type": "system", "subtype": "task_started", "task_id": "e2e-ag-bg", "description": "Index the docs", "task_type": "local_agent", "tool_use_id": "toolu_e2e_bg" },
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-ag-bg", "description": "Index the docs", "task_type": "local_agent", "tool_use_id": "toolu_e2e_bg", "is_backgrounded": true },
         { "type": "system", "subtype": "task_progress", "task_id": "e2e-ag-bg", "usage": { "total_tokens": 12300 }, "last_tool_name": "Read", "summary": "reading docs/architecture.md" },
         { "type": "system", "subtype": "task_started", "task_id": "e2e-sh-child", "description": "grep -rn TODO docs", "task_type": "local_bash", "parent_task_id": "e2e-ag-bg" }
       ]

@@ -42,6 +42,7 @@ export function TasksDrawer() {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="menu"], [role="listbox"]')) return;
       e.preventDefault();
+      e.stopImmediatePropagation(); // one Esc closes one layer (a comment popup or picker open under it keeps its draft)
       close();
     };
     const onDown = (e: MouseEvent) => {
@@ -74,7 +75,7 @@ export function TasksDrawer() {
           {rows.map(({ id, task, depth }) => {
             const icon = ICON[task.status];
             const meta = [task.type, fmtElapsed((task.end ?? now) - task.start), task.tokens ? `${fmtK(task.tokens)} tok` : '', task.tool].filter(Boolean).join(' · ');
-            const canOpen = (task.kind === 'agent' && !!task.call && protocol >= AGENT_PROTOCOL) || (task.kind === 'shell' && protocol >= TASKS_PROTOCOL);
+            const canOpen = (task.kind === 'agent' && task.type !== 'remote_agent' && !!task.call && protocol >= AGENT_PROTOCOL) || (task.kind === 'shell' && protocol >= TASKS_PROTOCOL);
             return (
               <li
                 key={id}
@@ -103,7 +104,7 @@ export function TasksDrawer() {
                   </button>
                 )}
                 {controls && task.status === 'running' && <StopButton id={id} />}
-                {task.status === 'running' && <BackgroundButton task={task} />}
+                {task.status === 'running' && <BackgroundButton id={id} task={task} />}
               </li>
             );
           })}
