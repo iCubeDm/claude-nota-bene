@@ -961,6 +961,26 @@ test('a chat video opens in a file tab at the time it was played; /attach media 
   await expect(tabOf(page, 'media/a.mp4')).toHaveAttribute('aria-selected', 'true');
   const opened = page.locator('video[data-media-tab="file:media/a.mp4"]');
   await expect.poll(() => opened.evaluate((e: HTMLVideoElement) => e.currentTime)).toBeGreaterThan(11);
+  expect(await opened.evaluate((e: HTMLVideoElement) => e.paused)).toBe(true); // paused in the chat: paused here
+});
+
+test('a playing chat video plays on in its file tab; the chat copy pauses (user, 2026-10-29) @files', async ({ page }) => {
+  test.skip(!hasFfmpeg, 'needs ffmpeg on PATH: e2e/serve.mjs generates the mp4 fixtures with it');
+  await start(page);
+  const text = uniq('embed media');
+  await composer(page).fill(text);
+  await composer(page).press('Enter');
+  await settled(page, text);
+  const r = reply(page, text);
+  const video = r.locator('video');
+  await expect.poll(() => video.evaluate((e: HTMLVideoElement) => e.readyState)).toBeGreaterThanOrEqual(1);
+  await video.evaluate((e: HTMLVideoElement) => { e.muted = true; e.currentTime = 12; return e.play(); });
+  const wrap = r.locator('.md-media').first();
+  await wrap.hover();
+  await wrap.getByRole('button', { name: /Open in a tab|Открыть во вкладке/ }).click();
+  const opened = page.locator('video[data-media-tab="file:media/a.mp4"]');
+  await expect.poll(() => opened.evaluate((e: HTMLVideoElement) => !e.paused && e.currentTime > 11)).toBe(true);
+  expect(await video.evaluate((e: HTMLVideoElement) => e.paused)).toBe(true);
 });
 
 // our bar on a video embedded in a chat reply (same fake turn as above)

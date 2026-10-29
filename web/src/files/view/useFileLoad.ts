@@ -3,11 +3,18 @@ import { selectMediaComments } from '@/comments/slice.ts';
 import { selectTurnSeq, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import type { FileKind } from '../kinds.ts';
 import { fileTabId } from '@/tabs/slice.ts';
-import { takeStartAt } from '../startAt.ts';
+import { takeStartAt, type StartAt } from '../startAt.ts';
 import { dropFileLoad, setFileLoad, setFileVersion } from '../slice.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const PROBE = 8192;
+
+/** Applies a chat "open in a tab" start; one that was playing plays on (the click was the user's gesture). */
+function startFrom(el: HTMLMediaElement, s: StartAt | undefined) {
+  if (!s) return;
+  el.currentTime = s.at;
+  if (s.play) el.play().catch(() => { /* refused (no activation, headless): stays paused at that time */ });
+}
 
 export type Loaded =
   | { s: 'text'; text: string }
@@ -109,15 +116,13 @@ export function useFileLoad({ path, src, ref, url, kind, media, markableKind, ac
   const onMediaMeta = (e: { currentTarget: HTMLMediaElement }) => {
     if (resumeAt.current > 0) e.currentTarget.currentTime = resumeAt.current;
     resumeAt.current = 0;
-    const at = takeStartAt(tabId); // "open in a tab" from the chat: a fresh tab starts here
-    if (at !== undefined) e.currentTarget.currentTime = at;
+    startFrom(e.currentTarget, takeStartAt(tabId)); // "open in a tab" from the chat: a fresh tab starts here
   };
   // the same tab already open with its media loaded: no new loadedmetadata, so apply on (re)activation
   useEffect(() => {
     const el = mediaEl.current;
     if (!active || !media || !el || el.readyState < 1) return;
-    const at = takeStartAt(tabId);
-    if (at !== undefined) el.currentTime = at;
+    startFrom(el, takeStartAt(tabId));
   }, [active, media, tabId]);
 
   const loadedRev = useRef<{ path: string; rev: number } | null>(null);

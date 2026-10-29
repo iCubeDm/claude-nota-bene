@@ -183,10 +183,10 @@ export const Markdown = memo(
         const m = mb.parentElement?.querySelector('img, video, audio');
         const open = m && openMediaFile(m);
         if (!open || !redux) return;
-        // a played video/audio opens at that time (consumed once by the file view, see files/startAt.ts)
+        // a played video/audio opens at that time, a playing one plays on (consumed once by the file view, see files/startAt.ts)
         if (m instanceof HTMLMediaElement && m.currentTime > 0) {
           const f = fileOfImage(m)!;
-          setStartAt(fileTabId(f.path, f.src), m.currentTime);
+          setStartAt(fileTabId(f.path, f.src), m.currentTime, !m.paused && !m.ended);
         }
         redux.store.dispatch(open);
         return;

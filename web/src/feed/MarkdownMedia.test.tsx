@@ -48,8 +48,18 @@ describe('the open-in-a-tab button on embedded media', () => {
     expect(takeStartAt('file:a.mp4')).toBeUndefined();
     container.querySelector('video')!.currentTime = 12.5;
     fireEvent.click(container.querySelector('button.md-open-media')!);
-    expect(takeStartAt('file:a.mp4')).toBe(12.5);
+    expect(takeStartAt('file:a.mp4')).toEqual({ at: 12.5, play: false });
     expect(takeStartAt('file:a.mp4')).toBeUndefined();
+  });
+
+  it('a playing video opens playing on', () => {
+    const st = store();
+    const { container } = render(<Provider store={st}><Markdown text="![v](a.mp4)" final /></Provider>);
+    const v = container.querySelector('video')!;
+    v.currentTime = 3;
+    Object.defineProperty(v, 'paused', { get: () => false, configurable: true });
+    fireEvent.click(container.querySelector('button.md-open-media')!);
+    expect(takeStartAt('file:a.mp4')).toEqual({ at: 3, play: true });
   });
 
   it('works without a store (inert)', () => {

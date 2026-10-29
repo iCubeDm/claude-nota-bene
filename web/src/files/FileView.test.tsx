@@ -537,3 +537,20 @@ it('a start time set by the chat button is applied once the metadata is loaded, 
   fireEvent(v, new Event('loadedmetadata'));
   expect(v.currentTime).toBe(1);
 });
+
+it('a start that was playing in the chat plays on; a paused one does not', () => {
+  setStartAt('file:v.mp4', 7.5, true);
+  const { r } = setup('v.mp4');
+  const v = r.container.querySelector('video')!;
+  const play = vi.spyOn(v, 'play').mockResolvedValue();
+  fireEvent(v, new Event('loadedmetadata'));
+  expect(v.currentTime).toBe(7.5);
+  expect(play).toHaveBeenCalledTimes(1);
+  cleanup();
+  setStartAt('file:w.mp4', 2);
+  const w = setup('w.mp4').r.container.querySelector('video')!;
+  const playW = vi.spyOn(w, 'play').mockResolvedValue();
+  fireEvent(w, new Event('loadedmetadata'));
+  expect(w.currentTime).toBe(2);
+  expect(playW).not.toHaveBeenCalled();
+});

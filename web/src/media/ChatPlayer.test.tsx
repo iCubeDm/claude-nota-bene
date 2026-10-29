@@ -85,18 +85,18 @@ it('a project video shows its media comments as ticks; a click opens the tab at 
   expect(ticks()).toHaveLength(2); // only the project file's bar
   fireEvent.click(ticks()[0]);
   expect(selectActiveTab(store.getState())).toMatchObject({ kind: 'file', path: 'v.mp4' });
-  expect(takeStartAt('file:v.mp4')).toBe(41);
+  expect(takeStartAt('file:v.mp4')).toEqual({ at: 41, play: false });
   expect(st.time).toBe(20); // the chat copy is not seeked
 });
 
-it('a playing chat video pauses when "open" switches to its file tab, and the tab starts where it was (user, 2026-10-29)', () => {
+it('a playing chat video pauses when "open" switches to its file tab, and the tab starts where it was, playing on (user, 2026-10-29)', () => {
   const { container, store } = mount('![v](v.mp4)');
   st.paused = false;
   st.time = 33;
   fireEvent.click(container.querySelector('button.md-open-media')!);
   expect(selectActiveTab(store.getState())).toMatchObject({ kind: 'file', path: 'v.mp4' });
   expect(pause).toHaveBeenCalled();
-  expect(takeStartAt('file:v.mp4')).toBe(33);
+  expect(takeStartAt('file:v.mp4')).toEqual({ at: 33, play: true });
 });
 
 it('a bar narrower than 360 px drops speed and PiP', () => {
