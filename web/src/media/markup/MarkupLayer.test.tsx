@@ -34,7 +34,7 @@ function image() {
   return img;
 }
 
-function setup(media: HTMLImageElement | HTMLVideoElement = image(), protocol = 4, held = false) {
+function setup(media: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement = image(), protocol = 4, held = false) {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   store.dispatch(serverEvent({ kind: 'hello', protocol } as ServerEvent));
   const onAdd = vi.fn();
@@ -341,4 +341,24 @@ it('held (the comment popup is open): the mode keys are off', () => {
   expect(onAdd).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(draft()).toMatchObject({ on: true, tool: 'rect' });
+});
+
+
+it('a 3D canvas is offered markup only from protocol 9 (an older server would drop the camera); the shapes use the canvas size', () => {
+  const c = document.createElement('canvas');
+  c.width = 2000;
+  c.height = 1000;
+  c.getBoundingClientRect = () => rect(0, 0, 1000, 1000);
+  pane.append(c);
+  setup(c, 8);
+  expect(screen.queryByRole('button', { name: /mark up/i })).toBeNull();
+  cleanup();
+  const s = setup(c, 9);
+  fireEvent.click(toggle());
+  expect(s.draft().on).toBe(true);
+  expect(layer()).toBeTruthy();
+  drag([[100, 300], [300, 500]]);
+  const sh = s.draft().shapes[0];
+  expect(sh).toMatchObject({ kind: 'rect', x: 0.1, w: 0.2 });
+  expect((sh as { y: number }).y).toBeCloseTo(0.1, 5); // the 1000x500 content box sits at y 250
 });

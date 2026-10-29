@@ -2,6 +2,9 @@ import type { ModelCamera } from '@nota-bene/shared';
 import { tIn, type Lang } from '@/i18n/index.ts';
 import type { CameraPose } from './api.ts';
 
+/** The protocol a server must announce for the client to offer markup on a 3D view (it keeps the anchor's `camera`). */
+export const MODEL_MARKUP_PROTOCOL = 9;
+
 /** `n` to 3 significant digits as plain text (no exponent, no "-0"): 1.23456 → "1.23", 1234.5 → "1230". */
 export function sig3(n: number): string {
   const r = Number(n.toPrecision(3));

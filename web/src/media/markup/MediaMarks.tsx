@@ -51,8 +51,10 @@ function usePausedAt(media: Media): number | null {
  * placed only on resizes. With no mark to show, nothing is mounted or observed.
  */
 /** `refName`: the file's ref for another source (not `ref`: that name is React's). */
-export function MediaMarks({ tabId, media, fit, path, refName: ref }: {
+export function MediaMarks({ tabId, media, fit, path, refName: ref, atView }: {
   tabId: string; media: Media; fit: 'contain' | 'natural'; path: string; refName?: string;
+  /** a 3D view (canvas): the ids of the comments whose camera the view is at now; only those show (like a video mark at its time) */
+  atView?: ReadonlySet<string>;
 }) {
   const t = useT();
   const dispatch = useAppDispatch();
@@ -65,9 +67,10 @@ export function MediaMarks({ tabId, media, fit, path, refName: ref }: {
     if (at === null) return [];
     // a sent mark drawn on another version of the file points at what is no longer there (a pending one stays, flagged)
     const live = all.filter((c) => !(c.status === 'sent' && changedSince(c, current)));
-    const list = video ? live.filter((c) => c.anchor.time !== undefined && Math.abs(c.anchor.time - at) <= TIME_TOLERANCE) : live;
+    const list = video ? live.filter((c) => c.anchor.time !== undefined && Math.abs(c.anchor.time - at) <= TIME_TOLERANCE)
+      : media instanceof HTMLCanvasElement ? live.filter((c) => atView?.has(c.id)) : live;
     return list.some((c) => c.status === 'sent') ? [...list].sort((a, b) => (a.status === b.status ? 0 : a.status === 'sent' ? -1 : 1)) : list;
-  }, [all, at, video, current]);
+  }, [all, at, video, media, atView, current]);
 
   // the paths of a comment, per comment object (an edit of the text makes a new object; that is rare and cheap)
   const cache = useRef(new WeakMap<MediaComment, { els: ReturnType<typeof shapeEls>; ds: string[] }>());

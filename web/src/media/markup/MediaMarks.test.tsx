@@ -146,3 +146,42 @@ it('a sent mark of another version of the file is not drawn; a pending one still
   expect(ids().sort()).toEqual(['pending-old', 'sent-same', 'sent-unversioned']);
   expect(pane.querySelector('g[data-hit="pending-old"] title')?.textContent).toMatch(/changed/i);
 });
+
+
+// ---- a 3D view: the marks of a comment show only where the camera is (the parent says which comments are at the view) ----
+const CAM = { position: [1, 2, 3] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 50 };
+function canvas() {
+  const c = document.createElement('canvas');
+  c.width = 2000;
+  c.height = 1000;
+  c.getBoundingClientRect = () => rect(0, 0, 1000, 500);
+  pane.append(c);
+  return c;
+}
+function setupModel(items: Comment[], atView: ReadonlySet<string>) {
+  const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+  act(() => void store.dispatch(serverEvent({ kind: 'comments', items })));
+  const c = canvas();
+  const ui = (at: ReadonlySet<string>) => <Provider store={store}><MediaMarks tabId="file:m.glb" media={c} fit="contain" path="m.glb" atView={at} /></Provider>;
+  const r = render(ui(atView));
+  return { r, ui, store };
+}
+
+it('a model comment\'s marks show only while its id is at the view', () => {
+  const a = comment('a', media('m.glb', [RED], { camera: CAM }));
+  const b = comment('b', media('m.glb', [BLUE], { camera: { ...CAM, position: [9, 9, 9] } }));
+  const { r, ui } = setupModel([a, b], new Set(['a']));
+  expect([...pane.querySelectorAll('[data-mark]')].map((g) => g.getAttribute('data-mark'))).toEqual(['a']);
+  r.rerender(ui(new Set()));
+  expect(pane.querySelector('svg[data-media-marks]')).toBeNull();
+  r.rerender(ui(new Set(['a', 'b'])));
+  expect(pane.querySelectorAll('[data-mark]').length).toBe(2);
+});
+
+it('a sent model comment drawn on another version of the file is not drawn even at its view', () => {
+  const a = comment('a', media('m.glb', [RED], { camera: CAM, version: 'v1' }), { status: 'sent' });
+  const { store } = setupModel([a], new Set(['a']));
+  expect(pane.querySelectorAll('[data-mark]').length).toBe(1);
+  act(() => void store.dispatch(setFileVersion({ path: 'm.glb', version: 'v2' })));
+  expect(pane.querySelector('svg[data-media-marks]')).toBeNull();
+});
