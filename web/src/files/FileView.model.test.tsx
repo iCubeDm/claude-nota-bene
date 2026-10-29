@@ -10,7 +10,7 @@ vi.mock('@/model/viewer.ts', () => ({
   createViewer: () => ({
     load: vi.fn(async () => ({ meshes: 1, triangles: 12, materials: 1, clips: [] })), clear: vi.fn(), resetView: vi.fn(),
     getPose: vi.fn(), setPose: vi.fn(), setClip: vi.fn(), setPlaying: vi.fn(), setBackground: vi.fn(), setVisible: vi.fn(),
-    snapshot: vi.fn(), dispose: vi.fn(),
+    snapshot: vi.fn(), dispose: vi.fn(), canvas: document.createElement('canvas'), setFrozen: vi.fn(), renderNow: vi.fn(),
   }),
 }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });

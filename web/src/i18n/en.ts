@@ -278,6 +278,8 @@ export const en: Dict = {
   modelClip: 'Animation',
   modelPlay: 'Play',
   camLine: (pos: string, target: string, fov: string) => `camera ${pos} → ${target}, fov ${fov}°`,
+  modelViews: 'Saved views',
+  modelViewGo: 'Go to this view',
   modelPause: 'Pause',
   // image attachments (M3-12)
   attach: 'Attach an image\nor paste from the clipboard ⌘V / drop into the window',

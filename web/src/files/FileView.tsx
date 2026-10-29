@@ -44,7 +44,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const marking = useAppSelector((s) => selectDraft(s, tabId).on);
   const markingRef = useRef(marking);
   markingRef.current = marking;
-  const load = useFileLoad({ path, src, ref, url, kind, media, markableKind, active, fixed, marking, markingRef });
+  const load = useFileLoad({ path, src, ref, url, kind, media, versioned: markableKind || kind === 'model', active, fixed, marking, markingRef });
   const { data, rev, loadedRev, failed, mediaUrl, resumeAt } = load;
   const markup = useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, mediaEl: load.mediaEl });
   const { markable } = markup;
@@ -95,7 +95,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
       {kind === 'model' ? (
-        <ModelPane path={path} src={src} tabId={tabId} active={active} reloadKey={load.bust} srcGone={srcGone} />
+        <ModelPane path={path} src={src} fileRef={ref} tabId={tabId} active={active} reloadKey={load.bust} srcGone={srcGone} />
       ) : media ? (
         <MediaBody
           kind={kind} path={path} fileRef={ref} tabId={tabId} active={active} marking={marking} natural={natural}

@@ -23,7 +23,7 @@ export async function deleteMarks(id: string): Promise<void> {
 }
 
 /** What only prepare knows for sure; merged into the anchor before the comment is added. */
-export type MediaAnchorPatch = Partial<Pick<MediaAnchor, 'scale' | 'version' | 'time'>>;
+export type MediaAnchorPatch = Partial<Pick<MediaAnchor, 'scale' | 'version' | 'time' | 'width' | 'height' | 'camera'>>;
 
 /** A HEAD that never answers must not hold Add forever: no version then. */
 const VERSION_WAIT_MS = 5000;

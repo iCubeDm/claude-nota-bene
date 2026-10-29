@@ -17,7 +17,6 @@ export function useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, me
   mediaEl: MutableRefObject<HTMLMediaElement | null>;
 }) {
   const t = useT();
-  const dispatch = useAppDispatch();
   // the media controller tracks this tab's <video|audio> while it is mounted (pause/PiP rules, the ▶ dot)
   const mediaCtl = useMedia();
   // the image or video the markup layer draws over (state: the layer mounts once the element exists)
@@ -37,18 +36,7 @@ export function useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, me
     };
   }, [mediaCtl, tabId, mediaEl]);
   const imgRef = useCallback((el: HTMLImageElement | null) => setMarkable(el), []);
-  // markup → comment. The version is the media's ETag, asked for when the mode is entered (absent for a branch
-  // source); prepare awaits that request, so an early Add still gets it. Nothing is written until Add (the popup runs
-  // `prepare` then), and the draft is cleared only once the comment exists.
-  const version = useRef<Promise<string | undefined> | undefined>(undefined);
-  useEffect(() => {
-    version.current = undefined;
-    if (!marking) return;
-    const ac = new AbortController();
-    version.current = headVersion(mediaUrl, ac.signal);
-    return () => ac.abort();
-  }, [marking, mediaUrl]);
-  const [markPopup, setMarkPopup] = useState<PendingComment | null>(null);
+  const { version, markPopup, setMarkPopup, closeMarkPopup, markAdded, saving, onPopupBusy } = useMarkPopup({ tabId, active, marking, mediaUrl });
   const onMarkAdd = useCallback((shapes: MediaShape[], at: DOMRect) => {
     const el = markable;
     if (!el) return;
@@ -66,6 +54,29 @@ export function useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, me
     const v = version.current;
     setMarkPopup({ anchor, rect: at, id, prepare: () => prepareMediaComment(id, el, anchor, { version: v }) });
   }, [markable, path, ref, t]);
+
+  return { markable, player, mediaRef, imgRef, markPopup, onMarkAdd, closeMarkPopup, markAdded, saving, onPopupBusy };
+}
+
+
+/**
+ * What a media tab's markup shares with a 3D tab's: the file version asked for when the mode is entered, the popup a
+ * drawing's Add opens, and the saving state. Nothing is written until Add (the popup runs `prepare` then), and the draft
+ * is cleared only once the comment exists.
+ */
+export function useMarkPopup({ tabId, active, marking, mediaUrl }: { tabId: string; active: boolean; marking: boolean; mediaUrl: string }) {
+  const dispatch = useAppDispatch();
+  // markup → comment. The version is the media's ETag, asked for when the mode is entered (absent for a branch
+  // source); prepare awaits that request, so an early Add still gets it.
+  const version = useRef<Promise<string | undefined> | undefined>(undefined);
+  useEffect(() => {
+    version.current = undefined;
+    if (!marking) return;
+    const ac = new AbortController();
+    version.current = headVersion(mediaUrl, ac.signal);
+    return () => ac.abort();
+  }, [marking, mediaUrl]);
+  const [markPopup, setMarkPopup] = useState<PendingComment | null>(null);
   const closeMarkPopup = useCallback(() => setMarkPopup(null), []);
   // only the shapes that went into the comment leave the draft (a stroke drawn meanwhile is not the comment's)
   const markAdded = useCallback((shapes: MediaShape[]) => void dispatch(dropShapes(tabId, shapes)), [dispatch, tabId]);
@@ -78,8 +89,7 @@ export function useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, me
   useEffect(() => {
     if ((!active || !marking) && !popupBusy.current) setMarkPopup(null);
   }, [active, marking]);
-
-  return { markable, player, mediaRef, imgRef, markPopup, onMarkAdd, closeMarkPopup, markAdded, saving, onPopupBusy };
+  return { version, markPopup, setMarkPopup, closeMarkPopup, markAdded, saving, onPopupBusy };
 }
 
 export type MediaMarkup = ReturnType<typeof useMediaMarkup>;

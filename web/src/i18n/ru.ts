@@ -276,6 +276,8 @@ export const ru = {
   modelClip: 'Анимация',
   modelPlay: 'Играть',
   camLine: (pos: string, target: string, fov: string) => `камера ${pos} → ${target}, fov ${fov}°`,
+  modelViews: 'Сохранённые виды',
+  modelViewGo: 'Перейти к этому виду',
   modelPause: 'Пауза',
   // image attachments (M3-12)
   attach: 'Прикрепить изображение\nили вставь из буфера ⌘V / перетащи в окно',

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import type { CameraPose, ModelStats, ModelViewer, ViewerModule } from '@/model/api.ts';
-import { registerModelViewer, unregisterModelViewer } from '@/model/registry.ts';
+import { publishViewPose, registerModelViewer, unregisterModelViewer } from '@/model/registry.ts';
 import { RefusedResource, resolveModelUrl } from '@/model/resolve.ts';
 import { fileUrl } from '../kinds.ts';
+import { ModelMarkup } from './ModelMarkup.tsx';
 
 /** Above this a model is not fetched at all: the whole file lives in memory twice (bytes, then the parsed scene). */
 export const MODEL_MAX_BYTES = 256 * 1024 * 1024;
@@ -109,8 +110,8 @@ function useBackground(el: React.RefObject<HTMLElement | null>, onChange: (css: 
  * ETag is not even read. A lost WebGL context disposes the viewer; ↻ makes a new one and parses the kept bytes again.
  * A tab hidden for RELEASE_AFTER_MS gives its context back and gets a new viewer (same camera) when shown.
  */
-export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs = RELEASE_AFTER_MS }: {
-  path: string; src: string; tabId: string; active: boolean; reloadKey: number; releaseAfterMs?: number;
+export function ModelBody({ path, src, fileRef, tabId, active, reloadKey, releaseAfterMs = RELEASE_AFTER_MS }: {
+  path: string; src: string; fileRef?: string; tabId: string; active: boolean; reloadKey: number; releaseAfterMs?: number;
 }) {
   const t = useT();
   const pane = useRef<HTMLDivElement>(null);
@@ -123,6 +124,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
   const [playing, setPlaying] = useState(false);
   const [lost, setLost] = useState(false);
   const [released, setReleased] = useState(false);
+  const [marking, setMarking] = useState(false); // a drawing is being made over the view: the camera and the clip are held
   const bgRef = useRef<string>('');
   const file = `${path}\0${src}`;
 
@@ -157,7 +159,10 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
         v = m.createViewer(host.current, {
           background,
           onContextLost: () => { if (!dead) { setLost(true); setStatus({ s: 'lost' }); } },
-          onView: (p: CameraPose) => { if (pane.current) pane.current.dataset.modelCamera = [...p.position, ...p.target].map((x) => x.toFixed(3)).join(' '); },
+          onView: (p: CameraPose) => {
+            if (pane.current) pane.current.dataset.modelCamera = [...p.position, ...p.target].map((x) => x.toFixed(3)).join(' ');
+            publishViewPose(tabId, p);
+          },
         });
       } catch {
         setStatus({ s: 'noGl' }); // no WebGL, a blocklisted GPU, or the context cap
@@ -254,6 +259,8 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
   }, [viewer, active, file, path, src, reloadKey]);
 
   const ready = status.s === 'ready' ? status : null;
+  const onPause = useCallback(() => setPlaying(false), []);
+  const markUrl = reloadKey ? `${fileUrl(path, undefined, src)}&r=${reloadKey}` : fileUrl(path, undefined, src);
   const note = (text: string, alert = false) => <p role={alert ? 'alert' : undefined} className="absolute inset-x-0 top-0 p-4 text-sm text-muted-foreground">{text}</p>;
   return (
     <div
@@ -263,7 +270,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
       hidden={!active}
       className="grid-pane relative min-h-0 flex-1 overflow-hidden"
     >
-      <div ref={host} data-model-host className="absolute inset-0 bg-background" onDoubleClick={() => viewer?.resetView()} />
+      <div ref={host} data-model-host className="absolute inset-0 bg-background" onDoubleClick={() => marking || viewer?.resetView()} />
       {status.s === 'loading' && note(t('modelLoading', status.pct))}
       {status.s === 'gone' && note(t('fileGone'))}
       {status.s === 'tooBig' && note(t('modelTooBig', fmtSize(status.size, t)))}
@@ -271,6 +278,10 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
       {status.s === 'lost' && note(t('modelLost'), true)}
       {status.s === 'noGl' && note(t('modelNoWebgl'), true)}
       {status.s === 'refused' && note(t('modelRefused', status.uri), true)}
+      <ModelMarkup
+        tabId={tabId} path={path} src={src} fileRef={fileRef} url={markUrl} active={active} viewer={viewer} ready={!!ready}
+        playing={playing} onPause={onPause} onMarking={setMarking}
+      />
       {ready && (
         <div data-anchor-skip className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-2 border-t border-border-soft bg-chrome px-3 py-1 font-mono text-[11.5px] text-muted-foreground backdrop-blur">
           <span data-model-info className="min-w-0 flex-1 truncate">
@@ -282,6 +293,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
               <select
                 aria-label={t('modelClip')}
                 value={clip}
+                disabled={marking}
                 onChange={(e) => { const i = Number(e.target.value); setClip(i); viewer?.setClip(i); }}
                 className="max-w-40 rounded border border-border-soft bg-background px-1"
               >
@@ -289,6 +301,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
               </select>
               <button
                 type="button"
+                disabled={marking}
                 aria-label={playing ? t('modelPause') : t('modelPlay')}
                 title={playing ? t('modelPause') : t('modelPlay')}
                 onClick={() => { viewer?.setPlaying(!playing); setPlaying(!playing); }}
@@ -296,7 +309,7 @@ export function ModelBody({ path, src, tabId, active, reloadKey, releaseAfterMs 
               >{playing ? '❚❚' : '▶'}</button>
             </>
           )}
-          <button type="button" aria-label={t('modelReset')} title={t('modelResetTip')} onClick={() => viewer?.resetView()} className="rounded px-1.5 hover:bg-muted hover:text-foreground">⟲</button>
+          <button type="button" aria-label={t('modelReset')} title={t('modelResetTip')} disabled={marking} onClick={() => viewer?.resetView()} className="rounded px-1.5 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40">⟲</button>
         </div>
       )}
     </div>

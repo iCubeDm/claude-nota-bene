@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '@/i18n/index.ts';
 import type { ModelViewer, ViewerOptions } from '@/model/api.ts';
 import { getModelViewer } from '@/model/registry.ts';
+import { makeStore } from '@/store/store.ts';
 import { ModelBody, fetchModel } from './ModelBody.tsx';
 
 // jsdom has no WebGL: the whole 3D module is replaced by a recording fake
@@ -12,6 +14,9 @@ let loadImpl: (d: ArrayBuffer) => Promise<{ meshes: number; triangles: number; m
 let loadData: ArrayBuffer[];
 let loadArgs: { keepView: boolean; resolve: (u: string) => string | null }[];
 const fake = (): ModelViewer => ({
+  canvas: document.createElement('canvas'),
+  setFrozen: vi.fn(),
+  renderNow: vi.fn(() => ({ position: [0, 0, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: poseFov })),
   load: vi.fn(async (d, o) => { calls.push('load'); loadArgs.push(o); loadData.push(d); return loadImpl(d); }),
   clear: vi.fn(() => void calls.push('clear')),
   resetView: vi.fn(() => void calls.push('reset')),
@@ -39,6 +44,7 @@ let pulls: number;
 let fetchSpec: { etag?: string; status?: number; size?: number; bytes?: number; noLength?: boolean };
 let fetched: string[];
 beforeEach(() => {
+  store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
   setLang('en');
   calls.length = 0; created = []; loadArgs = []; loadData = []; fetched = []; fetchGate = null; pulls = 0; poseFov = 77; createThrows = null;
   fetchSpec = { bytes: 2048 };
@@ -58,8 +64,9 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+let store: ReturnType<typeof makeStore>;
 const ui = (p: Partial<{ path: string; src: string; active: boolean; reloadKey: number; releaseAfterMs: number }> = {}) => (
-  <ModelBody path="models/car/car.glb" src="here" tabId="file:models/car/car.glb" active reloadKey={0} {...p} />
+  <Provider store={store}><ModelBody path="models/car/car.glb" src="here" tabId="file:models/car/car.glb" active reloadKey={0} {...p} /></Provider>
 );
 const ready = (c: HTMLElement) => c.querySelector('[data-model-ready]');
 

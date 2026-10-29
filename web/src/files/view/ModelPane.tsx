@@ -1,7 +1,7 @@
 import { useEffect, useState, type ComponentType } from 'react';
 import { useT } from '@/i18n/index.ts';
 
-type Props = { path: string; src: string; tabId: string; active: boolean; reloadKey: number };
+type Props = { path: string; src: string; fileRef?: string; tabId: string; active: boolean; reloadKey: number };
 type PaneProps = Props & { srcGone?: boolean };
 
 // ModelBody (with its strings' logic, the size cap, the reader) is its own chunk, so the main one pays for none of it;

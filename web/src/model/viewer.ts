@@ -182,6 +182,7 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
   }
 
   const api: ModelViewer = {
+    canvas,
     async load(data, lo: LoadOptions) {
       const my = latest.next();
       const refused: string[] = [];
@@ -258,6 +259,13 @@ export function createViewer(host: HTMLElement, o: ViewerOptions): ModelViewer {
     setVisible(v) {
       visible = v;
       if (v) { tick(); resize(); requestRender(); } else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    },
+    setFrozen(frozen) {
+      controls.enabled = !frozen;
+    },
+    renderNow() {
+      if (!disposed) renderer.render(scene, camera);
+      return pose();
     },
     snapshot() {
       if (disposed) return Promise.resolve(null);

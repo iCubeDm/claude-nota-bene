@@ -26,6 +26,8 @@ export type LoadOptions = {
 };
 
 export interface ModelViewer {
+  /** The WebGL canvas (kept readable: the markup draws it into the comment's frame). */
+  readonly canvas: HTMLCanvasElement;
   /** Parses a .glb / .gltf. Replaces the model on screen (the caller `clear()`s first). Rejects with a readable error. */
   load(data: ArrayBuffer, o: LoadOptions): Promise<ModelStats>;
   /** Removes the model and disposes its geometries, materials and textures. */
@@ -39,7 +41,11 @@ export interface ModelViewer {
   setBackground(css: string): void;
   /** A hidden tab renders nothing. */
   setVisible(visible: boolean): void;
-  /** The current frame as a PNG (for step B's comments). */
+  /** Freezes (true) or releases the orbit controls: while a drawing is made over the view, the camera must not move. Does not touch an animation. */
+  setFrozen(frozen: boolean): void;
+  /** Draws a frame right now (the canvas is then exactly what the camera sees) and returns the pose it was drawn from. */
+  renderNow(): CameraPose;
+  /** The current frame as a PNG. */
   snapshot(): Promise<Blob | null>;
   /** Everything: model, renderer, WebGL context, observers. Safe to call twice. */
   dispose(): void;
