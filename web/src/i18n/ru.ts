@@ -18,6 +18,7 @@ export const ru = {
   you: 'ты',
   youBusy: ' · во время работы',
   youForced: ' · прервал агента',
+  replyPlain: 'ответ',
   reply: (n: number, at: string) => `ответ #${n} · ${at}`,
   working: 'агент работает…',
   done: 'готово',

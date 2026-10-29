@@ -6,7 +6,7 @@ import { describeShape } from '../media/markup/geometry.ts';
  * The text sent to the agent: the general message, then the numbered comment list (prototype format).
  * Pure: everything that depends on app state arrives as an argument.
  * @param labelOf quick-label emoji + text for a comment, '' when it has none
- * @param whereOf where the quoted fragment lives ("reply #2", "my message")
+ * @param whereOf where the quoted fragment lives ("reply", "my message")
  * @param instructionOf the quick label's instruction line, if any
  */
 export function composeBatch(

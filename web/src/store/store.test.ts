@@ -66,6 +66,11 @@ it('selectReplyLabel numbers final assistant items and names user messages', asy
   expect(selectReplyLabel(st, 'u1')).toBe('my message');
   expect(selectReplyLabel(st, 'a1:0')).toBe('reply #1');
   expect(selectReplyLabel(st, 'a2:0')).toBe('reply #2');
+  expect(selectReplyLabel(st, 'a2:0', true)).toBe('reply'); // the batch text: no unstable number
+  const { whereOf } = await import('../comments/send.ts');
+  const on = (id: string) => ({ anchor: { source: { kind: 'message', id }, start: 0, end: 1, quote: 'q', prefix: '', suffix: '' } }) as never;
+  expect(whereOf(on('a2:0'), st)).toBe('reply'); // the agent never sees the UI numbering
+  expect(whereOf(on('u1'), st)).toBe('my message');
   expect(selectReplyLabel(st, 'nope')).toBeNull();
 });
 

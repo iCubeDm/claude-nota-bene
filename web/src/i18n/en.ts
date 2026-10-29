@@ -20,6 +20,7 @@ export const en: Dict = {
   you: 'you',
   youBusy: ' · while working',
   youForced: ' · interrupted the agent',
+  replyPlain: 'reply',
   reply: (n, at) => `reply #${n} · ${at}`,
   working: 'agent is working…',
   done: 'done',

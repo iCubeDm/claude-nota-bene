@@ -27,7 +27,8 @@ export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0])
   const a = c.anchor;
   if (isMediaAnchor(a)) return `${whereOfFile(a.source)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${a.width}×${a.height}`;
   if (src.kind === 'file') return whereOfFile(src);
-  return (st && selectReplyLabel(st, src.id)) ?? t('srcChat');
+  // the batch text names a reply plainly: its number is the index in the CURRENT feed (restarts after a compaction, shifts when earlier history is shown); the quote is the locator
+  return (st && selectReplyLabel(st, src.id, true)) ?? t('srcChat');
 }
 
 /**

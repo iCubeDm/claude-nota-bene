@@ -214,11 +214,11 @@ export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _
 const ARG_CUT = 60;
 
 /**
- * Where a comment's source sits, for the batch text: "reply #n" for a FINAL assistant item (n = 1-based among final
- * assistant items in feed order), "my message" for a user item, "<name> command (arg)" for an action, null otherwise. The feed keeps no time per assistant
+ * Where a comment's source sits: "reply #n" for a FINAL assistant item (n = 1-based among final
+ * assistant items in feed order), "my message" for a user item, "<name> command (arg)" for an action, null otherwise; `plain` (the batch text) names a reply just "reply", no number. The feed keeps no time per assistant
  * item, so the " · time" part of `reply` is dropped rather than invented.
  */
-export const selectReplyLabel = (s: RootState, messageId: string): string | null => {
+export const selectReplyLabel = (s: RootState, messageId: string, plain = false): string | null => {
   if (messageId.startsWith(TOOL_SRC)) {
     // an agent action's command or output (R-M7-20): "Bash command (npm test)", the arg cut to 60 characters
     const id = messageId.slice(TOOL_SRC.length);
@@ -232,7 +232,8 @@ export const selectReplyLabel = (s: RootState, messageId: string): string | null
     if (it.kind === 'assistant' && it.final) n++;
     if ((it.kind === 'assistant' || it.kind === 'user') && it.id === messageId) {
       if (it.kind === 'user') return t('srcMine');
-      return it.final ? t('reply', n, '').replace(/\s*·\s*$/, '') : null;
+      if (!it.final) return null;
+      return plain ? t('replyPlain') : t('reply', n, '').replace(/\s*·\s*$/, '');
     }
   }
   return null;

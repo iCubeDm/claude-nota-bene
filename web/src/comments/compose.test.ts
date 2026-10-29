@@ -6,12 +6,12 @@ const c = (id: string, quote: string, text: string, label?: Comment['label']): C
   id, text, label, status: 'pending', createdAt: 1,
   anchor: { source: { kind: 'message', id }, start: 0, end: quote.length, quote, prefix: '', suffix: '' },
 });
-const where = (x: Comment) => (x.id === 'u' ? 'my message' : 'reply #1');
+const where = (x: Comment) => (x.id === 'u' ? 'my message' : 'reply');
 const none = () => '';
 
 it('general text first, then the header and numbered items', () => {
   const out = composeBatch('Please fix', [c('a', 'foo', ' bar '), c('u', 'baz', 'qux')], 'en', none, where, () => undefined);
-  expect(out).toBe('Please fix\n\nComments on fragments:\n\n1. [reply #1]\n> foo\n→ bar\n\n2. [my message]\n> baz\n→ qux');
+  expect(out).toBe('Please fix\n\nComments on fragments:\n\n1. [reply]\n> foo\n→ bar\n\n2. [my message]\n> baz\n→ qux');
 });
 
 it('omits the leading blank when general is empty; header follows the lang', () => {
