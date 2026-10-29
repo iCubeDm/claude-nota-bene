@@ -38,7 +38,7 @@ export function StopButton({ id, className = BTN }: { id: string; className?: st
           timer.current = setTimeout(() => setSure(false), STOP_CONFIRM_MS);
         }
       }}
-      className={`${className} ${sure ? 'border-destructive text-destructive' : ''}`}
+      className={sure ? className.replace('border-border-soft', 'border-destructive').replace('text-foreground', 'text-destructive') : className}
     >
       {sure ? t('taskStopConfirm') : t('taskStop')}
     </button>

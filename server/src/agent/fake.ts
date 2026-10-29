@@ -198,8 +198,7 @@ class FakeSession implements FakeAgentSession {
 
   async stopTask(taskId: string): Promise<void> {
     this.tasks.stops.push(taskId);
-    if (this.tasks.stopped.has(taskId)) return;
-    this.tasks.stopped.add(taskId);
+    this.tasks.stopped.add(taskId); // its output stops growing; a task id started again is stopped again by a new stopTask
     // as the CLI does: a task_notification with status stopped
     this.injected.push(sdk({ type: 'system', subtype: 'task_notification', task_id: taskId, status: 'stopped', output_file: '', summary: 'stopped', session_id: this.sessionId, uuid: `fake-tn-${taskId}` }));
     this.wake?.();

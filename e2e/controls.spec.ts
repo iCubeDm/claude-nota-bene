@@ -258,16 +258,20 @@ test('compact adds its boundary line; clear asks first, empties the feed, gets a
   await expect(page.locator('[data-kind="marker"]')).toHaveCount(0);
 });
 
-test('background tasks: the row appears, ticks and disappears @controls', async ({ page }) => {
+test('background tasks: the indicator counts, the drawer row ticks, a finished task stays as done @controls', async ({ page }) => {
   await open(page);
-  const row = page.getByRole('status', { name: en.tasksLabel });
   const text = `[tasks] ${uniq('tasks')}`;
   await send(page, text);
+  const ind = page.locator('#tasks-indicator');
+  await expect(ind).toContainText('1 task');
+  await ind.click();
+  const row = page.locator('[data-task="t-e2e"]');
   await expect(row).toContainText('Explore the repo');
   await expect(row).toContainText('Grep');
   await expect(row).toContainText('5k tok'); // fmtK rounds 4500 to 5k
   await expect(row).toContainText(/[12]s · 5k tok/); // the elapsed time moves on by itself
-  await expect(row).toBeHidden(); // task_notification removes it while the turn may still run
+  await expect(row).toHaveAttribute('data-status', 'done'); // task_notification ends it while the turn may still run
+  await expect(ind).not.toContainText('task');
   await expect(donesAfter(page, text).first()).toBeVisible();
 });
 

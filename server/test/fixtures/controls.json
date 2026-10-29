@@ -51,8 +51,24 @@
         { "type": "system", "subtype": "task_started", "task_id": "t-e2e", "description": "Explore the repo", "task_type": "local_agent" },
         { "type": "system", "subtype": "task_progress", "task_id": "t-e2e", "usage": { "total_tokens": 4500 }, "last_tool_name": "Grep", "summary": "searching" },
         { "sleepMs": 2500 },
-        { "type": "system", "subtype": "task_notification", "task_id": "t-e2e" }
+        { "type": "system", "subtype": "task_notification", "task_id": "t-e2e", "status": "completed" }
+      ]
+    },
+    {
+      "match": "[tasks-drawer]", "text": "tasks started",
+      "frames": [
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-sh-run", "description": "tail -f build.log", "task_type": "local_bash" },
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-sh-done", "description": "npm run lint", "task_type": "local_bash" },
+        { "type": "system", "subtype": "task_notification", "task_id": "e2e-sh-done", "status": "completed" },
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-ag-bg", "description": "Index the docs", "task_type": "local_agent", "tool_use_id": "toolu_e2e_bg" },
+        { "type": "system", "subtype": "task_progress", "task_id": "e2e-ag-bg", "usage": { "total_tokens": 12300 }, "last_tool_name": "Read", "summary": "reading docs/architecture.md" },
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-sh-child", "description": "grep -rn TODO docs", "task_type": "local_bash", "parent_task_id": "e2e-ag-bg" }
       ]
     }
+  ],
+  "shells": [
+    { "taskId": "e2e-sh-run", "chunks": ["> build started\n", "compiling 1/4\n", "\u001b[32mcompiling 2/4\u001b[0m\n", "compiling 3/4\n", "compiling 4/4\n", "build finished\n"] },
+    { "taskId": "e2e-sh-done", "chunks": ["lint: 0 problems\n"] },
+    { "taskId": "e2e-sh-child", "chunks": ["docs/a.md:3: TODO\n"] }
   ]
 }

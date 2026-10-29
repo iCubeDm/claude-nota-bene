@@ -104,7 +104,7 @@ Decided 2026-10-25. The prototype never had this; Claude Code's terminal does, a
   - A shell task opens as a tab with its output tail: `get_task_output`, polled every second while the tab is visible.
   - Agent tabs are commentable like the main chat. Anchors use the same stable ids.
 - **Prompting subagents is out of scope.** Comments on a subagent's chat are sent to the **main session** (the orchestrator), labelled with the subagent and the reply they refer to.
-- **Control:** `stopTask(task_id)`; `backgroundTasks(tool_use_id)` (Ctrl+B for one task). These are new client messages: `{type:'task-stop', id}`, `{type:'task-background', toolUseId}`, `{type:'task-output', id}`.
+- **Control:** `stopTask(task_id)`; `backgroundTasks(tool_use_id)` (Ctrl+B for one task). These are new client messages: `{type:'task-stop', id}`, `{type:'task-background', toolUseId}`, `{type:'task-output', id}`. Built as `GET /task-output` instead of a socket message (protocol 8): the output is a polled read-only tail like `/subagent`, not an event.
 - **Resume:** on `--continue`, `listSubagents` + `getSubagentMessages` restore subagent chats, so their tabs open with history.
 - **Tabs:** the main chat is always the first tab and cannot be closed. A right-click menu on any tab, as in VS Code / IntelliJ, offers Close, Close Others, Close to the Right and Close All (the main chat is never closed by them). The `tabs` slice is introduced here and reused by files in M3.
 - **Parked:** messaging a running agent (agent teams / teammates).
@@ -164,10 +164,10 @@ The milestone that delivers each item is in brackets. "Verify" lists what the e2
 - [ ] **Emoji** in comment text: an emoji menu button in the comment popup, and GitHub-style `:` shortcodes with autocomplete (`:+1` → 👍; ↑↓ Enter/Tab, Esc), the same keyboard behaviour as the `@` picker.
 
 **Agents & tasks (M2)** — new, beyond the prototype; built after M5 (see Milestones → Order). The last two items below (tab strip, tab context menu) are delivered in M3; see [Agents and background tasks](#agents-and-background-tasks)
-- [ ] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer.
-- [ ] Drawer: tree of tasks (subagents, shell, monitors; nested by `parent_task_id`) with status, elapsed time, tokens, last tool, one-line summary; actions: open, stop (`stopTask`), move to background (`backgroundTasks(toolUseId)`).
+- [x] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer (Alt+T). Finished tasks stay (the last 20), shown quietly as `✓ N`.
+- [x] Drawer: tree of tasks (subagents, shell, monitors; nested by `parent_task_id`) with status, elapsed time, tokens, last tool, one-line summary; actions: open, stop (`stopTask`), move to background (`backgroundTasks(toolUseId)`).
 - [ ] Subagent chat in its own tab (live via `forwardSubagentText`), commentable; comments go to the main session.
-- [ ] Shell task output in its own tab (`get_task_output` tail, polled while the tab is open), stop.
+- [x] Shell task output in its own tab (`get_task_output` tail, polled while the tab is open), stop.
 - [ ] Main feed: a subagent call renders as a card (type, description, status) that opens its tab.
 - [ ] Resume: subagent chats of a resumed session restored from disk (`listSubagents` / `getSubagentMessages`).
 - [ ] Tab strip: the main chat is pinned as the first tab and cannot be closed. Media in a closed tab stops; picture-in-picture closes.
