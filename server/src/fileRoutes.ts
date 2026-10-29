@@ -9,6 +9,7 @@ import { blobSize, branchFiles, gitStatus, listSources, readFile, readTree, Sour
 import { fuzzyScore } from './fuzzy.ts';
 import type { AgentSession } from './agent/types.ts';
 import { parseRange } from './range.ts';
+import { BlendError, type BlendConverter, type BlendInput } from './blend.ts';
 
 // from the prototype's MIME table
 const MIME: Record<string, string> = {
@@ -120,6 +121,8 @@ export function fileRoutes(o: {
   root: () => string;
   hub: EventHub;
   complete: (q: string) => Promise<string[]>;
+  /** .blend → GLB for /model; without it the route is not served */
+  blend?: BlendConverter;
 }): Record<string, RequestListener> {
   const fail = (req: IncomingMessage, res: ServerResponse, e: unknown) => {
     reportError(o.hub, req.url ?? '', e);
@@ -254,6 +257,46 @@ export function fileRoutes(o: {
         if (src === 'here') return serveFs(req, res, root);
         if (src.kind === 'worktree' && src.dir) return serveFs(req, res, src.dir);
         await serveBlob(req, res, root, src).catch((e) => sourceFail(req, res, e));
+      });
+    },
+
+    '/model': (req, res) => {
+      if (!getOnly(req, res)) return;
+      const blend = o.blend;
+      if (!blend) return plain(res, 404, 'not found');
+      const rel = queryPath(req);
+      if (!/\.blend$/i.test(rel)) return plain(res, 400, 'only .blend files are converted');
+      withSource(req, res, async (src, root) => {
+        let input: BlendInput;
+        if (src === 'here' || (src.kind === 'worktree' && src.dir)) {
+          const abs = resolveInRoot(src === 'here' ? root : src.dir!, rel);
+          if (abs === null) return plain(res, 403, 'outside project');
+          const st = await fs.promises.stat(abs).catch(() => null);
+          if (!st?.isFile()) return plain(res, 404, 'not found');
+          input = { file: abs };
+        } else {
+          // a branch: the blob is written to a temp file by the converter and removed after
+          let bytes: Buffer | null;
+          try {
+            bytes = await readFile(root, src, rel);
+          } catch (e) {
+            return sourceFail(req, res, e);
+          }
+          if (bytes === null) return plain(res, 404, 'not found');
+          input = { bytes };
+        }
+        try {
+          const { glb, hash } = await blend.convert(input);
+          const st = await fs.promises.stat(glb);
+          res.writeHead(200, { 'content-type': 'model/gltf-binary', 'content-length': st.size, etag: `"${hash}"`, ...SAFETY });
+          if (req.method === 'HEAD') return void res.end();
+          pipeline(fs.createReadStream(glb), res, (e) => {
+            if (e && (e as NodeJS.ErrnoException).code !== 'ERR_STREAM_PREMATURE_CLOSE') reportError(o.hub, rel, e);
+          });
+        } catch (e) {
+          if (e instanceof BlendError) return json(req, res, e.status, { error: e.code, detail: e.detail });
+          fail(req, res, e);
+        }
       });
     },
 

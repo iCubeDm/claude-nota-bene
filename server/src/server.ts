@@ -15,6 +15,7 @@ import { MarkFiles, markRoutes } from './marks.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
 import { complete, fileRoutes } from './fileRoutes.ts';
+import { BlendConverter } from './blend.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
 import { SwitchError, createSessionManager } from './session.ts';
 import type { IdleConfig } from './idle.ts';
@@ -114,6 +115,7 @@ export async function startServer(o: {
         setTimeout(() => (o.exit ?? process.exit)(code), 100);
       });
     };
+    const blend = new BlendConverter({ stateDir });
     const marks = new MarkFiles({ root, stateDir });
     const sessionsRoute: http.RequestListener = (req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -139,7 +141,7 @@ export async function startServer(o: {
       allowedHosts,
       allowedOrigins,
       extra: {
-        ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q) }),
+        ...fileRoutes({ root, hub, complete: (q) => complete({ session: manager, root: root() }, q), blend }),
         ...attachmentRoutes(attachments, hub),
         // only the current conversation's archive: a page of another one (before a switch or a /clear) gets 409
         ...historyRoutes(archive, () => manager.archiveId(), hub),
@@ -182,7 +184,7 @@ export async function startServer(o: {
       info: () => {
         const { id, root, title, model } = manager.info();
         // busy and clients: for another window's Settings → Windows
-        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients() };
+        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend.available() };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);

@@ -182,6 +182,20 @@ describe('server', () => {
     }
   });
 
+  it('/info.blender says whether a Blender is found (NOTA_BENE_BLENDER is authoritative)', async () => {
+    const prev = process.env.NOTA_BENE_BLENDER;
+    const s = await boot();
+    const has = async () => ((await (await fetch(`${s.url}/info`)).json()) as { blender: boolean }).blender;
+    try {
+      process.env.NOTA_BENE_BLENDER = '/nonexistent/blender';
+      expect(await has()).toBe(false);
+      process.env.NOTA_BENE_BLENDER = process.execPath; // any executable file
+      expect(await has()).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.NOTA_BENE_BLENDER; else process.env.NOTA_BENE_BLENDER = prev;
+    }
+  });
+
   it('a taken port rejects startServer with the listen error (instead of hanging)', async () => {
     const s = await boot();
     const port = Number(new URL(s.url).port);
