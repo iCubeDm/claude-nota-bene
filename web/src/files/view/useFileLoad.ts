@@ -152,5 +152,5 @@ export function useFileLoad({ path, src, ref, url, kind, media, markableKind, ac
     else dispatch(setFileLoad({ path, ref, s: data.s === 'text' ? 'loaded' : 'gone' }));
   }, [media, data, path, ref, dispatch]);
 
-  return { data, rev, loadedRev, failed, onError: () => setFailed(true), mediaUrl, mediaEl, resumeAt, reloadClick, onMediaMeta };
+  return { data, rev, loadedRev, failed, bust, onError: () => setFailed(true), mediaUrl, mediaEl, resumeAt, reloadClick, onMediaMeta };
 }

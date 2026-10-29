@@ -11,6 +11,10 @@ it('kindOf covers each regex', () => {
   expect(kindOf('v.m4v')).toBe('video');
   expect(kindOf('s.m4a')).toBe('audio');
   expect(kindOf('s.ogg')).toBe('audio');
+  expect(kindOf('m/robot.glb')).toBe('model');
+  expect(kindOf('ROBOT.GLB')).toBe('model');
+  expect(kindOf('scene.gltf')).toBe('model');
+  expect(kindOf('scene.gltf.txt')).toBe('text');
   expect(kindOf('main.ts')).toBe('text');
   expect(kindOf('Makefile')).toBe('text');
 });

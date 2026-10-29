@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AUDIO, IMAGE, VIDEO } from './kinds.ts';
+import { AUDIO, IMAGE, MODEL, VIDEO } from './kinds.ts';
 
 /**
  * File-type icons (M6-11), after IntelliJ's new UI: a coloured letter mark for source and config files, a coloured
@@ -8,7 +8,7 @@ import { AUDIO, IMAGE, VIDEO } from './kinds.ts';
  */
 export type IconId =
   | 'ts' | 'js' | 'json' | 'md' | 'css' | 'html' | 'py' | 'sh' | 'yml' | 'toml'
-  | 'image' | 'video' | 'audio' | 'npm' | 'readme' | 'git' | 'docker' | 'dir' | 'dirOpen' | 'file';
+  | 'image' | 'video' | 'audio' | 'model' | 'npm' | 'readme' | 'git' | 'docker' | 'dir' | 'dirOpen' | 'file';
 
 type Mark = { text: string; color: string } | { glyph: ReactNode; color: string };
 
@@ -38,6 +38,7 @@ const MARKS: Record<IconId, Mark> = {
   image: { glyph: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-9 9" /></>, color: C.green },
   video: { glyph: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m10 9 5 3-5 3z" /></>, color: C.purple },
   audio: { glyph: <><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></>, color: C.orange },
+  model: { text: '3D', color: C.teal },
   npm: { glyph: <><path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="m3 7 9 5 9-5M12 12v10" /></>, color: C.red },
   readme: { glyph: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></>, color: C.blue },
   git: { glyph: <><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="9" r="2.5" /><path d="M6 8.5v7M18 11.5c0 4-6 3-11 5" /></>, color: C.orange },
@@ -70,6 +71,7 @@ export function iconOf(path: string): IconId {
   if (IMAGE.test(name)) return 'image';
   if (VIDEO.test(name)) return 'video';
   if (AUDIO.test(name)) return 'audio';
+  if (MODEL.test(name)) return 'model';
   const dot = name.lastIndexOf('.');
   return (dot > 0 && BY_EXT[name.slice(dot + 1)]) || 'file';
 }

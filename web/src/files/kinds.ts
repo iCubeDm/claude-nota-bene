@@ -2,15 +2,17 @@
 export const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
 export const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
 export const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
+export const MODEL = /\.(glb|gltf)$/i;
 export const MD = /\.(md|markdown)$/i;
 
-export type FileKind = 'md' | 'image' | 'video' | 'audio' | 'text';
+export type FileKind = 'md' | 'image' | 'video' | 'audio' | 'model' | 'text';
 
 export function kindOf(path: string): FileKind {
   if (MD.test(path)) return 'md';
   if (IMAGE.test(path)) return 'image';
   if (VIDEO.test(path)) return 'video';
   if (AUDIO.test(path)) return 'audio';
+  if (MODEL.test(path)) return 'model';
   return 'text';
 }
 

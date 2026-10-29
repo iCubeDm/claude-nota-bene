@@ -260,6 +260,18 @@ export const ru = {
   noHighlight: 'без подсветки: файл большой',
   wrapLines: 'Перенос строк',
   reload: 'Перезагрузить',
+  // 3D-модель (.glb / .gltf)
+  modelLoading: (pct: number | null) => (pct === null ? 'Загрузка модели…' : `Загрузка модели… ${pct}%`),
+  modelTooBig: (size: string) => `Модель слишком большая для показа (${size}, предел 256 МБ)`,
+  modelFailed: (e: string) => `Не удалось показать модель: ${e}`,
+  modelLost: 'Контекст WebGL потерян: браузер забрал видеокарту. Перезагрузите вкладку (↻)',
+  modelInfo: (size: string, meshes: number, tris: number, mats: number, anims: number) =>
+    `${size} · мешей: ${meshes} · треугольников: ${tris} · материалов: ${mats} · анимаций: ${anims}`,
+  modelReset: 'Сбросить вид',
+  modelResetTip: 'Сбросить вид (двойной клик)',
+  modelClip: 'Анимация',
+  modelPlay: 'Играть',
+  modelPause: 'Пауза',
   // image attachments (M3-12)
   attach: 'Прикрепить изображение\nили вставь из буфера ⌘V / перетащи в окно',
   remove: 'Убрать',

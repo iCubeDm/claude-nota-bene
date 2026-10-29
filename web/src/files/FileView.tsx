@@ -15,6 +15,7 @@ import { SourceChip } from './SourcePicker.tsx';
 import { clearJump, selectJump } from './slice.ts';
 import { HIGHLIGHT_MAX } from './view/CodeText.tsx';
 import { MediaBody } from './view/MediaBody.tsx';
+import { ModelPane } from './view/ModelPane.tsx';
 import { TextBody } from './view/TextBody.tsx';
 import { useFileLoad } from './view/useFileLoad.ts';
 import { useWrapLines, wrapLines } from './wrap.ts';
@@ -28,6 +29,8 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const t = useT();
   const dispatch = useAppDispatch();
   const kind = kindOf(path);
+  // not text: no text load. A model rides the media reload machinery (cache-busting `bust`, held while marking) but is
+  // neither markable nor a player: the MediaController and the markup never see it
   const media = kind !== 'md' && kind !== 'text';
   const markableKind = kind === 'image' || kind === 'video';
   const tabId = fileTabId(path, src);
@@ -91,7 +94,9 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <button type="button" aria-label={t('reload')} title={t('reload')} onClick={load.reloadClick} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
         <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
-      {media ? (
+      {kind === 'model' ? (
+        <ModelPane path={path} src={src} tabId={tabId} active={active} reloadKey={load.bust} />
+      ) : media ? (
         <MediaBody
           kind={kind} path={path} fileRef={ref} tabId={tabId} active={active} marking={marking} natural={natural}
           onToggleNatural={() => setNatural((v) => !v)} mediaUrl={mediaUrl} failed={failed} srcGone={srcGone}

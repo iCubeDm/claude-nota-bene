@@ -140,6 +140,7 @@ export function makeStore(o: {
   const media: MediaController = new MediaController({
     pip: o.pip ?? browserPip,
     activate: (id) => store.dispatch(activate(id as Tab['id'])),
+    // video and audio only: a model tab (.glb) has no player, and an image has nothing to pause
     isMedia: (id) => {
       const tab = store.getState().tabs.open.find((t) => t.id === id);
       return tab?.kind === 'file' && (VIDEO.test(tab.path) || AUDIO.test(tab.path));

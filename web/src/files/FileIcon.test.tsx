@@ -9,7 +9,7 @@ it('maps the plan\'s extensions, media and well-known names (M6-11)', () => {
     ['src/a.ts', 'ts'], ['b.tsx', 'ts'], ['c.js', 'js'], ['bin/x.mjs', 'js'], ['tsconfig.json', 'json'],
     ['docs/A.MD', 'md'], ['theme.css', 'css'], ['index.html', 'html'], ['tool.py', 'py'], ['run.sh', 'sh'],
     ['ci.yml', 'yml'], ['ci.yaml', 'yml'], ['Cargo.toml', 'toml'],
-    ['scene_v6.png', 'image'], ['a.JPG', 'image'], ['icon.svg', 'image'], ['clip_вход.mp4', 'video'], ['x.mov', 'video'], ['v.mp3', 'audio'],
+    ['scene_v6.png', 'image'], ['a.JPG', 'image'], ['icon.svg', 'image'], ['clip_вход.mp4', 'video'], ['x.mov', 'video'], ['v.mp3', 'audio'], ['m/robot.glb', 'model'], ['scene.GLTF', 'model'],
     ['web/package.json', 'npm'], ['README.md', 'readme'], ['readme', 'readme'], ['.gitignore', 'git'], ['Dockerfile', 'docker'], ['dockerfile.dev', 'docker'],
     ['LICENSE', 'file'], ['.env', 'file'], ['notes.txt', 'file'], ['archive.tar.gz', 'file'],
   ];

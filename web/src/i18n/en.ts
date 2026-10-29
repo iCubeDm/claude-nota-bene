@@ -262,6 +262,18 @@ export const en: Dict = {
   noHighlight: 'not highlighted: large file',
   wrapLines: 'Wrap lines',
   reload: 'Reload',
+  // 3D model (.glb / .gltf)
+  modelLoading: (pct) => (pct === null ? 'Loading the model…' : `Loading the model… ${pct}%`),
+  modelTooBig: (size) => `The model is too large to show (${size}, the limit is 256 MB)`,
+  modelFailed: (e) => `Could not show the model: ${e}`,
+  modelLost: 'The WebGL context was lost: the browser took the GPU back. Reload the tab (↻)',
+  modelInfo: (size, meshes, tris, mats, anims) =>
+    `${size} · ${meshes} mesh${meshes === 1 ? '' : 'es'} · ${tris} triangle${tris === 1 ? '' : 's'} · ${mats} material${mats === 1 ? '' : 's'} · ${anims} animation${anims === 1 ? '' : 's'}`,
+  modelReset: 'Reset view',
+  modelResetTip: 'Reset view (double click)',
+  modelClip: 'Animation',
+  modelPlay: 'Play',
+  modelPause: 'Pause',
   // image attachments (M3-12)
   attach: 'Attach an image\nor paste from the clipboard ⌘V / drop into the window',
   remove: 'Remove',
