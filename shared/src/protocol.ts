@@ -19,12 +19,16 @@ export type MediaShape =
   | { kind: 'rect' | 'ellipse'; color: MarkColor; x: number; y: number; w: number; h: number }
   | { kind: 'arrow'; color: MarkColor; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'pen'; color: MarkColor; points: number[] };
+/** A 3D view's camera (protocol 9): where it is, what it looks at, its vertical field of view in degrees (0 < fov < 180). */
+export type ModelCamera = { position: [number, number, number]; target: [number, number, number]; fov: number };
 export type MediaAnchor = {
   kind: 'media'; source: FileSource; width: number; height: number;
   /** seconds at the pause (video only), ms precision */
   time?: number;
   /** the /file ETag when drawn */
   version?: string;
+  /** a 3D model comment (protocol 9): the camera the frame was rendered from. A model comment has no `time`. */
+  camera?: ModelCamera;
   /** set only when the frame and layer files were downscaled to fit MARK_MAX_BYTES (0 < scale < 1; both files) */
   scale?: number;
   shapes: MediaShape[];
@@ -72,9 +76,10 @@ export const generatedImages = (c: Comment): number => (isMediaAnchor(c.anchor) 
  * 6: the model and effort switch: the client's `model` (ids answered with `ack`), the server's `model` and `models` events,
  * `capabilities.models`;
  * 7: a message anchor may name a subagent (`source.agent`, the Agent call's tool-use id) and `GET /subagent` serves its conversation;
- * 8: the client's `task-stop` and `task-background`, and `GET /task-output` (a shell task's output tail).
+ * 8: the client's `task-stop` and `task-background`, and `GET /task-output` (a shell task's output tail);
+ * 9: a media anchor may carry a `camera` (a comment on a 3D model view); an older server would drop it, so the client offers markup on a model only from 9.
  */
-export const PROTOCOL = 8;
+export const PROTOCOL = 9;
 
 /** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
 export const TAKEN_OVER_CODE = 4001;
@@ -240,10 +245,16 @@ function isMediaShape(v: unknown): v is MediaShape {
   }
 }
 
+const isVec3 = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
+function isCamera(v: unknown): v is ModelCamera {
+  return isObj(v) && isVec3(v.position) && isVec3(v.target) && typeof v.fov === 'number' && Number.isFinite(v.fov) && v.fov > 0 && v.fov < 180;
+}
+
 function isMediaAnchorShape(v: Obj): boolean {
   return isObj(v.source) && isFileSource(v.source) && isPos(v.width) && isPos(v.height)
     && (v.time === undefined || (typeof v.time === 'number' && Number.isFinite(v.time) && v.time >= 0))
     && (v.version === undefined || (typeof v.version === 'string' && v.version.length <= 200))
+    && (v.camera === undefined || isCamera(v.camera))
     && (v.scale === undefined || (typeof v.scale === 'number' && v.scale > 0 && v.scale < 1))
     && Array.isArray(v.shapes) && v.shapes.length > 0 && v.shapes.every(isMediaShape);
 }
@@ -292,6 +303,8 @@ function toShape(s: MediaShape): MediaShape {
   }
 }
 
+const toCamera = (c: ModelCamera): ModelCamera => ({ position: [c.position[0], c.position[1], c.position[2]], target: [c.target[0], c.target[1], c.target[2]], fov: c.fov });
+
 /** exported for tests */
 export function toAnchor(a: Anchor): Anchor {
   if (isMediaAnchor(a)) {
@@ -299,6 +312,7 @@ export function toAnchor(a: Anchor): Anchor {
       kind: 'media', source: toSource(a.source) as FileSource, width: a.width, height: a.height,
       ...(a.time === undefined ? {} : { time: a.time }),
       ...(a.version === undefined ? {} : { version: a.version }),
+      ...(a.camera === undefined ? {} : { camera: toCamera(a.camera) }),
       ...(a.scale === undefined ? {} : { scale: a.scale }),
       shapes: a.shapes.map(toShape),
     };

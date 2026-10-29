@@ -199,6 +199,30 @@ describe('comment sync', () => {
   });
 });
 
+describe('a model comment', () => {
+  it('is stored with its camera, replayed with it, and hello announces protocol 9', async () => {
+    const s = await boot({ resume: 'sess-cam' });
+    const camera = { position: [1, 2, 3], target: [0, 0.5, 0], fov: 45 };
+    const A = '2f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
+    const model = c(A, {
+      anchor: { kind: 'media', source: { kind: 'file', path: 'm/a.glb' }, width: 800, height: 600, version: '"v"', camera, junk: 1, shapes: [{ kind: 'rect', color: '#ff3b30', x: 0, y: 0, w: 1, h: 1 }] },
+    } as unknown as Partial<Comment>);
+    const cl = await connect(s.url);
+    expect(cl.events.find((e) => e.kind === 'hello')).toMatchObject({ protocol: 9 });
+    cl.ws.send(JSON.stringify({ type: 'comments', sessionId: 'sess-cam', items: [model] }));
+    await until(() => lastComments(cl)?.length === 1);
+    const anchor = lastComments(cl)![0].anchor as unknown as Record<string, unknown>;
+    expect(anchor.camera).toEqual(camera);
+    expect(anchor.junk).toBeUndefined();
+    expect('time' in anchor).toBe(false);
+    // a second client gets it replayed from the store
+    const cl2 = await connect(s.url);
+    await until(() => lastComments(cl2)?.length === 1);
+    expect((lastComments(cl2)![0].anchor as unknown as { camera: unknown }).camera).toEqual(camera);
+    expect(JSON.parse(fs.readFileSync(path.join(home, 'comments', 'sess-cam.json'), 'utf8'))).toBeTruthy();
+  });
+});
+
 describe('mark files follow their comment', () => {
   it('a media comment dropped from the set loses its folder in the project; a kept one and the merge stand', async () => {
     const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-csync-proj-')));
