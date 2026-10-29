@@ -80,6 +80,7 @@ export const en: Dict = {
   agentLoading: 'Loading the subagent…',
   agentGone: 'This subagent is not in the current session.',
   agentFailed: (m) => `Could not load the subagent: ${m}`,
+  agentOldServer: 'The server is older than this page: restart it (▾ → Restart the server), then the tab reads again.',
   agentPrompt: 'prompt',
   agentNoComment: 'Commenting here needs a server restart (code updated).',
   batchHead: 'Comments on fragments:',

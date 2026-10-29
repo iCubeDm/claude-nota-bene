@@ -6,7 +6,7 @@ import { Feed } from '@/feed/Feed.tsx';
 import { useAppDispatch, useAppSelector, type AppStore } from '@/store/store.ts';
 import { setAgentTitle, type AgentTab } from '@/tabs/slice.ts';
 import { selectLiveCalls } from '@/tasks/slice.ts';
-import { AGENT_PROTOCOL, fetchSubagent, selectSubagent, selectToolResulted } from './slice.ts';
+import { AGENT_PROTOCOL, OLD_SERVER, fetchSubagent, selectSubagent, selectToolResulted } from './slice.ts';
 
 /** How often a running subagent is read again while its tab is the visible one. */
 export const POLL_MS = 1500;
@@ -32,6 +32,8 @@ export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
   const live = useAppSelector((s) => selectLiveCalls(s).has(tool));
   const resulted = useAppSelector((s) => selectToolResulted(s, tool));
   const pollable = live || !resulted;
+  // a server restart (a new `hello`) reads at once: the one before may have been too old for /subagent
+  const protocol = useAppSelector((s) => s.controls.protocol);
 
   useEffect(() => {
     if (!session) return; // the conversation is not known yet: the read waits for it
@@ -51,7 +53,7 @@ export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
       ctl.abort();
       clearTimeout(timer);
     };
-  }, [tool, session, active, pollable, dispatch, store]);
+  }, [tool, session, active, pollable, protocol, dispatch, store]);
 
   // the real description names the tab (a restored one had the saved title)
   const name = entry?.description || entry?.type || '';
@@ -75,7 +77,7 @@ export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
         ) : (
           <>
             {entry.status === 'error' && (
-              <div data-anchor-skip data-kind="agent-status" role="alert" className="mb-3 rounded border border-destructive/40 px-3 py-2 text-sm text-destructive">{t('agentFailed', entry.error ?? '')}</div>
+              <div data-anchor-skip data-kind="agent-status" role="alert" className="mb-3 rounded border border-destructive/40 px-3 py-2 text-sm text-destructive">{entry.error === OLD_SERVER ? t('agentOldServer') : t('agentFailed', entry.error ?? '')}</div>
             )}
             {entry.feed.items.length > 0 && <Feed feed={entry.feed} agent={tool} running={entry.running} />}
           </>

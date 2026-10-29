@@ -72,13 +72,19 @@ export const fetchSubagent = (tool: string, signal?: AbortSignal): AppThunk<Prom
   if (!session) return 'stale';
   dispatch(requested({ tool, session }));
   const stale = () => getState().feed.session?.id !== session || signal?.aborted === true;
+  // an older server has no /subagent (its page fallback answers HTML): say what helps, not a JSON parse error
+  const old = () => (dispatch(failed({ tool, session, status: 'error', error: OLD_SERVER })), 'error' as const);
+  const { protocol } = getState().controls;
+  if (protocol > 0 && protocol < AGENT_PROTOCOL) return old(); // known old: not even asked
   try {
     const r = await fetch(`/subagent?session=${encodeURIComponent(session)}&tool=${encodeURIComponent(tool)}`, { signal });
     if (stale()) return 'stale';
     if (r.status === 404 || r.status === 409) return (dispatch(failed({ tool, session, status: 'gone' })), 'gone');
     if (!r.ok) return (dispatch(failed({ tool, session, status: 'error', error: `HTTP ${r.status}` })), 'error');
-    const v: unknown = await r.json();
+    const body = await r.text();
     if (stale()) return 'stale';
+    if (body.trimStart().startsWith('<')) return old();
+    const v: unknown = JSON.parse(body);
     if (!isView(v)) return (dispatch(failed({ tool, session, status: 'error', error: 'bad answer' })), 'error');
     dispatch(loaded({ tool, session, view: v }));
     return v.running ? 'running' : 'done';
@@ -102,6 +108,9 @@ export const itemsOf = (s: RootState, agent?: string): FeedItem[] | null => {
   // a failed poll keeps what was read: its comment cards must not turn into orphans for a network blip
   return e && (e.status === 'ok' || (e.status === 'error' && e.feed.items.length > 0)) ? e.feed.items : null;
 };
+
+/** The error of a read from a server without /subagent: the tab asks for a server restart. */
+export const OLD_SERVER = 'old-server';
 
 /** The first protocol whose server keeps `source.agent` on a comment's anchor (older ones drop it): below it, no comments in a subagent's tab. */
 export const AGENT_PROTOCOL = 7;

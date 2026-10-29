@@ -197,6 +197,24 @@ describe('the subagent tab', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the subagent: HTTP 500');
   });
 
+  it('a server older than protocol 7 (no /subagent: its page fallback answers HTML) asks for a server restart', async () => {
+    answer = () => new Response('<!doctype html><html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    setup();
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server is older than this page: restart it (▾ → Restart the server)');
+    cleanup();
+    calls = [];
+    setup({ protocol: 6 });
+    expect(await screen.findByRole('alert')).toHaveTextContent('restart it');
+    expect(calls).toEqual([]); // known old: not even asked
+  });
+
+  it('after a server restart to protocol 7 the tab reads at once', async () => {
+    const { store } = setup({ protocol: 6 });
+    expect(await screen.findByRole('alert')).toHaveTextContent('restart it');
+    act(() => { store.dispatch(serverEvent({ kind: 'hello', protocol: 7 })); });
+    expect(await screen.findByText('hello brave world')).toBeInTheDocument();
+  });
+
   it('keeps the content when a later poll fails, and says so', async () => {
     vi.useFakeTimers();
     let n = 0;
@@ -301,11 +319,11 @@ describe('comments in the subagent tab', () => {
   });
 
   it('a server older than protocol 7 gets no comments here (it would file them under the main chat), and the pane says why', async () => {
+    // such a server has no /subagent either: the pane asks for a restart and offers no comments
     const { r } = setup({ protocol: 6 });
-    await screen.findByText('hello brave world');
-    await select(r, 'a1:0', 6, 11);
-    expect(screen.queryByRole('button', { name: 'Looks good' })).toBeNull();
+    expect(await screen.findByRole('alert')).toHaveTextContent('restart it');
     expect(r.container.querySelector('[data-agent-nocomment]')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Looks good' })).toBeNull();
   });
 
   it('the mark is drawn in the subagent pane for its comment, not in the chat', async () => {
