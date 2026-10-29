@@ -3,7 +3,7 @@ import { fileTabId } from '@/tabs/slice.ts';
 import { setStartAt } from '@/files/startAt.ts';
 import { refOf } from '@/files/sources.ts';
 import { fileOfImage, openMediaFile } from '@/refs/refs.ts';
-import { useAppDispatch } from '@/store/store.ts';
+import { useAppDispatch, useMedia } from '@/store/store.ts';
 import { PlayerBar } from './PlayerBar.tsx';
 import { PlayerFlash } from './PlayerFlash.tsx';
 import { applyPlayerKey } from './playerKeys.ts';
@@ -17,6 +17,7 @@ import { useChatPlayerKeys } from './useChatPlayerKeys.ts';
  */
 export function ChatPlayer({ media, box }: { media: HTMLMediaElement; box: HTMLElement }) {
   const dispatch = useAppDispatch();
+  const controller = useMedia();
   const ref = useRef<HTMLElement | null>(box);
   ref.current = box;
   const flash = useChatPlayerKeys(media, ref);
@@ -34,6 +35,8 @@ export function ChatPlayer({ media, box }: { media: HTMLMediaElement; box: HTMLE
       media.removeEventListener('click', toggle);
     };
   }, [media, box]);
+  // a guest of its pane (chat or a subagent tab): a media tab pauses it, leaving the pane sends a playing video to PiP
+  useEffect(() => controller.guest(media, () => box.closest<HTMLElement>('[data-pane]')?.dataset.pane ?? null), [controller, media, box]);
   const onTick = file && ((time: number) => {
     const open = openMediaFile(media);
     if (!open) return;

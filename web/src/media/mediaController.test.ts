@@ -223,3 +223,52 @@ it('subscribers hear play, pause and ended; unregister stops tracking', async ()
   v.pause();
   expect(seen).toHaveBeenCalledTimes(6); // play + the unregister itself, nothing after unsubscribe
 });
+
+// A video or audio inside a chat reply (or a subagent's feed) lives in a pane that is not a media tab: a guest of that pane.
+it('a playing chat medium pauses when a media tab opens, with no PiP (user, 2026-10-29)', async () => {
+  const [inChat, file] = [fake('video'), fake('video')];
+  mc.guest(inChat, () => 'chat');
+  mc.register('A', file);
+  await inChat.play();
+  mc.onSwitch('chat', 'A');
+  await vi.runAllTimersAsync();
+  expect(inChat.paused).toBe(true);
+  expect(pip.request).not.toHaveBeenCalled();
+});
+
+it('leaving the chat for a non-media tab sends its playing video to PiP, like a media tab; audio plays on', async () => {
+  const [v, a] = [fake('video'), fake('audio')];
+  mc.guest(v, () => 'chat');
+  mc.guest(a, () => 'chat');
+  await v.play();
+  mc.onSwitch('chat', 'file:notes.md');
+  expect(pip.request).toHaveBeenCalledWith(v);
+  pip.request.mockClear();
+  await pip.exit();
+  v.pause();
+  await a.play();
+  mc.onSwitch('chat', 'file:notes.md');
+  expect(pip.request).not.toHaveBeenCalled();
+  expect(a.paused).toBe(false);
+});
+
+it('a guest of another pane is left alone on a switch between non-media tabs; closing its tab pauses it', async () => {
+  const v = fake('video');
+  mc.guest(v, () => 'agent:t1');
+  await v.play();
+  mc.onSwitch('chat', 'file:notes.md');
+  expect(pip.request).not.toHaveBeenCalled();
+  expect(v.paused).toBe(false);
+  mc.onClose('agent:t1');
+  expect(v.paused).toBe(true);
+});
+
+it('an unregistered guest is forgotten', async () => {
+  const [v, file] = [fake('video'), fake('video')];
+  const off = mc.guest(v, () => 'chat');
+  off();
+  mc.register('A', file);
+  await v.play();
+  mc.onSwitch('chat', 'A');
+  expect(v.paused).toBe(false);
+});

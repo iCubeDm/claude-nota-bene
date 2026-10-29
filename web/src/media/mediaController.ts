@@ -20,10 +20,13 @@ const BACK_TO_TAB_DELAY = 50;
  * - leaving a playing video for a non-media tab sends it to PiP (one window); audio keeps playing;
  * - PiP's "back to tab" only activates the video's tab; our own exit() is ignored;
  * - closing a tab pauses its medium and closes PiP if it is the one.
+ * A video or audio inside a chat reply or a subagent's feed is a guest of that pane (`guest`): the pane is not a media
+ * tab, but its media follow the same rules (paused by a media tab, PiP when its pane is left for a non-media tab).
  * Lives outside React and Redux: it holds DOM elements.
  */
 export class MediaController {
   private els = new Map<string, HTMLMediaElement>();
+  private guests = new Map<HTMLMediaElement, () => string | null>(); // element -> the tab id of the pane it sits in
   private ownExit = new Set<Element>(); // elements whose next leavepictureinpicture we caused
   private subs = new Set<() => void>();
   private readonly pip: PipApi;
@@ -54,16 +57,32 @@ export class MediaController {
     };
   }
 
+  /** A medium inside a pane that is not a media tab; `owner` names that pane's tab at the time it is asked. */
+  guest(el: HTMLMediaElement, owner: () => string | null): () => void {
+    const onLeave = () => { const id = owner(); if (id) this.onLeavePip(id, el); };
+    el.addEventListener('leavepictureinpicture', onLeave);
+    this.guests.set(el, owner);
+    return () => {
+      el.removeEventListener('leavepictureinpicture', onLeave);
+      this.ownExit.delete(el);
+      this.guests.delete(el);
+    };
+  }
+
+  private guestsOf(tabId: string): HTMLMediaElement[] {
+    return [...this.guests].flatMap(([el, owner]) => (owner() === tabId ? [el] : []));
+  }
+
   /** Call before `to` is shown. */
   onSwitch(from: string, to: string): void {
     if (from === to) return;
     if (this.isMedia(to)) {
       const target = this.els.get(to);
-      for (const el of this.els.values()) if (el !== target && !el.paused) el.pause();
+      for (const el of [...this.els.values(), ...this.guests.keys()]) if (el !== target && !el.paused) el.pause();
       if (this.pip.current()) this.exitPip(); // another tab's video (paused above), or `to`'s own: it plays on in its pane
       return;
     }
-    const el = this.els.get(from);
+    const el = this.els.get(from) ?? this.guestsOf(from).find((g) => g instanceof HTMLVideoElement && !g.paused && !g.ended);
     if (!(el instanceof HTMLVideoElement) || el.paused || el.ended || this.pip.current() === el) return; // audio plays on
     // a rejected request (no user activation, PiP disabled, headless) leaves the video playing hidden, as before PiP
     const request = () => this.pip.request(el).catch(() => {});
@@ -81,10 +100,11 @@ export class MediaController {
 
   /** Pause the tab's medium and close PiP if it is this one. */
   onClose(tabId: string): void {
-    const el = this.els.get(tabId);
-    if (!el) return;
-    if (this.pip.current() === el) this.exitPip();
-    if (!el.paused) el.pause();
+    const own = this.els.get(tabId);
+    for (const el of [...(own ? [own] : []), ...this.guestsOf(tabId)]) {
+      if (this.pip.current() === el) this.exitPip();
+      if (!el.paused) el.pause();
+    }
   }
 
   /** Tab id of the playing medium, for the ▶ dot. */
@@ -115,7 +135,7 @@ export class MediaController {
     if (this.ownExit.delete(el)) return; // we closed it: no tab switch
     // the user left PiP: "back to tab" keeps it playing → show its tab; the window's × pauses it → nothing
     setTimeout(() => {
-      if (this.els.get(tabId) === el && !el.paused && !el.ended) this.activate(tabId);
+      if ((this.els.get(tabId) === el || this.guests.has(el)) && !el.paused && !el.ended) this.activate(tabId);
     }, BACK_TO_TAB_DELAY);
   }
 }
