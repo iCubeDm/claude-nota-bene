@@ -223,6 +223,19 @@ describe('mapSdk: tasks, suggestion, rate limit', () => {
     expect(sys('task_started', { task_id: 't', task_type: 'bash' })[0]).toMatchObject({ desc: 'bash', type: 'bash' });
     expect(sys('task_started', { task_id: 't' })[0]).toMatchObject({ desc: 'task' });
   });
+  it('is_backgrounded: kept on task_started, and a task_updated holding only it is an update with bg', () => {
+    expect(sys('task_started', { task_id: 't', description: 'D', is_backgrounded: false })[0]).toMatchObject({ bg: false });
+    expect(sys('task_started', { task_id: 't', description: 'D' })[0]).not.toHaveProperty('bg');
+    expect(sys('task_updated', { task_id: 't', patch: { is_backgrounded: true } })).toEqual([{ t: 'task', id: 't', phase: 'updated', bg: true }]);
+    expect(sys('task_updated', { task_id: 't', patch: { description: 'x', is_backgrounded: true } })).toEqual([{ t: 'task', id: 't', phase: 'updated', desc: 'x', bg: true }]);
+  });
+  it('an ambient shell / Monitor watcher is kept and flagged; other ambient tasks and skip_transcript ones are not shown', () => {
+    expect(sys('task_started', { task_id: 'w', description: 'watch', task_type: 'monitor_mcp', ambient: true })[0]).toMatchObject({ ambient: true, desc: 'watch' });
+    expect(sys('task_started', { task_id: 'w', description: 'watch', task_type: 'local_bash', ambient: true })[0]).toMatchObject({ ambient: true });
+    expect(sys('task_started', { task_id: 'w', task_type: 'local_agent', ambient: true })).toEqual([]);
+    expect(sys('task_started', { task_id: 'w', task_type: 'local_bash', ambient: true, skip_transcript: true })).toEqual([]);
+    expect(sys('task_started', { task_id: 't', description: 'D', task_type: 'local_bash' })[0]).not.toHaveProperty('ambient');
+  });
   it('task_started ambient or skip_transcript -> nothing; no task_id -> nothing', () => {
     expect(sys('task_started', { task_id: 't', ambient: true })).toEqual([]);
     expect(sys('task_started', { task_id: 't', skip_transcript: true })).toEqual([]);

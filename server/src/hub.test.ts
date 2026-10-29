@@ -241,6 +241,19 @@ describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
     expect(reduceTasks({}, replayOf(hub) as ServerEvent)).toEqual(expected);
   });
 
+  it('the bg flag survives a cut: the last update that carries it is kept', () => {
+    const hub = new EventHub();
+    let ts = 0;
+    const task = (e: object): Stored => ({ kind: 'agent', e: { t: 'task', ...e } as never, ts: ++ts });
+    for (const e of [{ id: 'x', phase: 'started', desc: 'x', type: 'local_bash', bg: false }, { id: 'x', phase: 'updated', bg: true },
+      { id: 'x', phase: 'updated', desc: 'renamed' }, { id: 'x', phase: 'progress', tokens: 1, tool: 't', summary: 's' }]) hub.emit(task(e));
+    const expected = reduceTasks({}, replayOf(hub) as ServerEvent);
+    expect(expected.x).toMatchObject({ bg: true, desc: 'renamed' });
+    hub.emit(boundary);
+    hub.cut({ archive: () => 1 });
+    expect(reduceTasks({}, replayOf(hub) as ServerEvent)).toEqual(expected);
+  });
+
   it('a failing archive leaves the history as it was', () => {
     const hub = new EventHub();
     hub.emit(user('a'));

@@ -1,7 +1,7 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 // the fake backend speaks SDK frames through this mapper (R-M7-13); it takes the frame type from here, not the SDK
 export type { SDKMessage };
-import { MODES, TOOL_USE_ID } from '@nota-bene/shared';
+import { MODES, TASK_ID, TOOL_USE_ID, taskKind } from '@nota-bene/shared';
 import type { AgentEvent, Mode, WireAgentEvent } from '@nota-bene/shared';
 
 /**
@@ -29,7 +29,7 @@ type Frame = {
   // tasks
   task_id?: string; parent_task_id?: string; tool_use_id?: string; description?: string; subagent_type?: string; task_type?: string; ambient?: boolean; skip_transcript?: boolean;
   usage?: { total_tokens?: number }; last_tool_name?: string; summary?: string;
-  patch?: { status?: string; description?: string };
+  patch?: { status?: string; description?: string; is_backgrounded?: boolean }; is_backgrounded?: boolean;
   // prompt_suggestion, rate_limit_event
   suggestion?: unknown; rate_limit_info?: unknown;
 };
@@ -117,15 +117,18 @@ function task(m: Frame): AgentEvent[] {
   if (!id) return [];
   switch (m.subtype) {
     case 'task_started':
-      // ambient tasks and the ones kept out of the transcript are not shown
-      if (m.ambient || m.skip_transcript) return [];
-      return [{ t: 'task', id, phase: 'started', desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type ?? '', ...(typeof m.tool_use_id === 'string' && TOOL_USE_ID.test(m.tool_use_id) ? { call: m.tool_use_id } : {}), ...(typeof m.parent_task_id === 'string' && TOOL_USE_ID.test(m.parent_task_id) ? { parent: m.parent_task_id } : {}) }];
+      // housekeeping (skip_transcript) is never shown; a watcher (ambient) only when it is a shell / Monitor, which the shell
+      // tab exists for, and then flagged so it stays out of the counts
+      if (m.skip_transcript || (m.ambient && taskKind(m.task_type ?? '') !== 'shell')) return [];
+      return [{ t: 'task', id, phase: 'started', ...(m.ambient ? { ambient: true } : {}), ...(typeof m.is_backgrounded === 'boolean' ? { bg: m.is_backgrounded } : {}), desc: m.description || m.subagent_type || m.task_type || 'task', type: m.task_type ?? '', ...(typeof m.tool_use_id === 'string' && TOOL_USE_ID.test(m.tool_use_id) ? { call: m.tool_use_id } : {}), ...(typeof m.parent_task_id === 'string' && TASK_ID.test(m.parent_task_id) ? { parent: m.parent_task_id } : {}) }];
     case 'task_progress':
       return [{ t: 'task', id, phase: 'progress', tokens: m.usage?.total_tokens || 0, tool: m.last_tool_name || '', summary: m.summary || '' }];
     case 'task_updated': {
       const st = m.patch?.status;
       if (st && st !== 'running' && st !== 'pending' && st !== 'paused') return [{ t: 'task', id, phase: 'done', ...endStatus(st) }];
-      return m.patch?.description ? [{ t: 'task', id, phase: 'updated', desc: m.patch.description }] : [];
+      const bg = m.patch?.is_backgrounded;
+      return m.patch?.description || typeof bg === 'boolean'
+        ? [{ t: 'task', id, phase: 'updated', ...(m.patch?.description ? { desc: m.patch.description } : {}), ...(typeof bg === 'boolean' ? { bg } : {}) }] : [];
     }
     default: // task_notification
       return [{ t: 'task', id, phase: 'done', ...endStatus(m.status) }];

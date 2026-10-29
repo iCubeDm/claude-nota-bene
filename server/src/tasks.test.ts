@@ -35,7 +35,7 @@ const turn: FakeTurn = {
   ],
 };
 
-async function boot(o: { background?: boolean | 'throw' } = {}) {
+async function boot(o: { background?: boolean | 'throw'; refuseStop?: string[] } = {}) {
   const backend = fakeBackend([turn], { shells, ...o });
   const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist, oneTab: false, resume: 'fake-session' });
   closers.push(s.close);
@@ -88,6 +88,14 @@ describe('task-stop / task-background', () => {
     off.ws.send(JSON.stringify({ type: 'task-background', toolUseId: 'toolu_sh' }));
     await until(() => errors(off.events).length === 1);
     expect(errors(off.events)[0]).toMatchObject({ where: 'task', message: 'background tasks are disabled' });
+  });
+
+  it('a refused stop comes back as server-error where task, with the reason, and the task keeps running', async () => {
+    const { ws, events } = await boot({ refuseStop: ['sh1'] });
+    ws.send(JSON.stringify({ type: 'task-stop', id: 'sh1' }));
+    await until(() => errors(events).length === 1);
+    expect(errors(events)[0]).toMatchObject({ where: 'task', message: 'cannot stop sh1: no such task' });
+    expect(tasks(events).sh1?.status).toBe('running');
   });
 
   it('a malformed one is an error event and reaches no backend', async () => {

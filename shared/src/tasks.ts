@@ -11,6 +11,8 @@ export type Task = {
   desc: string; type: string; kind: TaskKind;
   /** the tool-use id of the call that started it, when the CLI said */ call?: string;
   /** task_id of the subagent task that launched it, when the CLI said */ parent?: string;
+  /** the CLI's `is_backgrounded`: false = blocks its tool call, true = in the background; absent = not said */ bg?: boolean;
+  /** a live-update watcher: listed, but not counted as activity */ ambient?: boolean;
   start: number; status: TaskStatus; /** the server time the task ended; only once it is not running */ end?: number;
   tokens: number; tool: string; summary: string;
 };
@@ -58,6 +60,7 @@ export function reduceTasks(s: TasksState, ev: ServerEvent): TasksState {
         ...s,
         [e.id]: {
           desc: e.desc ?? 'task', type, kind: taskKind(type, e.call), ...(e.call ? { call: e.call } : {}), ...(e.parent ? { parent: e.parent } : {}),
+          ...(e.bg !== undefined ? { bg: e.bg } : {}), ...(e.ambient ? { ambient: true } : {}),
           start: ev.ts, status: 'running', tokens: 0, tool: '', summary: '',
         },
       };
@@ -65,7 +68,7 @@ export function reduceTasks(s: TasksState, ev: ServerEvent): TasksState {
     case 'progress':
       return cur?.status === 'running' ? { ...s, [e.id]: { ...cur, tokens: e.tokens || 0, tool: e.tool || '', summary: e.summary || '' } } : s;
     case 'updated':
-      return cur && e.desc ? { ...s, [e.id]: { ...cur, desc: e.desc } } : s;
+      return cur && (e.desc || e.bg !== undefined) ? { ...s, [e.id]: { ...cur, ...(e.desc ? { desc: e.desc } : {}), ...(e.bg !== undefined ? { bg: e.bg } : {}) } } : s;
     case 'done': {
       if (cur?.status !== 'running') return s; // unknown, or already over (the CLI reports an end twice: update, then notification)
       const next = { ...s, [e.id]: { ...cur, status: e.status ?? 'done', end: ev.ts } as Task };

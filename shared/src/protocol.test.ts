@@ -282,3 +282,12 @@ test('task-stop and task-background parse strictly', () => {
     expect(parseClientMessage(bad)).toHaveProperty('error');
   }
 });
+
+test('bg: the CLI\'s is_backgrounded is kept from the start and moved by an update; an update with only bg changes nothing else', () => {
+  let s = reduceTasks({}, T(1, { id: 'a', phase: 'started', desc: 'a', type: 'local_bash', bg: false }));
+  expect(s.a?.bg).toBe(false);
+  s = reduceTasks(s, T(2, { id: 'a', phase: 'updated', bg: true }));
+  expect(s.a).toMatchObject({ bg: true, desc: 'a' });
+  expect(reduceTasks({}, T(1, { id: 'b', phase: 'started', desc: 'b' })).b).not.toHaveProperty('bg');
+  expect(reduceTasks({}, T(1, { id: 'w', phase: 'started', desc: 'w', ambient: true })).w?.ambient).toBe(true);
+});

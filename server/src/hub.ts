@@ -124,7 +124,7 @@ export class EventHub {
 /**
  * The indexes of the task events a replay needs for the tasks the state holds at the boundary (the running ones and the
  * last few finished): per id, after its last `started`, that `started`, the last `progress` before it ended, the first
- * `done` (the reducer ignores a second end), and the last `updated` that names a desc. That is all the web's
+ * `done` (the reducer ignores a second end), the last `updated` that names a desc and the last that carries `bg`. That is all the web's
  * reduceTasks reads (a progress overwrites tokens, tool and summary of a running task; an updated with a desc overwrites
  * the desc, one without changes nothing), so the trimmed events replay to the same state. The rest is archived.
  */
@@ -141,7 +141,10 @@ function runningTasks(before: ServerEvent[]): Set<number> {
       if (!m.has('done')) m.set('done', i);
     } else if (phase === 'progress') {
       if (!m.has('done')) m.set(phase, i);
-    } else if (phase === 'updated' && ev.e.desc) m.set(phase, i);
+    } else if (phase === 'updated') {
+      if (ev.e.desc) m.set('updated', i);
+      if (ev.e.bg !== undefined) m.set('updatedBg', i);
+    }
   });
   return new Set([...last.values()].flatMap((m) => [...m.values()]));
 }

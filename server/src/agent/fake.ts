@@ -99,6 +99,7 @@ type TaskState = {
   shells: FakeShell[]; reads: Map<string, number>; stopped: Set<string>; stops: string[]; backgrounds: string[];
   /** what `backgroundTask` answers: true (default), false (nothing matched) or 'throw' (background tasks disabled) */
   background: boolean | 'throw';
+  /** task ids `stopTask` refuses (rejects) */ refuseStop: string[];
 };
 
 const TAIL_BYTES = 8192;
@@ -115,6 +116,8 @@ export type FakeScript = FakeTurn[] | {
   shells?: FakeShell[];
   /** what `backgroundTask` answers (default true) */
   background?: boolean | 'throw';
+  /** task ids `stopTask` refuses */
+  refuseStop?: string[];
 };
 
 /** What a fake agent knows of its model: the list, the one running, and what was asked of it (shared by the backend's tests). */
@@ -198,6 +201,7 @@ class FakeSession implements FakeAgentSession {
 
   async stopTask(taskId: string): Promise<void> {
     this.tasks.stops.push(taskId);
+    if (this.tasks.refuseStop.includes(taskId)) throw new Error(`cannot stop ${taskId}: no such task`);
     this.tasks.stopped.add(taskId); // its output stops growing; a task id started again is stopped again by a new stopTask
     // as the CLI does: a task_notification with status stopped
     this.injected.push(sdk({ type: 'system', subtype: 'task_notification', task_id: taskId, status: 'stopped', output_file: '', summary: 'stopped', session_id: this.sessionId, uuid: `fake-tn-${taskId}` }));
@@ -434,7 +438,7 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; subagents?: FakeSubagent[]; shells?: FakeShell[]; background?: boolean | 'throw' } = {},
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; subagents?: FakeSubagent[]; shells?: FakeShell[]; background?: boolean | 'throw'; refuseStop?: string[] } = {},
 ): Omit<AgentBackend, 'start'> & {
   start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[];
   /** every setModel / setEffort call, in order */
@@ -442,7 +446,7 @@ export function fakeBackend(
   /** every stopTask / backgroundTask call, in order */
   stops: string[]; backgrounds: string[];
 } {
-  const tasks: TaskState = { shells: o.shells ?? [], reads: new Map(), stopped: new Set(), stops: [], backgrounds: [], background: o.background ?? true };
+  const tasks: TaskState = { shells: o.shells ?? [], reads: new Map(), stopped: new Set(), stops: [], backgrounds: [], background: o.background ?? true, refuseStop: o.refuseStop ?? [] };
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
   const setModels: (string | null)[] = [];
@@ -500,5 +504,5 @@ export function fakeBackend(
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
   return Array.isArray(script)
     ? fakeBackend(script, { base })
-    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.subagents ? { subagents: script.subagents } : {}), ...(script.shells ? { shells: script.shells } : {}), ...(script.background !== undefined ? { background: script.background } : {}) });
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.subagents ? { subagents: script.subagents } : {}), ...(script.shells ? { shells: script.shells } : {}), ...(script.background !== undefined ? { background: script.background } : {}), ...(script.refuseStop ? { refuseStop: script.refuseStop } : {}) });
 }
