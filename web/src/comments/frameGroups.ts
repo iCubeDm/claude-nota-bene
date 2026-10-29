@@ -7,7 +7,7 @@ import { drawBadges } from '../media/markup/badges.ts';
 export type FrameGroup = { key: string; idx: number[] };
 
 const frameKey = (a: MediaAnchor): string =>
-  JSON.stringify([a.source.path, a.source.ref ?? null, a.time ?? null, a.version, a.width, a.height]);
+  JSON.stringify([a.source.path, a.source.ref ?? null, a.time ?? null, a.camera ?? null, a.version, a.width, a.height]);
 
 /**
  * Groups of >= 2 pending media comments on one source frame (each with a stored frame image). A comment without a known

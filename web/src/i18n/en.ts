@@ -277,6 +277,7 @@ export const en: Dict = {
   modelResetTip: 'Reset view (double click)',
   modelClip: 'Animation',
   modelPlay: 'Play',
+  camLine: (pos: string, target: string, fov: string) => `camera ${pos} → ${target}, fov ${fov}°`,
   modelPause: 'Pause',
   // image attachments (M3-12)
   attach: 'Attach an image\nor paste from the clipboard ⌘V / drop into the window',

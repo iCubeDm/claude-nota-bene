@@ -275,6 +275,7 @@ export const ru = {
   modelResetTip: 'Сбросить вид (двойной клик)',
   modelClip: 'Анимация',
   modelPlay: 'Играть',
+  camLine: (pos: string, target: string, fov: string) => `камера ${pos} → ${target}, fov ${fov}°`,
   modelPause: 'Пауза',
   // image attachments (M3-12)
   attach: 'Прикрепить изображение\nили вставь из буфера ⌘V / перетащи в окно',

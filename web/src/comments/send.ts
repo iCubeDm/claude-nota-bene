@@ -7,6 +7,7 @@ import { instructionOf, labelOf } from './labels.ts';
 import { draftSent, removeImage, selectBuilding, selectDraft, selectImages, selectUploading, setBuilding, setDraft, type ImageEntry } from '../composer/slice.ts';
 import { markSending, selectComments, selectPending, unmarkSending } from './slice.ts';
 import { selectFileVersion } from '../files/slice.ts';
+import { cameraLine } from '../model/pose.ts';
 import { mediaTime } from '../media/markup/geometry.ts';
 import { activate } from '../tabs/slice.ts';
 import { toast } from '../shell/toast.ts';
@@ -31,7 +32,7 @@ const pastedImages = (c: Comment): string[] => (c.images ?? []).slice(generatedI
 export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0]): string {
   const src = c.anchor.source;
   const a = c.anchor;
-  if (isMediaAnchor(a)) return `${whereOfFile(a.source)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${a.width}×${a.height}`;
+  if (isMediaAnchor(a)) return `${whereOfFile(a.source)}${a.time !== undefined ? ` @ ${mediaTime(a.time)}` : ''} · ${a.width}×${a.height}${a.camera ? ` · ${cameraLine(a.camera, getLang())}` : ''}`;
   if (src.kind === 'file') return whereOfFile(src);
   // the batch text names a reply plainly: its number is the index in the CURRENT feed (restarts after a compaction, shifts when earlier history is shown); the quote is the locator
   // a subagent's reply or action is named with the subagent (no numbers); one the loaded conversation does not hold still is not "chat"

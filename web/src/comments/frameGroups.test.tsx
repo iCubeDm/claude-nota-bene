@@ -59,6 +59,12 @@ it('frameGroups: same path, time, version and size group (>= 2); the key carries
   expect(g).toEqual([{ key: '1:c1,2:c2', idx: [0, 1] }, { key: '4:c4,5:c5', idx: [3, 4] }]);
 });
 
+it('frameGroups: model comments group only at the same camera', () => {
+  const cam = (x: number) => ({ position: [x, 1, 1] as [number, number, number], target: [0, 0, 0] as [number, number, number], fov: 50 });
+  const m = (id: string, x: number): Comment => ({ ...mc(id, { path: 'a.glb' }), anchor: { ...(mc(id, { path: 'a.glb' }).anchor as object), camera: cam(x) } as never });
+  expect(fg.frameGroups([m('c1', 1), m('c2', 1), m('c3', 2), m('c4', 2), m('c5', 3)]).map((g) => g.idx)).toEqual([[0, 1], [2, 3]]);
+});
+
 it('a send with a shared frame builds one composite, disables a second send, and sends 2 images for 3+1 comments', async () => {
   const done = gate();
   const { sent, store } = setup([mc('c1'), mc('c2'), mc('c3'), mc('c4', { path: 'b.png', img: 'b' })]);
