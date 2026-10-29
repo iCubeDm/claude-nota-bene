@@ -15,8 +15,29 @@
       "history": [{ "role": "user", "text": "beta question" }, { "role": "assistant", "text": "beta answer" }]
     }
   ],
+  "subagents": [
+    {
+      "toolUseId": "toolu_e2e_done", "type": "general-purpose", "description": "Review batch fixes",
+      "messages": [
+        { "role": "user", "text": "Review the diff" },
+        { "role": "assistant", "text": "Reading the changed files first.", "tools": [{ "id": "toolu_e2e_inner", "name": "Bash", "input": { "command": "git diff --stat" }, "output": "3 files changed" }] },
+        { "role": "assistant", "text": "The send path looks correct and the tests cover it." }
+      ]
+    },
+    {
+      "toolUseId": "toolu_e2e_run", "type": "Explore", "description": "Look around the repo", "running": true,
+      "messages": [
+        { "role": "user", "text": "Explore" },
+        { "role": "assistant", "text": "Still exploring the repository layout." }
+      ]
+    }
+  ],
   "turns": [
     { "text": "plain reply", "compactMs": 1500, "suggestions": ["notes.md"] },
+    { "match": "[agents]", "text": "subagents launched", "tools": [
+      { "id": "toolu_e2e_done", "name": "Agent", "input": { "subagent_type": "general-purpose", "description": "Review batch fixes", "prompt": "Review the diff" }, "output": "agentId: e2edone01 (finished)" },
+      { "id": "toolu_e2e_run", "name": "Agent", "input": { "subagent_type": "Explore", "description": "Look around the repo", "prompt": "Explore" }, "output": "Async agent launched successfully. agentId: e2erun02" }
+    ] },
     { "match": "[plan]", "text": "Here is the plan.", "ask": { "toolName": "ExitPlanMode", "input": { "plan": "## The plan\n\nStep one: rename bravo.\n\nStep two: run the tests.\n" }, "onAllow": "default" } },
     { "match": "[initmode]", "text": "the CLI changed the mode", "initMode": "acceptEdits" },
     { "match": "[warn]", "text": "context is filling", "context": { "used": 130000, "max": 200000, "pct": 65 } },
