@@ -6,6 +6,16 @@ import path from 'node:path';
 /** Blender's own app path on macOS, the last place we look. */
 export const MAC_BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender';
 export const EXPORT_SCRIPT = path.join(import.meta.dirname, 'blend', 'export.py');
+export const SANDBOX_PROFILE = path.join(import.meta.dirname, 'blend', 'sandbox.sb');
+const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
+let warnedNoSandbox = false;
+
+/** The install Blender may read: its .app bundle, else the folder above the binary's. */
+function installOf(bin: string): string {
+  const real = fs.realpathSync(bin);
+  const m = /^(.*?\.app)\//.exec(real);
+  return m ? m[1]! : path.dirname(path.dirname(real));
+}
 
 const isExecutable = (p: string): boolean => {
   try {
@@ -54,6 +64,11 @@ export type BlendOptions = {
   timeoutMs?: number;
   /** after SIGTERM, how long before SIGKILL */
   graceMs?: number;
+  /** Run Blender under macOS sandbox-exec (reads only the project root, the Blender install and the system; writes only
+   * the work dir; no network). 'auto': on macOS when sandbox-exec exists; elsewhere Blender runs unsandboxed (logged once). */
+  sandbox?: boolean | 'auto';
+  /** TEST ONLY: export.py skips its static outside-references check, so a test can see the sandbox alone hold. */
+  skipStaticCheck?: boolean;
 };
 
 /** `transient`: not in the cache (the file changed while it was converted): the caller removes `glb` after sending it. */
@@ -69,7 +84,7 @@ const TAIL_BYTES = 16384;
 const TAIL_LINES = 12;
 
 // the child gets no secrets from our environment (API keys, tokens): only what a program needs to start
-const childEnv = (): NodeJS.ProcessEnv => {
+const childEnv = (work?: string): NodeJS.ProcessEnv => {
   const out: NodeJS.ProcessEnv = {};
   for (const k of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'USER', 'DISPLAY', 'XDG_RUNTIME_DIR']) {
     if (process.env[k] !== undefined) out[k] = process.env[k];
@@ -134,7 +149,7 @@ export class BlendConverter {
   private readonly onExit = () => { this.child?.kill('SIGKILL'); };
 
   constructor(o: BlendOptions) {
-    this.o = { timeoutMs: 120_000, graceMs: 3000, blender: () => findBlender(), ...o };
+    this.o = { timeoutMs: 120_000, graceMs: 3000, blender: () => findBlender(), sandbox: 'auto', skipStaticCheck: false, ...o };
   }
 
   available(): boolean {
@@ -203,6 +218,18 @@ export class BlendConverter {
     return p;
   }
 
+  private sandboxed(): boolean {
+    const want = this.o.sandbox;
+    if (want === false) return false;
+    const can = process.platform === 'darwin' && fs.existsSync(SANDBOX_EXEC);
+    if (want === true && !can) throw new BlendError(500, 'no-sandbox', 'sandbox-exec is not available');
+    if (!can && !warnedNoSandbox) {
+      warnedNoSandbox = true;
+      console.warn('Nota Bene: sandbox-exec is not available on this platform; Blender runs without an OS sandbox (only the static reference check protects reads)');
+    }
+    return can;
+  }
+
   private enqueue<T>(job: () => Promise<T>): Promise<T> {
     const next = this.chain.then(job, job);
     this.chain = next.catch(() => undefined);
@@ -248,9 +275,19 @@ export class BlendConverter {
   private spawnBlender(bin: string, blend: string, out: string, cwd: string, bases: string[]): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const args = ['-b', '--disable-autoexec', '--factory-startup', '--offline-mode', '-noaudio', blend, '--python-exit-code', '1', '--python', EXPORT_SCRIPT, '--', out, ...bases];
+      let cmd = bin;
+      let argv = args;
       let child;
       try {
-        child = spawn(bin, args, { cwd, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'], shell: false });
+        const work = fs.realpathSync(cwd);
+        if (this.sandboxed()) {
+          // every path is a -D parameter of the fixed profile, never part of its text
+          cmd = SANDBOX_EXEC;
+          argv = ['-D', `SCRIPT=${EXPORT_SCRIPT}`, '-D', `ROOT=${bases[0] ?? work}`, '-D', `WORK=${work}`, '-D', `APP=${installOf(bin)}`, '-f', SANDBOX_PROFILE, bin, ...args];
+        }
+        const env = childEnv(work);
+        if (this.o.skipStaticCheck) env.NB_TEST_SKIP_STATIC_CHECK = '1';
+        child = spawn(cmd, argv, { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
       } catch (e) {
         return reject(spawnError(e));
       }
@@ -279,7 +316,7 @@ export class BlendConverter {
         clearTimeout(timer);
         clearTimeout(killer);
         release();
-        const refused = refusedPaths(tail);
+        const refused = code === 3 ? refusedPaths(tail) : null;
         if (timedOut) reject(new BlendError(504, 'timeout', `Blender did not finish in ${Math.round(this.o.timeoutMs / 1000)} s and was stopped\n${lastLines()}`.trim()));
         else if (this.disposed) reject(new BlendError(503, 'closing', 'the server is stopping'));
         else if (refused) reject(new BlendError(422, 'outside-refs', 'the .blend references files outside the project', refused));

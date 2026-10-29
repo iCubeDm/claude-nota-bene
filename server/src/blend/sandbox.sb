@@ -1,0 +1,29 @@
+;; macOS sandbox-exec profile for the Blender that converts a .blend (see ../blend.ts). Deny by default.
+;; Parameters (-D, never spliced into this text): SCRIPT = blend/export.py, ROOT = the realpath'd project / worktree root
+;; (the work dir for a branch blob), WORK = the realpath'd work dir, APP = the Blender install (the .app bundle).
+;; Reads: the system, the Blender install, ROOT, WORK. Writes: WORK only. No network.
+(version 1)
+(deny default)
+(allow process-exec*)
+(allow process-fork)
+(allow sysctl-read)
+(allow system-info)
+(allow mach-lookup)
+(allow ipc-posix-shm*)
+(allow signal (target self))
+;; Blender asks the GPU (Metal) which device it is, even with -b
+(allow iokit-open)
+(allow iokit-get-properties)
+;; stat / realpath of any path (no file content)
+(allow file-read-metadata)
+(allow file-read*
+  (literal "/")
+  (subpath "/System") (subpath "/usr") (subpath "/Library") (subpath "/private/etc") (subpath "/private/var/db")
+  (subpath "/dev")
+  (subpath (param "APP"))
+  (literal (param "SCRIPT"))
+  (subpath (param "ROOT"))
+  (subpath (param "WORK")))
+(allow file-read* file-write* (subpath (param "WORK")))
+(allow file-write* (literal "/dev/null"))
+;; (deny network*) is implied by deny default

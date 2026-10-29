@@ -5,7 +5,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { BlendConverter, findBlender, MAC_BLENDER } from './blend.ts';
+import { BlendConverter, findBlender, MAC_BLENDER, SANDBOX_PROFILE } from './blend.ts';
 import { EventHub } from './hub.ts';
 import { httpHandler } from './http.ts';
 import { fileRoutes } from './fileRoutes.ts';
@@ -39,7 +39,7 @@ const spawns = () => {
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const conv = (o: Partial<ConstructorParameters<typeof BlendConverter>[0]> = {}) =>
-  new BlendConverter({ stateDir: () => state, blender: () => fake, ...o });
+  new BlendConverter({ stateDir: () => state, blender: () => fake, sandbox: false, ...o });
 
 beforeAll(() => {
   dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-blend-')));
@@ -266,7 +266,7 @@ describe.skipIf(!real)('real Blender', () => {
     const { execFileSync } = await import('node:child_process');
     const script = path.join(dir, 'make.py');
     fs.writeFileSync(script, `import bpy, sys, os\nbpy.ops.wm.read_factory_settings(use_empty=True)\nOUT = sys.argv[sys.argv.index("--") + 1]\n${body}\n`);
-    execFileSync(real!, ['-b', '--factory-startup', '--python', script, '--', where], { stdio: 'ignore' });
+    execFileSync(real!, ['-b', '--factory-startup', '--python-exit-code', '1', '--python', script, '--', where], { stdio: 'ignore' });
   };
   const textured = (img: string, pack = false) => `
 bpy.ops.mesh.primitive_cube_add()
@@ -361,5 +361,94 @@ bpy.ops.wm.save_as_mainfile(filepath=OUT)`);
     fs.rmSync(marker);
     await c().convert({ file: blend, base: rd });
     expect(fs.existsSync(marker)).toBe(false);
+  }, 60_000);
+
+  const tiled = (pattern: string) => `
+bpy.ops.wm.save_as_mainfile(filepath=OUT) # saved first: a '//' path needs a place
+bpy.ops.mesh.primitive_cube_add()
+cube = bpy.context.active_object
+mat = bpy.data.materials.new('M'); mat.use_nodes = True
+tex = mat.node_tree.nodes.new('ShaderNodeTexImage')
+img = bpy.data.images.new('u', 4, 4, tiled=True)
+img.filepath_raw = ${JSON.stringify(pattern)}
+img.file_format = 'PNG'
+img.save()
+tex.image = img
+mat.node_tree.links.new(tex.outputs['Color'], mat.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
+cube.data.materials.append(mat)
+bpy.ops.wm.save_mainfile()`;
+
+  it('a Geometry Nodes disk bake (it reads blob files by names from its own meta, ../ included) is refused; a packed one is not', async () => {
+    const mk = (target: string) => `
+bpy.ops.mesh.primitive_cube_add()
+o = bpy.context.active_object
+ng = bpy.data.node_groups.new('G', 'GeometryNodeTree')
+ng.interface.new_socket('Geometry', in_out='INPUT', socket_type='NodeSocketGeometry')
+ng.interface.new_socket('Geometry', in_out='OUTPUT', socket_type='NodeSocketGeometry')
+i = ng.nodes.new('NodeGroupInput'); out = ng.nodes.new('NodeGroupOutput'); b = ng.nodes.new('GeometryNodeBake')
+ng.links.new(i.outputs[0], b.inputs[0]); ng.links.new(b.outputs[0], out.inputs[0])
+m = o.modifiers.new('GN', 'NODES'); m.node_group = ng; m.bake_target = '${target}'
+bpy.ops.wm.save_as_mainfile(filepath=OUT)`;
+    const disk = path.join(rd, 'disk.blend');
+    await make(disk, mk('DISK'));
+    await expect(c().convert({ file: disk, base: rd })).rejects.toMatchObject({ status: 422, code: 'outside-refs', paths: [expect.stringContaining('disk bake')] });
+    const packed = path.join(rd, 'packedbake.blend');
+    await make(packed, mk('PACKED'));
+    await expect(c().convert({ file: packed, base: rd })).resolves.toBeTruthy();
+  }, 60_000);
+
+  it('an external point cache is refused', async () => {
+    const blend = path.join(rd, 'pc.blend');
+    await make(blend, `
+bpy.ops.mesh.primitive_cube_add()
+o = bpy.context.active_object
+m = o.modifiers.new('Cloth', 'CLOTH')
+m.point_cache.use_external = True
+bpy.ops.wm.save_as_mainfile(filepath=OUT)`);
+    await expect(c().convert({ file: blend, base: rd })).rejects.toMatchObject({ code: 'outside-refs', paths: [expect.stringContaining('external point cache')] });
+  }, 60_000);
+
+  describe('a UDIM tile that is a symlink to a file outside the project', () => {
+    let blend: string;
+    let secret: Buffer;
+    beforeAll(async () => {
+      const dirT = path.join(rd, 'udim');
+      fs.mkdirSync(dirT);
+      blend = path.join(dirT, 'udim.blend');
+      await make(blend, tiled('//tex.<UDIM>.png'));
+      // an image no tile of the project holds: the bytes we look for in the GLB
+      const png = path.join(outside, 'secret-tile.png');
+      await make(path.join(outside, 'x.blend'), `img = bpy.data.images.new('s', 8, 8)\nimg.pixels = [0.123, 0.456, 0.789, 1.0] * 64\nimg.filepath_raw = ${JSON.stringify(png)}\nimg.file_format = 'PNG'\nimg.save()\nbpy.ops.wm.save_as_mainfile(filepath=OUT)`);
+      secret = fs.readFileSync(png);
+      fs.rmSync(path.join(dirT, 'tex.1001.png'), { force: true });
+      fs.symlinkSync(png, path.join(dirT, 'tex.1001.png'));
+    }, 60_000);
+    const holds = (file: string) => fs.readFileSync(file).includes(secret);
+
+    it('the static check refuses it', async () => {
+      await expect(c().convert({ file: blend, base: rd })).rejects.toMatchObject({ code: 'outside-refs', paths: [expect.stringContaining('tex.1001.png')] });
+    }, 60_000);
+
+    it('without the static check it would leak (control), and the sandbox alone stops it', async () => {
+      const open = await new BlendConverter({ stateDir: () => path.join(dir, 'real-sb0'), sandbox: false, skipStaticCheck: true }).convert({ file: blend, base: rd });
+      expect(holds(open.glb)).toBe(true);
+      const sb = new BlendConverter({ stateDir: () => path.join(dir, 'real-sb1'), sandbox: 'auto', skipStaticCheck: true });
+      let leaked = false;
+      try { leaked = holds((await sb.convert({ file: blend, base: rd })).glb); } catch { /* a failed export is fine too */ }
+      expect(leaked).toBe(false);
+    }, 90_000);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('the sandbox denies reading outside the project and the network, whatever the file asks', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const probe = path.join(dir, 'probe.py');
+    const secretFile = path.join(outside, 'plain-secret.txt');
+    fs.writeFileSync(secretFile, 'top secret');
+    fs.writeFileSync(probe, `import socket\ntry:\n    print('READ', open(${JSON.stringify(secretFile)}).read())\nexcept Exception as e:\n    print('READ-DENIED')\ntry:\n    socket.create_connection(('1.1.1.1', 53), timeout=3); print('NET-OK')\nexcept Exception as e:\n    print('NET-DENIED')\n`);
+    const work = fs.mkdtempSync(path.join(dir, 'sbwork-'));
+    const out = execFileSync('/usr/bin/sandbox-exec', ['-D', `SCRIPT=${probe}`, '-D', `ROOT=${rd}`, '-D', `WORK=${work}`, '-D', 'APP=/Applications/Blender.app', '-f', SANDBOX_PROFILE, real!, '-b', '--factory-startup', '--python', probe], { encoding: 'utf8', env: { PATH: process.env.PATH, TMPDIR: work, HOME: work } });
+    expect(out).toContain('READ-DENIED');
+    expect(out).toContain('NET-DENIED');
+    expect(out).not.toContain('top secret');
   }, 60_000);
 });
