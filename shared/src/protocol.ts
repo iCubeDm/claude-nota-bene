@@ -50,7 +50,12 @@ export type Comment = {
   sentIn?: string;
   /** attachment ids; labels are assigned at send time */
   images?: string[];
+  /** media comments: how many leading `images` the app generated (the frame, plus the transparent layer in old comments); the rest were pasted. Absent = 2 (old comments). */
+  genImages?: number;
 };
+
+/** The number of leading generated images of a comment (0 for a non-media one); the pasted ones follow. */
+export const generatedImages = (c: Comment): number => (isMediaAnchor(c.anchor) ? c.genImages ?? 2 : 0);
 
 /**
  * What this server understands beyond the base protocol, announced in `hello` on connect. Every window serves the one
@@ -249,7 +254,8 @@ function isComment(v: unknown): v is Comment {
   const textOk = v.text !== '' || v.label !== undefined;
   return labelOk && textOk && (v.status === 'pending' || v.status === 'sent') && isOffset(v.createdAt)
     && (v.sentIn === undefined || typeof v.sentIn === 'string')
-    && (v.images === undefined || (Array.isArray(v.images) && v.images.every(isImageId)));
+    && (v.images === undefined || (Array.isArray(v.images) && v.images.every(isImageId)))
+    && (v.genImages === undefined || isOffset(v.genImages));
 }
 
 function isPermission(o: Obj): boolean {
@@ -297,6 +303,7 @@ function toComment(c: Comment): Comment {
     status: c.status, createdAt: c.createdAt,
     ...(c.sentIn === undefined ? {} : { sentIn: c.sentIn }),
     ...(c.images === undefined ? {} : { images: [...c.images] }),
+    ...(c.genImages === undefined ? {} : { genImages: c.genImages }),
   };
 }
 

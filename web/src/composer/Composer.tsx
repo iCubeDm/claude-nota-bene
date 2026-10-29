@@ -12,7 +12,7 @@ import { MentionPicker } from './MentionPicker.tsx';
 import { Meters } from '@/stats/Meters.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { hasFiles, useImageIntake } from '@/attachments/useImageIntake.ts';
-import { addImage, removeImage, selectDraft, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from './slice.ts';
+import { addImage, removeImage, selectDraft, selectBuilding, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from './slice.ts';
 import { interrupt, selectBusy, selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { BINDINGS, keysLabel } from '@/shell/keymap.ts';
 import { PLAYER_HELP } from '@/media/playerKeys.ts';
@@ -29,7 +29,8 @@ export function Composer() {
   const caps = useAppSelector(selectCapabilities);
   const text = useAppSelector(selectDraft);
   const images = useAppSelector(selectImages);
-  const uploading = useAppSelector(selectUploading) > 0;
+  const building = useAppSelector(selectBuilding);
+  const uploading = useAppSelector(selectUploading) > 0 || building;
   // mid-switch the server refuses sends: Send is off (Enter too) and the draft simply waits for the new session
   const switching = useAppSelector(selectSwitching);
   const suggestion = useAppSelector(selectSuggestion);
@@ -112,7 +113,7 @@ export function Composer() {
   const submit = (force: boolean) => {
     if (uploading || switching) return;
     const r = dispatch(sendBatch(force));
-    if (r === 'empty' || r === 'switching' || r === 'building') return;
+    if (r === 'empty' || r === 'switching' || r === 'building' || r === 'changed') return;
     setFailed(r === 'offline');
     if (r === 'sent') ref.current?.focus();
   };
@@ -180,7 +181,7 @@ export function Composer() {
         </div>
         <MentionPicker target={ref} />
         <ShortcodePicker target={ref} />
-        <span className="inline-flex" title={switching ? t('switching') : uploading ? t('uploadWait') : undefined}>
+        <span className="inline-flex" title={switching ? t('switching') : building ? t('buildingImage') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>
             {nPending ? t('sendN', nPending) : t('send')}
           </Button>

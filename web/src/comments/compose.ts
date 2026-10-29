@@ -33,7 +33,10 @@ export function composeBatch(
     if (isMediaAnchor(a)) {
       const sfx = a.scale ? tIn(lang, 'scaledSfx', a.scale) : '';
       const dir = `.nota-bene/marks/${c.id}`;
-      if (shared[i]) tail += '\n' + tIn(lang, 'imgRefShared', shared[i].k, shared[i].cs);
+      if (shared[i]) {
+        tail += '\n' + tIn(lang, 'imgRefShared', shared[i].k, shared[i].cs);
+        if (refs[i].length > 1) tail += '\n' + tIn(lang, 'imgRef', refs[i].slice(1)); // pasted images after the shared one
+      }
       else if (refs[i]?.length) tail += '\n' + tIn(lang, 'imgRefMedia', refs[i]);
       tail += '\n' + tIn(lang, 'filesLine', [`${dir}/frame.jpg${sfx}`, `${dir}/layer.png${sfx}`]);
       if (staleOf(c)) tail += '\n' + tIn(lang, 'markStale');

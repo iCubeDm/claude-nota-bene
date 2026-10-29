@@ -1,4 +1,4 @@
-import { isMediaAnchor } from '@nota-bene/shared';
+import { generatedImages, isMediaAnchor } from '@nota-bene/shared';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Attachments } from '@/attachments/Attachments.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
@@ -41,9 +41,9 @@ export function CommentCard({ id, index, popover = false }: { id: string; index:
   const sent = c.status === 'sent';
   const media = isMediaAnchor(c.anchor) ? c.anchor : null;
   const changed = !!media?.version && version !== undefined && version !== media.version;
-  // a media comment's images: [0] the frame with the shapes (the thumbnail), [1] the transparent layer (for the agent);
-  // only pasted images after them go to the strip
-  const strip = media ? c.images?.slice(2) : c.images;
+  // a media comment's leading images are generated (the frame with the shapes = the thumbnail, in old comments also the layer);
+  // only the pasted ones after them go to the strip
+  const strip = c.images?.slice(generatedImages(c));
   const label = c.label && QUICK_LABELS.find((l) => l.id === c.label);
 
   const finish = (save: boolean) => {

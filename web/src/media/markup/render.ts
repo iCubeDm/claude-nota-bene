@@ -7,9 +7,11 @@ type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 const HEAD_ANGLE = (25 * Math.PI) / 180;
 
-/** Draws shapes on a 2D context sized w×h (relative → px). Stroke width max(3, round(min(w,h)/250)) px. */
-export function drawShapes(ctx: Ctx, shapes: MediaShape[], w: number, h: number): void {
-  const lineWidth = Math.max(3, Math.round(Math.min(w, h) / 250));
+/** The stroke width of shapes drawn on a w×h picture. */
+export const strokeWidth = (w: number, h: number): number => Math.max(3, Math.round(Math.min(w, h) / 250));
+
+/** Draws shapes on a 2D context sized w×h (relative → px). Stroke width `strokeWidth(w, h)` unless given. */
+export function drawShapes(ctx: Ctx, shapes: MediaShape[], w: number, h: number, lineWidth = strokeWidth(w, h)): void {
   ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';

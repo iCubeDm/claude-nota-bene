@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { parseClientMessage, toAnchor, type MediaAnchor } from './protocol.ts';
+import { generatedImages, parseClientMessage, toAnchor, type MediaAnchor } from './protocol.ts';
 
 test('accepts a send', () => expect(parseClientMessage('{"type":"send","id":"u1","text":"hi"}')).toEqual({ type: 'send', id: 'u1', text: 'hi' }));
 test('rejects bad json', () => expect(parseClientMessage('{nope')).toHaveProperty('error'));
@@ -59,6 +59,15 @@ test('send with images keeps only valid refs', () => {
   expect(parseClientMessage(send([{ ...ok, label: 1 }]))).toHaveProperty('error');
   expect(parseClientMessage(send('x'))).toHaveProperty('error');
 });
+test('genImages is a count; generatedImages: 2 for an old media comment, genImages for a new one, 0 for text', () => {
+  expect(parseClientMessage(comments(comment({ genImages: 1 })))).toMatchObject({ items: [{ genImages: 1 }] });
+  expect(parseClientMessage(comments(comment({ genImages: -1 })))).toHaveProperty('error');
+  const media = { kind: 'media', source: { kind: 'file', path: 'a.png' }, width: 1, height: 1, shapes: [] } as never;
+  expect(generatedImages({ ...(comment() as object), anchor: media } as never)).toBe(2);
+  expect(generatedImages({ ...(comment() as object), anchor: media, genImages: 1 } as never)).toBe(1);
+  expect(generatedImages(comment() as never)).toBe(0);
+});
+
 test('comment images are ids', () => {
   const c = comment({ images: [H] });
   expect(parseClientMessage(comments(c))).toStrictEqual({ type: 'comments', sessionId: null, items: [c] });

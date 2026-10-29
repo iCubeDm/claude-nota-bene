@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
-import { selectUploading } from '@/composer/slice.ts';
+import { selectBuilding, selectUploading } from '@/composer/slice.ts';
 import { selectSwitching } from '@/controls/slice.ts';
 import { CommentCard } from './CommentCard.tsx';
 import { PanelResizer, usePanelWidth } from '@/shell/PanelResizer.tsx';
@@ -15,7 +15,8 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
   const open = useAppSelector(selectCommentsUi).panelOpen;
   const pending = useAppSelector(selectPending);
   const n = pending.length;
-  const uploading = useAppSelector(selectUploading) > 0;
+  const building = useAppSelector(selectBuilding);
+  const uploading = useAppSelector(selectUploading) > 0 || building;
   const switching = useAppSelector(selectSwitching);
   const aside = useRef<HTMLElement>(null);
   const size = usePanelWidth('panel:comments:width', 320, 240);
@@ -54,7 +55,7 @@ export function CommentsPanel({ onSend }: { onSend: () => void }) {
         )}
       </div>
       <div className="flex-none border-t border-border-soft p-2">
-        <span className="block" title={switching ? t('switching') : uploading ? t('uploadWait') : undefined}>
+        <span className="block" title={switching ? t('switching') : building ? t('buildingImage') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" id="cSend" className="h-[34px] w-full" disabled={n === 0 || uploading || switching} onClick={onSend}>
             {n ? t('sendN', n) : t('send')}
           </Button>

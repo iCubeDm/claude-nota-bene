@@ -259,6 +259,8 @@ export const en: Dict = {
   markStale: '   (marked on an earlier version of the file; the frame shows it)',
   onlyImages: 'Only images can be attached',
   uploadWait: 'Wait for the image to finish uploading',
+  buildingImage: 'Building the image…',
+  changedWhileSending: 'The comments changed during sending: nothing was sent, send again',
   attachHere: 'Attach an image (or paste / drop here)',
   imgFail: 'Could not read the image',
   // permission mode (M4-06)

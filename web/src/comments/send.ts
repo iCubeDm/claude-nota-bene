@@ -1,25 +1,30 @@
-import { isMediaAnchor, type AnchorSource, type Comment, type ImageRef } from '@nota-bene/shared';
+import { generatedImages, isMediaAnchor, type AnchorSource, type Comment, type ImageRef } from '@nota-bene/shared';
 import { mediaTypeOf } from '../attachments/image.ts';
 import { getLang, t, tIn } from '../i18n/index.ts';
-import { selectReplyLabel, sendMessage, type AppThunk } from '../store/store.ts';
+import { selectReplyLabel, sendMessage, type AppThunk, type RootState } from '../store/store.ts';
 import { composeBatch } from './compose.ts';
 import { instructionOf, labelOf } from './labels.ts';
-import { clearImages, draftSent, selectDraft, selectImages, selectUploading, setDraft, uploadFinished, uploadStarted } from '../composer/slice.ts';
-import { markSending, selectPending } from './slice.ts';
+import { draftSent, removeImage, selectBuilding, selectDraft, selectImages, selectUploading, setBuilding, setDraft, type ImageEntry } from '../composer/slice.ts';
+import { markSending, selectComments, selectPending, unmarkSending } from './slice.ts';
 import { selectFileVersion } from '../files/slice.ts';
 import { mediaTime } from '../media/markup/geometry.ts';
 import { activate } from '../tabs/slice.ts';
 import { toast } from '../shell/toast.ts';
-import { buildComposites, frameGroups } from './frameGroups.ts';
+import { buildComposites, frameGroups, type FrameGroup } from './frameGroups.ts';
 
-/** 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). */
-export type SendResult = 'empty' | 'sent' | 'offline' | 'switching' | 'building';
+/** 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). 'changed': the comments or the session changed during that wait, nothing was sent. */
+export type SendResult = 'empty' | 'sent' | 'offline' | 'switching' | 'building' | 'changed';
 
 /** A file source as the batch and the card name it: `path`, or `path @ ref` for another branch or worktree (M3-16). */
 export const whereOfFile = (src: Extract<AnchorSource, { kind: 'file' }>): string => (src.ref ? `${src.path} @ ${src.ref}` : src.path);
 
-/** A media comment sends its frame only (images[0]); old comments stored layer.png as a second id, which stays on disk. */
-const mediaImages = (c: Comment): string[] => (isMediaAnchor(c.anchor) ? (c.images ?? []).slice(0, 1) : c.images ?? []);
+/** The images of a comment that go out on their own: a media comment's frame (images[0]; its layer.png stays on disk) and every pasted image. */
+const ownImages = (c: Comment): string[] => {
+  const all = c.images ?? [], gen = generatedImages(c);
+  return [...all.slice(0, Math.min(1, gen)), ...all.slice(gen)];
+};
+/** Pasted images only (a grouped media comment sends the shared composite instead of its frame). */
+const pastedImages = (c: Comment): string[] => (c.images ?? []).slice(generatedImages(c));
 
 /** Where a comment's fragment lives, for the batch line: the reply label, "my message", or the file. */
 export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0]): string {
@@ -31,47 +36,50 @@ export function whereOf(c: Comment, st?: Parameters<typeof selectReplyLabel>[0])
   return (st && selectReplyLabel(st, src.id, true)) ?? t('srcChat');
 }
 
+/** What one click on Send takes: the session, the draft (text and images) and the pending comments with a fingerprint each. */
+type Snapshot = { sid: string | null | undefined; draft: string; body: string; own: ImageEntry[]; pending: Comment[]; prints: string[] };
+const printOf = (c: Comment): string => JSON.stringify([c.text, c.label, c.anchor, c.images, c.genImages]);
+const snapshotOf = (st: RootState): Snapshot => {
+  const pending = selectPending(st), draft = selectDraft(st);
+  return { sid: st.feed.session?.id, draft, body: draft.trim(), own: selectImages(st), pending, prints: pending.map(printOf) };
+};
+/** Still the same send? Same session, and every snapshot comment is still pending and unchanged. */
+const unchanged = (st: RootState, snap: Snapshot): boolean =>
+  st.feed.session?.id === snap.sid
+  && snap.pending.every((c, i) => {
+    const now = selectComments(st).find((x) => x.id === c.id);
+    return now?.status === 'pending' && printOf(now) === snap.prints[i];
+  });
+
 /**
- * The one send path: the composer draft plus every pending comment as one message. Pending → sent happens only via
- * the server echo; until then the ids sit in `sendingIds` so a second send cannot repeat them. On success the draft
- * and the composer images are cleared (comment images stay on their comments); when offline, everything is kept.
- * Images are numbered across the whole message: the composer's first, then each comment's in order. An upload still in
- * flight blocks the send ('empty': nothing happens, the button is disabled meanwhile). A send switches to the chat tab.
- * Media comments on one source frame share one composite image (`frameGroups`); `composites` maps group key → its attachment id,
- * a group without one (or whose comments changed meanwhile) falls back to each comment's own frame.
+ * Sends exactly the snapshot (its ids are already in `sendingIds`; any result but 'sent' releases them). Pending → sent
+ * happens only via the server echo. On success only what was snapshotted leaves the composer: the draft text (a tail typed
+ * since stays) and the snapshotted images; comment images stay on their comments. Images are numbered across the whole
+ * message: the composer's first, then each comment's in order. Media comments on one source frame share one composite image
+ * (`composites`: group key → attachment id; a group without one falls back to each comment's own frame). A send switches to the chat tab.
  */
-const sendNow = (force: boolean, composites: Map<string, string>): AppThunk<SendResult> => (d, getState) => {
+const sendNow = (snap: Snapshot, composites: Map<string, string>, force: boolean): AppThunk<SendResult> => (d, getState) => {
   const st = getState();
-  // the server refuses sends mid-switch; the draft and the comments stay for the new session
-  if (st.controls.switching) return 'switching';
-  const pending = selectPending(st);
-  const body = selectDraft(st).trim();
-  const own = selectImages(st);
-  if ((!body && !pending.length && !own.length) || selectUploading(st)) return 'empty';
+  const { pending, body, own } = snap;
+  const ids = pending.map((c) => c.id);
+  const fail = (r: SendResult): SendResult => (d(unmarkSending(ids)), r);
+  if (st.controls.switching) return fail('switching'); // the server refuses sends mid-switch; the draft and the comments stay for the new session
+  if (!unchanged(st, snap)) return fail('changed');
   const lang = getLang();
   const images: ImageRef[] = own.map((im, k) => ({ ...im, label: tIn(lang, 'imgLabel', k + 1) }));
+  const push = (id: string, label: (k: number) => string): number => (images.push({ id, mediaType: mediaTypeOf(id), label: label(images.length + 1) }), images.length);
   const shared: ({ k: number; cs: number[] } | undefined)[] = [];
-  const groupOf = new Map<number, { key: string; idx: number[] }>();
+  const groupOf = new Map<number, FrameGroup>();
   for (const g of frameGroups(pending)) if (composites.has(g.key)) for (const i of g.idx) groupOf.set(i, g);
   const sharedK = new Map<string, number>(); // group key → its image number, once pushed
   const refs = pending.map((c, i) => {
     const g = groupOf.get(i);
-    if (g) {
-      let k = sharedK.get(g.key);
-      if (k === undefined) {
-        const cs = g.idx.map((j) => j + 1);
-        const id = composites.get(g.key)!;
-        images.push({ id, mediaType: mediaTypeOf(id), label: tIn(lang, 'imgLabelG', images.length + 1, cs) });
-        k = images.length;
-        sharedK.set(g.key, k);
-      }
-      shared[i] = { k, cs: g.idx.map((j) => j + 1) };
-      return [k];
-    }
-    return mediaImages(c).map((id) => {
-      images.push({ id, mediaType: mediaTypeOf(id), label: tIn(lang, 'imgLabelC', images.length + 1, i + 1) });
-      return images.length;
-    });
+    const mine = (list: string[]) => list.map((id) => push(id, (k) => tIn(lang, 'imgLabelC', k, i + 1)));
+    if (!g) return mine(ownImages(c));
+    const cs = g.idx.map((j) => j + 1);
+    if (!sharedK.has(g.key)) sharedK.set(g.key, push(composites.get(g.key)!, (k) => tIn(lang, 'imgLabelG', k, cs)));
+    shared[i] = { k: sharedK.get(g.key)!, cs };
+    return [shared[i]!.k, ...mine(pastedImages(c))];
   });
   const text = composeBatch(
     body, pending, lang, (c) => labelOf(c, lang),
@@ -86,32 +94,41 @@ const sendNow = (force: boolean, composites: Map<string, string>): AppThunk<Send
     },
     shared,
   );
-  const ids = pending.map((c) => c.id);
   const id = crypto.randomUUID();
-  if (!d(sendMessage(text, force, ids, images, id))) return 'offline';
+  if (!d(sendMessage(text, force, ids, images, id))) return fail('offline');
   d(draftSent({ id, text: body, images: own, commentIds: ids })); // until the echo: a refusal puts it back
-  d(markSending(ids));
-  d(setDraft(''));
-  d(clearImages());
+  const cur = selectDraft(getState());
+  d(setDraft(snap.draft && cur.startsWith(snap.draft) ? cur.slice(snap.draft.length).trimStart() : cur));
+  for (const im of own) d(removeImage(im.id));
   d(activate('chat')); // sent from a file tab: the reply arrives in the chat (prototype parity)
   return 'sent';
 };
 
+/** After the async part: anything but 'sent' is told to the user, never silent. */
+const tell = (r: SendResult): void => {
+  if (r === 'offline') toast(t('offline'), '');
+  else if (r === 'switching') toast(t('switching'), '');
+  else if (r === 'changed') toast(t('changedWhileSending'), '');
+};
+
 /**
- * Entry point. With comments sharing a source frame (and a live connection) the composite images are built and
- * uploaded first: the upload counter is raised for the duration (the send buttons are disabled, a second call is
- * 'empty'), then `sendNow` re-reads the whole state, so edits made meanwhile are honoured. A failed build toasts and
- * sends nothing; every comment and the draft stay.
+ * Entry point: SNAPSHOT AT THE CLICK. The draft, its images and the pending comments are taken now and their ids marked as
+ * sending, so nothing sent later (and no second click) can touch them; whatever is added meanwhile stays out of this send.
+ * Comments sharing a source frame (with a live connection) get their composite images built from the snapshot first: the
+ * send buttons are off for the duration ('building') and a second call is 'empty'. Then `sendNow` sends the snapshot if the
+ * session and the comments are unchanged, else nothing (released, the user is told). An upload still running at the click blocks it.
  */
 export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState) => {
   const st = getState();
-  const pending = selectPending(st);
-  const groups = frameGroups(pending);
-  if (!groups.length || st.controls.switching || selectUploading(st) || st.conn.state !== 'open') return d(sendNow(force, new Map()));
-  d(uploadStarted());
-  void buildComposites(pending, groups).then(
-    (c) => { d(uploadFinished()); if (d(sendNow(force, c)) === 'offline') toast(t('offline'), ''); },
-    (e) => { d(uploadFinished()); console.warn('composite image:', e); toast(t('groupFail'), ''); },
-  );
+  if (st.controls.switching) return 'switching';
+  const snap = snapshotOf(st);
+  if ((!snap.body && !snap.pending.length && !snap.own.length) || selectUploading(st) || selectBuilding(st)) return 'empty';
+  d(markSending(snap.pending.map((c) => c.id)));
+  const groups = frameGroups(snap.pending);
+  if (!groups.length || st.conn.state !== 'open') return d(sendNow(snap, new Map(), force));
+  d(setBuilding(true));
+  void buildComposites(snap.pending, groups)
+    .catch(() => new Map<string, string>())
+    .then((c) => { d(setBuilding(false)); tell(d(sendNow(snap, c, force))); });
   return 'building';
 };

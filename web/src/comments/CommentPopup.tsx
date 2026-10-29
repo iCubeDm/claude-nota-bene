@@ -126,7 +126,7 @@ export function CommentPopup({ pending, onClose, onAdded, onBusy, hidden = false
     }
     if (prepare) setBusy(false); // the save is over (the parent stops holding the popup)
     const all = [...prepared, ...images.map((i) => i.id)];
-    if (has) dispatch(addComment({ ...(id && { id }), anchor, text: body, ...(label && { label }), ...(all.length && { images: all }) }));
+    if (has) dispatch(addComment({ ...(id && { id }), anchor, text: body, ...(label && { label }), ...(all.length && { images: all }), ...(prepared.length && { genImages: prepared.length }) }));
     // the user has moved on (the tab closed or in the background): their selection and the panel are not ours to touch
     const seen = alive.current && !hiddenNow.current;
     if (seen) window.getSelection()?.removeAllRanges();

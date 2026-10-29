@@ -13,7 +13,7 @@ export type SentDraft = { id: string; text: string; images: ImageEntry[]; commen
 
 export const composerSlice = createSlice({
   name: 'composer',
-  initialState: { draft: '', images: [] as ImageEntry[], uploading: 0, unconfirmed: null as SentDraft | null },
+  initialState: { draft: '', images: [] as ImageEntry[], uploading: 0, building: false, unconfirmed: null as SentDraft | null },
   reducers: {
     setDraft: (s, a: PayloadAction<string>) => void (s.draft = a.payload),
     addImage: (s, a: PayloadAction<ImageEntry>) => void (s.images.some((i) => i.id === a.payload.id) || s.images.push(a.payload)),
@@ -21,6 +21,7 @@ export const composerSlice = createSlice({
     clearImages: (s) => void (s.images = []),
     uploadStarted: (s) => void (s.uploading += 1),
     uploadFinished: (s) => void (s.uploading = Math.max(0, s.uploading - 1)),
+    setBuilding: (s, a: PayloadAction<boolean>) => void (s.building = a.payload),
     draftSent: (s, a: PayloadAction<SentDraft>) => void (s.unconfirmed = a.payload),
   },
   extraReducers: (b) =>
@@ -33,7 +34,9 @@ export const composerSlice = createSlice({
     }),
 });
 
-export const { setDraft, addImage, removeImage, clearImages, uploadStarted, uploadFinished, draftSent } = composerSlice.actions;
+export const { setDraft, addImage, removeImage, clearImages, uploadStarted, uploadFinished, setBuilding, draftSent } = composerSlice.actions;
 export const selectDraft = (s: RootState): string => s.composer.draft;
 export const selectImages = (s: RootState): ImageEntry[] => s.composer.images;
 export const selectUploading = (s: RootState): number => s.composer.uploading;
+/** A send is building its combined images: the send buttons are off (a snapshot of the draft and comments is already taken). */
+export const selectBuilding = (s: RootState): boolean => s.composer.building;
