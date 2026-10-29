@@ -2,7 +2,7 @@ import { keysLabel, BINDINGS } from './keymap.ts';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { DRAWER_ID, INDICATOR_ID } from '@/tasks/TasksDrawer.tsx';
-import { selectDrawerOpen, selectFinishedCount, selectRunningCount, toggleDrawer } from '@/tasks/slice.ts';
+import { selectDrawerOpen, selectFinishedCount, selectRunningCount, selectWatcherCount, toggleDrawer } from '@/tasks/slice.ts';
 
 const hotkey = (() => { const b = BINDINGS.find((x) => x.id === 'hk_tasks'); return b ? keysLabel(b) : ''; })();
 
@@ -16,7 +16,8 @@ export function TasksIndicator() {
   const running = useAppSelector(selectRunningCount);
   const finished = useAppSelector(selectFinishedCount);
   const open = useAppSelector(selectDrawerOpen);
-  if (running + finished === 0) return null;
+  const watchers = useAppSelector(selectWatcherCount);
+  if (running + finished + watchers === 0) return null;
   const live = running > 0;
   return (
     <div className="flex pt-1.5 text-[11.5px] text-muted-foreground">
@@ -36,10 +37,15 @@ export function TasksIndicator() {
             <span aria-hidden className="animate-pulse text-nb-accent">⚙</span>
             <span data-tasks-count>{t('tasksRunning', running)}</span>
           </>
-        ) : (
+        ) : finished > 0 ? (
           <>
             <span aria-hidden>✓</span>
             <span data-tasks-count>{finished}</span>
+          </>
+        ) : (
+          <>
+            <span aria-hidden>⚙</span>
+            <span data-tasks-count data-watchers>{t('tasksWatchers', watchers)}</span>
           </>
         )}
       </button>

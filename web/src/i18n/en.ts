@@ -306,6 +306,7 @@ export const en: Dict = {
   // background tasks (M4-14)
   tasksLabel: 'Background tasks',
   tasksRunning: (n) => `${n} task${n === 1 ? '' : 's'}`,
+  tasksWatchers: (n) => `${n} watcher${n === 1 ? '' : 's'}`,
   tasksDrawer: 'Tasks',
   tasksNone: 'No tasks.',
   taskRunning: 'running',

@@ -35,6 +35,8 @@ export const selectLiveCalls = createSelector([(s: RootState) => s.tasks], (t): 
 export const selectTasks = (s: RootState): TasksState => s.tasks;
 /** How many tasks run (what the indicator, the pulse and the favicon count). */
 export const selectRunningCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status === 'running' && !x.ambient).length);
+/** Running watchers (`ambient`): only they exist => the indicator shows a quiet variant, so the drawer stays reachable. */
+export const selectWatcherCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status === 'running' && x.ambient).length);
 /** Finished tasks, not counting watchers (`ambient`, listed in the drawer but never activity). */
 export const selectFinishedCount = createSelector([selectTasks], (t) => Object.values(t).filter((x) => x.status !== 'running' && !x.ambient).length);
 

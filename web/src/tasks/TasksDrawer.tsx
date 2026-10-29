@@ -40,7 +40,9 @@ export function TasksDrawer() {
     // capture phase + preventDefault: the composer's Esc (interrupt the agent) sees it handled
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      // what really owns Esc: modal dialogs, menus, listboxes, Radix popovers. A plain role=dialog (the comment popup) does not:
+      // its own Esc is a document-capture handler that runs after this one, so the drawer closes first and the popup keeps its draft
+      if ((e.target as HTMLElement | null)?.closest?.('[data-nb-modal], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]')) return;
       e.preventDefault();
       e.stopImmediatePropagation(); // one Esc closes one layer (a comment popup or picker open under it keeps its draft)
       close();

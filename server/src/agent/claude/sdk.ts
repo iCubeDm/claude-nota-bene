@@ -119,7 +119,9 @@ class SdkSession implements AgentSession {
   }
 
   async taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }> {
-    // the control request is typed in the SDK but not exposed as a method yet; same narrow cast as fileSuggestions
+    // The control request is typed in the SDK; the runtime also has Query.getTaskOutput, but it is not in sdk.d.ts and takes no
+    // abort signal. Only `request` takes one (the 5 s cap below), so it stays; same narrow cast as fileSuggestions. Move to the
+    // public method when the .d.ts exposes it with a signal.
     const { q } = this as unknown as {
       q: { request(r: { subtype: 'get_task_output'; task_id: string }, o?: { signal?: AbortSignal }): Promise<{ response: { output: string; total_bytes: number; truncated: boolean } }> };
     };

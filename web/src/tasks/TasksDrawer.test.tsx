@@ -6,7 +6,10 @@ import { App } from '@/App.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
 import { selectTabs } from '@/tabs/slice.ts';
-import { selectDrawerOpen } from './slice.ts';
+import { CommentPopup } from '@/comments/CommentPopup.tsx';
+import { TooltipProvider } from '@/components/ui/tooltip.tsx';
+import { selectDrawerOpen, setDrawer } from './slice.ts';
+import { TasksDrawer } from './TasksDrawer.tsx';
 import { STOP_CONFIRM_MS, STOP_WAIT_MS } from './TaskButtons.tsx';
 
 type Task = Extract<WireAgentEvent, { t: 'task' }>;
@@ -53,6 +56,18 @@ describe('the indicator', () => {
     task({ t: 'task', id: 'b', phase: 'done', status: 'stopped' });
     expect(indicator()).toHaveTextContent('✓2');
     expect(indicator()!.querySelector('.animate-pulse')).toBeNull();
+  });
+
+  it('only a watcher is running: a quiet variant (no pulse) keeps the drawer reachable', () => {
+    const { task } = setup();
+    task(start('w', { ambient: true }));
+    expect(indicator()).toHaveTextContent('1 watcher');
+    expect(indicator()!.querySelector('.animate-pulse')).toBeNull();
+    expect(indicator()).not.toHaveAttribute('data-running');
+    fireEvent.click(indicator()!);
+    expect(row('w')).not.toBeNull();
+    task(start('r')); // real work shows the usual count, the watcher stays out of it
+    expect(indicator()).toHaveTextContent('1 task');
   });
 
   it('in Russian: the plural forms', () => {
@@ -256,7 +271,7 @@ describe('actions', () => {
   it('a watcher (ambient shell) is listed but not counted; a running child of a finished parent stays with the running rows', () => {
     const { task } = setup();
     task(start('w', { ambient: true }));
-    expect(indicator()).toBeNull(); // nothing but a watcher: no indicator
+    expect(indicator()).toHaveTextContent('1 watcher'); // nothing but a watcher: the quiet variant
     task(start('p', { type: 'local_agent' })); task(start('k', { parent: 'p' })); task(start('o')); task({ t: 'task', id: 'p', phase: 'done' });
     expect(indicator()).toHaveTextContent('2 tasks'); // k and o, not w
     fireEvent.click(indicator()!);
@@ -279,6 +294,26 @@ describe('actions', () => {
 });
 
 describe('Esc and the comment popup', () => {
+  it('the REAL comment popup: typing in it, Alt+T, Esc closes only the drawer and the draft survives; the next Esc closes the popup', async () => {
+    cleanup();
+    const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+    store.dispatch(serverEvent({ kind: 'hello', protocol: 8 }));
+    store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'task', phase: 'started', id: 'a', desc: 'a', type: 'local_bash' } }));
+    const onClose = vi.fn();
+    const pending = { anchor: { source: { kind: 'message', id: 'a1' }, start: 0, end: 1, quote: 'x', prefix: '', suffix: '' }, rect: { left: 10, right: 50, top: 20, bottom: 40, width: 40, height: 20, x: 10, y: 20, toJSON() {} } } as never;
+    render(<Provider store={store}><TooltipProvider><TasksDrawer /><CommentPopup pending={pending} onClose={onClose} /></TooltipProvider></Provider>);
+    const area = screen.getByPlaceholderText('Comment…') as HTMLTextAreaElement;
+    fireEvent.change(area, { target: { value: 'my draft' } });
+    act(() => void store.dispatch(setDrawer(true))); // Alt+T from inside the field does this
+    expect(drawer()).not.toBeNull();
+    fireEvent.keyDown(area, { key: 'Escape', code: 'Escape', bubbles: true });
+    expect(selectDrawerOpen(store.getState())).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(area.value).toBe('my draft');
+    fireEvent.keyDown(area, { key: 'Escape', code: 'Escape', bubbles: true }); // drawer closed: the popup behaves as before
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('one Esc closes one layer: the drawer first, the draft in an open popup survives', () => {
     const { store, task } = setup();
     task(start('a'));

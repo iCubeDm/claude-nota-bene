@@ -303,6 +303,7 @@ export const ru = {
   // background tasks (M4-14)
   tasksLabel: 'Фоновые задачи',
   tasksRunning: (n: number) => `${n} ${{ one: 'задача', few: 'задачи' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'задач'}`,
+  tasksWatchers: (n: number) => `${n} ${{ one: 'наблюдатель', few: 'наблюдателя' }[new Intl.PluralRules('ru').select(n) as 'one' | 'few'] || 'наблюдателей'}`,
   tasksDrawer: 'Задачи',
   tasksNone: 'Задач нет.',
   taskRunning: 'работает',
