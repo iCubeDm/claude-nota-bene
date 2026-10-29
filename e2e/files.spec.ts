@@ -1148,6 +1148,8 @@ test('a model with a clip: nothing plays by default, the control plays it and th
   await expect(pane.getByRole('combobox')).toHaveValue('0');
   await expect(pane.getByRole('combobox').locator('option')).toHaveText(['spin']);
   const frame = () => pane.locator('canvas').evaluate((c) => (c as HTMLCanvasElement).toDataURL('image/png'));
+  // the canvas settles first: the info bar appears with "ready" and the canvas shrinks above it (one redraw)
+  await expect.poll(async () => { const a = await frame(); await page.waitForTimeout(150); return a === (await frame()); }).toBe(true);
   const still = await frame();
   await page.waitForTimeout(500);
   expect(await frame()).toBe(still); // paused: not a single frame drawn
