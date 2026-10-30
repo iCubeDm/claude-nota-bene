@@ -193,7 +193,7 @@ describe('credentials', () => {
     expect(cookieRoute('GET', '/file')).toBe(true);
     expect(cookieRoute('HEAD', '/file')).toBe(true);
     expect(cookieRoute('GET', '/attach/' + 'a'.repeat(64))).toBe(true);
-    for (const [m, p] of [['POST', '/file'], ['POST', '/attach'], ['POST', '/attach/x'], ['GET', '/attach/'], ['GET', '/attach'], ['GET', '/model'], ['GET', '/info'], ['GET', '/tree'],
+    for (const [m, p] of [['POST', '/file'], ['POST', '/attach'], ['POST', '/attach/x'], ['GET', '/attach/'], ['GET', '/attach'], ['GET', '/model'], ['GET', '/tmpimage'], ['HEAD', '/tmpimage'], ['GET', '/info'], ['GET', '/tree'],
       ['GET', '/sessions'], ['GET', '/anything-new'], ['GET', '/file/x'], ['GET', '/filesystem'], ['GET', '/ws'], ['DELETE', '/attach/x'], [undefined, '/file']] as const) {
       expect(cookieRoute(m, p), `${m} ${p}`).toBe(false);
     }
@@ -260,7 +260,7 @@ const MATRIX: { method: string; path: string; cookie: 'open' | 'refused' }[] = [
   { method: 'GET', path: `/attach/${ID}`, cookie: 'open' },
   { method: 'HEAD', path: `/attach/${ID}`, cookie: 'open' },
   ...['/info', '/tree?path=', '/complete?q=a', '/sources', '/sessions', '/history?session=x&before=1', '/subagent?session=x&tool=y',
-    '/task-output?session=x&task=y', '/git-status', '/system/about', '/system/windows', '/system/storage', '/system/prefs', '/model?path=a.blend',
+    '/task-output?session=x&task=y', '/git-status', '/system/about', '/system/windows', '/system/storage', '/system/prefs', '/model?path=a.blend', '/tmpimage?path=%2Ftmp%2Fa.png',
     `/marks/${ID}/frame.jpg`].map((path) => ({ method: 'GET', path, cookie: 'refused' as const })),
   { method: 'POST', path: '/attach', cookie: 'refused' },
   { method: 'POST', path: `/attach/${ID}`, cookie: 'refused' },

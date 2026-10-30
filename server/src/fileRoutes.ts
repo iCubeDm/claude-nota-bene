@@ -9,6 +9,7 @@ import { blobSize, branchFiles, gitStatus, listSources, readFile, readTree, Sour
 import { fuzzyScore } from './fuzzy.ts';
 import type { AgentSession } from './agent/types.ts';
 import { parseRange } from './range.ts';
+import { serveTmpImage } from './tmpImage.ts';
 import { BlendError, type BlendConverter, type BlendInput } from './blend.ts';
 
 // from the prototype's MIME table
@@ -258,6 +259,12 @@ export function fileRoutes(o: {
         if (src.kind === 'worktree' && src.dir) return serveFs(req, res, src.dir);
         await serveBlob(req, res, root, src).catch((e) => sourceFail(req, res, e));
       });
+    },
+
+    // an image of a temp folder (the agent's screenshot). Not under /file: that is a cookie route and stays inside the project
+    '/tmpimage': (req, res) => {
+      if (!getOnly(req, res)) return;
+      serveTmpImage(req, res, (e) => fail(req, res, e));
     },
 
     '/model': (req, res) => {
