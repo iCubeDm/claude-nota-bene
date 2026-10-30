@@ -514,21 +514,23 @@ describe('--plan', () => {
     r = await plan('frobnicate');
     expect(r.out).toMatch(/^NB: unknown argument 'frobnicate'\. /);
     r = await plan('fork', { sid: 'x; rm -rf ~' });
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(0); // --plan runs in the skill's `!` preprocessing: a non-zero exit would fail it with no model turn
     expect(r.out).toBe("NB: no valid session id to fork ('x; rm -rf ~').\n");
     const d = binDir('oldnode-plan', [['node', '#!/bin/sh\necho 23.5.1\n']]);
     r = await plan('', { env: { PATH: `${d}:${process.env.PATH}` } });
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(0);
     expect(r.out).toMatch(/^NB: Nota Bene needs Node >= 23\.6; found 23\.5\.1/);
     expect(launches()).toEqual([]);
   });
 
-  it('a folder named `p r$oj Проект`: both commands are plain ASCII and read back exactly in bash and zsh', async () => {
+  it('a folder named `p r$oj Проект`: one word per command, the UTF-8 raw inside single quotes (no escape codes), read back exactly in bash and zsh', async () => {
     const odd = path.join(project, 'p r$oj Проект');
     fs.mkdirSync(odd);
     const r = await plan('new', { cwd: odd });
     expect(r.code).toBe(0);
-    expect(r.out).toMatch(/^[\x20-\x7e\n]*NB-NAME: Nota Bene · p r\$oj Проект\n$/); // no raw byte before the name
+    // Claude Code refuses text with escape codes ($'\320...') when it matches allowed-tools: a non-ASCII path stays raw, in '...'
+    expect(r.out).not.toMatch(/\$'|\\[0-9]{3}/);
+    expect(lines(r)['NB-RUN']).toContain(`'${odd}'`);
     const { 'NB-RUN': run, 'NB-WAIT': wait } = lines(r);
     // a stub node records the argv it gets
     const got = path.join(tmp, 'node-argv.log');
@@ -583,7 +585,8 @@ describe('the package lookup (plugin install)', () => {
   beforeEach(() => {
     data = path.join(path.dirname(project), 'plugin data');
   });
-  const pkgBin = () => path.join(data, 'node_modules/nota-bene-ide/bin/nota-bene.mjs');
+  const prefix = () => path.join(data, PKG_VER); // one install per plugin version
+  const pkgBin = () => path.join(prefix(), 'node_modules/nota-bene-ide/bin/nota-bene.mjs');
   const npmCalls = (): string[][] => {
     try {
       return fs.readFileSync(path.join(tmp, 'npm.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -592,10 +595,10 @@ describe('the package lookup (plugin install)', () => {
     }
   };
   /** An installed package at `ver`, as a good first run leaves it. */
-  function installed(ver = PKG_VER) {
+  function installed() {
     fs.mkdirSync(path.dirname(pkgBin()), { recursive: true });
     fs.copyFileSync(path.join(tmp, 'app/bin/nota-bene.mjs'), pkgBin());
-    fs.writeFileSync(path.join(data, '.nb-installed'), `${ver}\n`);
+    fs.writeFileSync(path.join(prefix(), '.nb-installed'), `${PKG_VER}\n`);
   }
   const plan = (args: string, o: RunOpts & { sid?: string; data?: string | null } = {}) => {
     fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
@@ -620,7 +623,7 @@ describe('the package lookup (plugin install)', () => {
   it('no checkout and no data dir: one NB: line saying how to install the plugin', async () => {
     for (const d of [null, '', '${CLAUDE_PLUGIN_DATA}']) {
       const r = await plan('', { data: d });
-      expect(r.code).toBe(1);
+      expect(r.code).toBe(0); // --plan never fails the skill's preprocessing
       expect(r.out).toMatch(/^NB: cannot find the Nota Bene launcher: no checkout above this skill and no plugin data dir\. Install the plugin /);
       expect(r.out.trimEnd().split('\n')).toHaveLength(1);
     }
@@ -635,14 +638,14 @@ describe('the package lookup (plugin install)', () => {
     expect(l['NB-NAME']).toBe('Nota Bene · project');
     expect(l['NB-NOTE']).toBe(`first run: installing nota-bene-ide@${PKG_VER} (about 330 MB) in the background task; this can take a few minutes.`);
     expect(npmCalls()).toEqual([]);
-    expect(fs.existsSync(path.join(data, 'node_modules'))).toBe(false);
+    expect(fs.existsSync(path.join(data, PKG_VER, 'node_modules'))).toBe(false);
   });
 
   it('--run installs the pinned version once with npm --prefix, then runs the launcher with the plan\'s arguments', async () => {
     const r = await sh([pkgOpen, '--data', data, '--run', project, '--resume', SID, '--fork']);
     expect(r.code).toBe(0);
-    expect(npmCalls()).toEqual([['install', '--prefix', data, `nota-bene-ide@${PKG_VER}`, '--no-audit', '--no-fund']]);
-    expect(fs.readFileSync(path.join(data, '.nb-installed'), 'utf8').trim()).toBe(PKG_VER);
+    expect(npmCalls()).toEqual([['install', '--prefix', prefix(), `nota-bene-ide@${PKG_VER}`, '--no-audit', '--no-fund']]);
+    expect(fs.readFileSync(path.join(prefix(), '.nb-installed'), 'utf8').trim()).toBe(PKG_VER);
     expect(launches()).toEqual([[project, '--resume', SID, '--fork']]);
     expect(r.out).toContain(`first run, installing nota-bene-ide@${PKG_VER}`);
     expect(r.out).toMatch(/opened http:\/\/127\.0\.0\.1:4795\n$/);
@@ -671,7 +674,7 @@ describe('the package lookup (plugin install)', () => {
     expect(lines(await plan('заново'))['NB-RUN']).toBe(`node ${esc(pkgBin())} ${project} --new`);
     const r = await plan('fork', { sid: 'nope' });
     expect(r.out).toBe("NB: no valid session id to fork ('nope').\n");
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(0);
   });
 
   it('installed: a window already open on the folder is brought to front, no NB-RUN', async () => {
@@ -682,12 +685,17 @@ describe('the package lookup (plugin install)', () => {
     expect(r.out).toBe('NB: already open at http://127.0.0.1:4792 (brought to front).\n');
   });
 
-  it('the version is pinned: a package installed for another plugin version is installed again', async () => {
-    installed('9.9.8');
+  it('the version is pinned: a plugin update installs beside the old version and leaves it untouched', async () => {
+    const old = path.join(data, '9.9.8/node_modules/nota-bene-ide/bin');
+    fs.mkdirSync(old, { recursive: true });
+    fs.writeFileSync(path.join(old, 'nota-bene.mjs'), '// old');
+    fs.writeFileSync(path.join(data, '9.9.8/.nb-installed'), '9.9.8\n');
     expect(lines(await plan('new'))['NB-RUN']).toContain('--run');
     await sh([pkgOpen, '--data', data, '--run', project]);
-    expect(npmCalls()).toEqual([['install', '--prefix', data, `nota-bene-ide@${PKG_VER}`, '--no-audit', '--no-fund']]);
-    expect(fs.readFileSync(path.join(data, '.nb-installed'), 'utf8').trim()).toBe(PKG_VER);
+    expect(npmCalls()).toEqual([['install', '--prefix', prefix(), `nota-bene-ide@${PKG_VER}`, '--no-audit', '--no-fund']]);
+    expect(fs.readFileSync(path.join(prefix(), '.nb-installed'), 'utf8').trim()).toBe(PKG_VER);
+    expect(fs.readFileSync(path.join(old, 'nota-bene.mjs'), 'utf8')).toBe('// old');
+    expect(fs.existsSync(path.join(data, '9.9.8/.nb-installed'))).toBe(true);
   });
 
   it('a package whose marker is there but whose launcher is gone is installed again', async () => {
@@ -713,7 +721,7 @@ describe('the package lookup (plugin install)', () => {
   it('npm missing on the first run: one NB: line with the fix, no NB-RUN', async () => {
     const tools = ['dirname', 'tr', 'sed', 'uname', 'cat'].map((t): [string, string] => [t, which(t)]);
     const r = await plan('', { env: { PATH: binDir('nonpm', [...tools, ['node', process.execPath]]) } });
-    expect(r.code).toBe(1);
+    expect(r.code).toBe(0);
     expect(r.out).toBe(`NB: npm not found on PATH; the first run installs nota-bene-ide@${PKG_VER} with it. Install Node.js with npm (nodejs.org), `
       + 'or run `npm install -g nota-bene-ide` and open it with `nota-bene`.\n');
   });
@@ -722,9 +730,9 @@ describe('the package lookup (plugin install)', () => {
     const r = await sh([pkgOpen, '--data', data, '--run', project], { env: { STUB_NPM_FAIL: '1' } });
     expect(r.code).toBe(1);
     expect(r.out).toContain(`NB: installing nota-bene-ide@${PKG_VER} failed (npm exit 1).`);
-    expect(r.out).toContain(`npm install --prefix "${data}" nota-bene-ide@${PKG_VER}`);
+    expect(r.out).toContain(`npm install --prefix "${prefix()}" nota-bene-ide@${PKG_VER}`);
     expect(r.out).toContain('npm ERR! boom: the last npm line');
-    expect(fs.existsSync(path.join(data, '.nb-installed'))).toBe(false);
+    expect(fs.existsSync(path.join(prefix(), '.nb-installed'))).toBe(false);
     expect(launches()).toEqual([]);
     // --wait reports the same, at once, instead of waiting out the install timeout
     const t0 = Date.now();
@@ -734,7 +742,7 @@ describe('the package lookup (plugin install)', () => {
     expect(Date.now() - t0).toBeLessThan(5000);
     // the next plan clears the old failure, so a retry's wait does not read it
     await plan('');
-    expect(fs.existsSync(path.join(data, '.nb-install-failed'))).toBe(false);
+    expect(fs.existsSync(path.join(prefix(), '.nb-install-failed'))).toBe(false);
   });
 
   it('--wait is patient on a first install: it waits for the install, then for the window', async () => {
@@ -755,6 +763,65 @@ describe('the package lookup (plugin install)', () => {
     expect(r.out).toBe("NB: the first install is still running after 1s - see the background task's output.\n");
   });
 
+  const lockAt = (o: { pid?: string; ts?: number }) => {
+    const lock = path.join(prefix(), '.nb-install.lock');
+    fs.mkdirSync(lock, { recursive: true });
+    if (o.pid !== undefined) fs.writeFileSync(path.join(lock, 'pid'), o.pid);
+    if (o.ts !== undefined) fs.writeFileSync(path.join(lock, 'ts'), String(o.ts));
+  };
+  const now = () => Math.floor(Date.now() / 1000);
+
+  it.each([
+    ['an empty pid file, taken long ago', { ts: 1 }, {}],
+    ['a dead pid', { pid: '999999', ts: now() - 10 }, {}],
+    ['a live but recycled pid, taken longer ago than the stale limit', { pid: String(process.pid), ts: now() - 100 }, { NB_LOCK_STALE_SECS: '5' }],
+  ])('a stale lock (%s) is reclaimed and the install goes ahead', async (_n, lock, extra) => {
+    lockAt(lock);
+    const r = await sh([pkgOpen, '--data', data, '--run', project], { env: { NB_INSTALL_WAIT_SECS: '20', ...extra } });
+    expect(r.code).toBe(0);
+    expect(npmCalls()).toHaveLength(1);
+    expect(fs.existsSync(path.join(prefix(), '.nb-install.lock'))).toBe(false);
+  });
+
+  it('a fresh lock of a live holder is respected (no second install) until it gives up', async () => {
+    lockAt({ pid: String(process.pid), ts: now() });
+    const r = await sh([pkgOpen, '--data', data, '--run', project], { env: { NB_INSTALL_WAIT_SECS: '2' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('another install of');
+    expect(npmCalls()).toEqual([]);
+    expect(fs.existsSync(path.join(prefix(), '.nb-install-failed'))).toBe(true); // --wait learns of it
+  });
+
+  it('every failure writes the marker: npm missing in --run, and --wait reports it at once', async () => {
+    const tools = ['dirname', 'tr', 'sed', 'uname', 'cat', 'mkdir', 'tee', 'rm', 'date', 'find', 'tail', 'kill'].map((x): [string, string] => [x, which(x)]);
+    const env = { PATH: binDir('nonpm-run', [...tools, ['node', process.execPath]]) };
+    const r = await sh([pkgOpen, '--data', data, '--run', project], { env });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('NB: npm not found on PATH');
+    const t0 = Date.now();
+    const w = await sh([pkgOpen, '--data', data, '--wait', project], { env });
+    expect(w.code).toBe(1);
+    expect(w.out).toContain('NB: npm not found on PATH');
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it('a launcher file without the installed marker (a half-written install) is not enough: --wait keeps waiting for the marker', async () => {
+    fs.mkdirSync(path.dirname(pkgBin()), { recursive: true });
+    fs.writeFileSync(pkgBin(), '// half');
+    const r = await sh([pkgOpen, '--data', data, '--wait', project], { env: { NB_INSTALL_WAIT_SECS: '1' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toBe("NB: the first install is still running after 1s - see the background task's output.\n");
+  });
+
+  it('SKILL.md passes the data dir single-quoted on every line: a live ${...} makes Claude Code refuse the line before any turn', () => {
+    const md = fs.readFileSync(path.join(SKILL, 'SKILL.md'), 'utf8');
+    const uses = md.split('\n').filter((l) => l.includes('CLAUDE_PLUGIN_DATA'));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const l of uses) {
+      expect(l.replace(/'\$\{CLAUDE_PLUGIN_DATA\}'/g, '')).not.toContain('CLAUDE_PLUGIN_DATA');
+    }
+  });
+
   it('a second --run during an install waits for it instead of installing twice', async () => {
     fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
     const first = sh([pkgOpen, '--data', data, '--run', project], { env: { STUB_NPM_SLEEP: '2' } });
@@ -771,7 +838,7 @@ describe('the package lookup (plugin install)', () => {
     const r = await plan('new', { env: { PATH: `${d}:${process.env.PATH}` } });
     if (ok) expect(r.code).toBe(0);
     else {
-      expect(r.code).toBe(1);
+      expect(r.code).toBe(0);
       expect(r.out).toBe(`NB: Nota Bene needs Node >= 22; found ${v} at ${d}/node. Make it the default node for Claude Code's shell (e.g. nvm alias default).\n`);
     }
   });
@@ -780,6 +847,25 @@ describe('the package lookup (plugin install)', () => {
     const d = binDir('floornode2', [['node', '#!/bin/sh\necho 22.5.0\n']]);
     const r = await nb('', { env: { PATH: `${d}:${process.env.PATH}` } });
     expect(r.out).toContain('needs Node >= 23.6; found 22.5.0');
+  });
+
+  it('a Cyrillic folder with an apostrophe: single-quoted, the quote closed and reopened, and read back exactly', async () => {
+    const odd = path.join(project, "Проект д'Артаньяна");
+    fs.mkdirSync(odd);
+    const run = lines(await plan('new', { cwd: odd }))['NB-RUN']!;
+    expect(run).toContain("д'\\''Артаньяна");
+    expect(run).not.toContain("$'");
+    const back = execFileSync('/bin/bash', ['-c', 'eval "set -- $RUN"; printf "%s\\n" "$@"'], { encoding: 'utf8', env: { RUN: run } }).trim().split('\n');
+    expect(back.slice(-2)).toEqual([odd, '--new']);
+  });
+
+  it("a control character in a folder name keeps %q's $'...' form (the only form that can carry it)", async () => {
+    const odd = path.join(project, 'tab\there');
+    fs.mkdirSync(odd);
+    const run = lines(await plan('new', { cwd: odd }))['NB-RUN']!;
+    expect(run).toContain("$'");
+    const back = execFileSync('/bin/bash', ['-c', 'eval "set -- $RUN"; printf "%s\\n" "$@"'], { encoding: 'utf8', env: { RUN: run } }).split('\n');
+    expect(back).toContain(odd);
   });
 
   it('the plan\'s NB-RUN reads back exactly in bash with a data dir and a folder whose names have spaces and quotes', async () => {

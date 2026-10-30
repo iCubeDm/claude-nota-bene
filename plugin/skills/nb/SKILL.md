@@ -8,7 +8,7 @@ allowed-tools: Bash(*/nb/open.sh *), Bash(node */bin/nota-bene.mjs *)
 
 # Nota Bene
 
-!`"${CLAUDE_SKILL_DIR}/open.sh" --data "${CLAUDE_PLUGIN_DATA}" --plan "$ARGUMENTS" "${CLAUDE_SESSION_ID}"`
+!`"${CLAUDE_SKILL_DIR}/open.sh" --data '${CLAUDE_PLUGIN_DATA}' --plan "$ARGUMENTS" "${CLAUDE_SESSION_ID}"`
 
 ## Your task
 

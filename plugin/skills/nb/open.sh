@@ -7,7 +7,7 @@
 #   Where the launcher lives, in this order:
 #     1. a checkout: bin/nota-bene.mjs three levels above this skill dir (plugin/skills/nb -> repo root), as before;
 #        found through the ~/.claude/skills/nb symlink too. Needs Node >= 23.6 (it runs the .ts sources).
-#     2. the npm package nota-bene-ide@<plugin version> installed under DIR (npm install --prefix DIR, done on the first
+#     2. the npm package nota-bene-ide@<plugin version> installed under DIR/<version>/ (npm install --prefix DIR/<version>, done on the first
 #        run, by --run, i.e. in the background task, never in the --plan preprocessing). Needs Node >= 22.
 #        The version is the plugin's (.claude-plugin/plugin.json); a plugin update therefore reinstalls.
 #   no arguments — a window already open on the folder is just brought to front; otherwise a new window, where the
@@ -34,6 +34,11 @@ DIR="$(pwd -P)"
 DATA=""
 if [ "${1:-}" = --data ] && [ $# -ge 2 ]; then DATA="$2"; shift 2; fi
 case "$DATA" in *'${'*) DATA="" ;; esac   # an unsubstituted ${CLAUDE_PLUGIN_DATA} is no directory
+# --plan runs in the skill's `!` preprocessing: a non-zero exit there fails the whole skill with no model turn, so an error
+# or refusal is printed and exits 0 (the model relays the NB: line). Every other mode keeps exit 1 for failures.
+PLAN=""
+[ "${1:-}" = --plan ] && PLAN=1
+bail() { echo "$1"; if [ -n "$PLAN" ]; then exit 0; fi; exit 1; }
 
 PKG=nota-bene-ide
 SRC="" BIN="" VER="" MIN_MAJOR=23 MIN_MINOR=6 FIRST_RUN=""
@@ -44,13 +49,15 @@ elif [ -n "$DATA" ]; then
   SRC=package MIN_MAJOR=22 MIN_MINOR=0
   VER="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SKDIR/../../.claude-plugin/plugin.json" 2>/dev/null)"
   VER="${VER%%$'\n'*}"
-  [ -n "$VER" ] || { echo "NB: cannot read the plugin version (.claude-plugin/plugin.json beside skills/): reinstall the plugin."; exit 1; }
-  BIN="$DATA/node_modules/$PKG/bin/nota-bene.mjs"
-  # installed = the marker (written last, after a good install) names this version and the launcher is there
-  if [ "$(cat "$DATA/.nb-installed" 2>/dev/null)" = "$VER" ] && [ -f "$BIN" ]; then :; else FIRST_RUN=1; fi
+  [[ "$VER" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || bail "NB: cannot read the plugin version (.claude-plugin/plugin.json beside skills/): reinstall the plugin."
+  # one install per version: DATA/<version>/. A plugin update installs beside the old one, so a session still on the old
+  # version (or a window running from it) is never touched; old version dirs are not pruned (see the release notes)
+  PREFIX="$DATA/$VER"
+  BIN="$PREFIX/node_modules/$PKG/bin/nota-bene.mjs"
+  # installed = the marker (written last, after a good install) and the launcher
+  if [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ]; then :; else FIRST_RUN=1; fi
 else
-  echo "NB: cannot find the Nota Bene launcher: no checkout above this skill and no plugin data dir. Install the plugin (/plugin marketplace add iCubeDm/nota-bene-ide, then /plugin install nota-bene@nota-bene) or link the skill from a checkout."
-  exit 1
+  bail "NB: cannot find the Nota Bene launcher: no checkout above this skill and no plugin data dir. Install the plugin (/plugin marketplace add iCubeDm/nota-bene-ide, then /plugin install nota-bene@nota-bene) or link the skill from a checkout."
 fi
 
 # the checkout launcher imports the server's .ts files directly: Node >= 23.6 strips their types; the package is compiled
@@ -61,41 +68,51 @@ if ! [[ "$NODE_V" =~ ^([0-9]+)\.([0-9]+) ]] || [ "${BASH_REMATCH[1]}" -lt "$MIN_
    || { [ "${BASH_REMATCH[1]}" -eq "$MIN_MAJOR" ] && [ "${BASH_REMATCH[2]}" -lt "$MIN_MINOR" ]; }; then
   if [ -n "$NODE" ]; then WHERE="at $NODE"; else WHERE="on PATH"; fi
   FLOOR="$MIN_MAJOR"; [ "$MIN_MINOR" -gt 0 ] && FLOOR="$MIN_MAJOR.$MIN_MINOR"
-  echo "NB: Nota Bene needs Node >= $FLOOR; found ${NODE_V:-none} $WHERE. Make it the default node for Claude Code's shell (e.g. nvm alias default)."
-  exit 1
+  bail "NB: Nota Bene needs Node >= $FLOOR; found ${NODE_V:-none} $WHERE. Make it the default node for Claude Code's shell (e.g. nvm alias default)."
 fi
 
 # npm is only needed for the first install of the package
-need_npm() {
-  command -v npm >/dev/null && return 0
-  echo "NB: npm not found on PATH; the first run installs $PKG@$VER with it. Install Node.js with npm (nodejs.org), or run \`npm install -g $PKG\` and open it with \`nota-bene\`."
-  return 1
+NPM_MISSING="NB: npm not found on PATH; the first run installs $PKG@$VER with it. Install Node.js with npm (nodejs.org), or run \`npm install -g $PKG\` and open it with \`nota-bene\`."
+# install the package into DATA/<version>; progress goes to our stdout (the background task's output). The lock keeps two /nb
+# runs from installing at once. EVERY failure writes .nb-install-failed, which is how --wait learns of it.
+STALE_SECS="${NB_LOCK_STALE_SECS:-1800}"
+lock_age() { # seconds since the lock was taken; huge when it carries no timestamp and is over a minute old; 0 when just taken
+  local ts; ts="$(cat "$1/ts" 2>/dev/null)"
+  if [[ "$ts" =~ ^[0-9]+$ ]]; then echo $(( $(date +%s) - ts )); return; fi
+  if [ -n "$(find "$1" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then echo 999999; else echo 0; fi
 }
-# install the package into DATA; progress goes to our stdout (the background task's output). The lock keeps two /nb runs
-# from installing into one prefix at once; the failure marker is how --wait learns of a failure.
 install_pkg() {
-  need_npm || return 1
-  mkdir -p "$DATA" || { echo "NB: cannot create the plugin data dir $DATA."; return 1; }
-  local lock="$DATA/.nb-install.lock" waited=0
+  local lock="$PREFIX/.nb-install.lock" failed="$PREFIX/.nb-install-failed" waited=0 log="$PREFIX/.nb-install.log" rc
+  mkdir -p "$PREFIX" 2>/dev/null || { echo "NB: cannot create the plugin data dir $PREFIX."; return 1; }
+  ifail() { { echo "$1"; [ -n "${2:-}" ] && tail -n 5 "$2" 2>/dev/null; } | tee "$failed"; rm -rf "$lock" 2>/dev/null; return 1; }
+  command -v npm >/dev/null || { echo "$NPM_MISSING" | tee "$failed"; return 1; }
   until mkdir "$lock" 2>/dev/null; do
-    local holder; holder="$(cat "$lock/pid" 2>/dev/null)"
-    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$lock"; continue; fi
+    local holder age; holder="$(cat "$lock/pid" 2>/dev/null)"; age="$(lock_age "$lock")"
+    # reclaim a lock whose holder is gone (dead pid, after a moment for the pid file to be written) or that is simply old
+    # (a recycled pid); the rename is atomic, so of several waiters one wins, and a lock taken meanwhile is put back
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && [ "$age" -gt 3 ]; } || [ "$age" -gt "$STALE_SECS" ] \
+       || { [ -z "$holder" ] && [ "$age" -gt 30 ]; }; then
+      if mv "$lock" "$lock.old.$$" 2>/dev/null; then
+        if [ "$(lock_age "$lock.old.$$")" -le 3 ]; then mv "$lock.old.$$" "$lock" 2>/dev/null || rm -rf "$lock.old.$$"; else rm -rf "$lock.old.$$"; fi
+      fi
+      continue
+    fi
     # another run is installing: wait for it, then use its result
     sleep 1; waited=$((waited + 1))
-    if [ "$(cat "$DATA/.nb-installed" 2>/dev/null)" = "$VER" ] && [ -f "$BIN" ]; then return 0; fi
-    [ "$waited" -ge "${NB_INSTALL_WAIT_SECS:-540}" ] && { echo "NB: another install of $PKG@$VER is still running after ${waited}s."; return 1; }
+    if [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ]; then return 0; fi
+    [ "$waited" -ge "${NB_INSTALL_WAIT_SECS:-540}" ] && { echo "NB: another install of $PKG@$VER is still running after ${waited}s." | tee "$failed"; return 1; }
   done
-  echo $$ > "$lock/pid"
-  rm -f "$DATA/.nb-installed" "$DATA/.nb-install-failed"
+  echo $$ > "$lock/pid"; date +%s > "$lock/ts"
+  # taken: another run may have finished between our last look and the lock
+  if [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ]; then rm -rf "$lock"; return 0; fi
+  rm -f "$PREFIX/.nb-installed" "$failed"
   echo "Nota Bene: first run, installing $PKG@$VER into the plugin data dir (about 330 MB, this takes a while)..."
-  local log="$DATA/.nb-install.log" rc
-  npm install --prefix "$DATA" "$PKG@$VER" --no-audit --no-fund 2>&1 | tee "$log"; rc=${PIPESTATUS[0]}
+  npm install --prefix "$PREFIX" "$PKG@$VER" --no-audit --no-fund 2>&1 | tee "$log"; rc=${PIPESTATUS[0]}
   if [ "$rc" -ne 0 ] || [ ! -f "$BIN" ]; then
-    local msg="NB: installing $PKG@$VER failed (npm exit $rc). Check the network and free disk space, then run /nb again; or run \`npm install --prefix \"$DATA\" $PKG@$VER\` yourself to see the full error."
-    { echo "$msg"; tail -n 5 "$log" 2>/dev/null; } | tee "$DATA/.nb-install-failed"
-    rm -rf "$lock"; return 1
+    ifail "NB: installing $PKG@$VER failed (npm exit $rc). Check the network and free disk space, then run /nb again; or run \`npm install --prefix \"$PREFIX\" $PKG@$VER\` yourself to see the full error." "$log"
+    return 1
   fi
-  echo "$VER" > "$DATA/.nb-installed"
+  echo "$VER" > "$PREFIX/.nb-installed"
   rm -rf "$lock"
   echo "Nota Bene: installed $PKG@$VER."
   return 0
@@ -118,11 +135,11 @@ if [ "${1:-}" = --wait ]; then
     # a first install is under way in the background task: wait for it (patiently), or for its failure marker
     ISECS="${NB_INSTALL_WAIT_SECS:-540}"; [[ "$ISECS" =~ ^[0-9]+$ ]] || ISECS=540
     for ((i = 0; i < ISECS * 2; i++)); do
-      [ "$(cat "$DATA/.nb-installed" 2>/dev/null)" = "$VER" ] && [ -f "$BIN" ] && break
-      [ -f "$DATA/.nb-install-failed" ] && { cat "$DATA/.nb-install-failed"; exit 1; }
+      [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ] && break
+      [ -f "$PREFIX/.nb-install-failed" ] && { cat "$PREFIX/.nb-install-failed"; exit 1; }
       sleep 0.5
     done
-    [ -f "$BIN" ] || { echo "NB: the first install is still running after ${ISECS}s - see the background task's output."; exit 1; }
+    [ -f "$PREFIX/.nb-installed" ] || { echo "NB: the first install is still running after ${ISECS}s - see the background task's output."; exit 1; }
   fi
   for ((i = 0; i < SECS * 2; i++)); do
     PORT="$(node "$BIN" --find "$WDIR" 2>/dev/null)" && [ -n "$PORT" ] && {
@@ -132,8 +149,7 @@ if [ "${1:-}" = --wait ]; then
   echo "NB: the window did not come up in ${SECS}s — see the background task's output."
   exit 1
 fi
-PLAN=""
-[ "${1:-}" = --plan ] && { PLAN=1; shift; }
+[ "${1:-}" = --plan ] && shift
 
 ARG="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" SID="${2:-}"
 case "$ARG" in
@@ -195,18 +211,29 @@ elif [ "$MODE" = new ]; then
   ARGS+=(--new)
 else
   UUID='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-  [[ "$SID" =~ $UUID ]] || { echo "NB: no valid session id to fork ('$SID')."; exit 1; }
+  [[ "$SID" =~ $UUID ]] || bail "NB: no valid session id to fork ('$SID')."
   ARGS+=(--resume "$SID" --fork) NOTE=" (forked from this conversation)"
 fi
 # test only: the launcher tests run the real bin with the fake agent
 [ -n "${NOTA_BENE_FAKE:-}" ] && ARGS+=(--fake "$NOTA_BENE_FAKE")
 
 if [ -n "$PLAN" ]; then
-  # LC_ALL=C: every non-ASCII byte escaped, never a lone byte of a UTF-8 sequence (q runs in $(...), so it stays there)
-  q() { LC_ALL=C; printf '%q' "$1"; }
+  # One shell word that bash and zsh read back exactly. ASCII: printf %q under LC_ALL=C. Non-ASCII without control characters
+  # (a Cyrillic folder): '...' with the raw UTF-8 and ' as '\'' - %q would print $'\320\237...', which Claude Code refuses to
+  # match against allowed-tools ("Text with escape codes"). Control characters keep %q's $'...'. Runs in a subshell: the locale stays.
+  q() {
+    (
+      LC_ALL=C
+      case "$1" in
+        *[[:cntrl:]]*) printf '%q' "$1" ;;
+        *[!\ -~]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
+        *) printf '%q' "$1" ;;
+      esac
+    )
+  }
   if [ -n "$FIRST_RUN" ]; then
-    need_npm || exit 1
-    rm -f "$DATA/.nb-install-failed" 2>/dev/null
+    command -v npm >/dev/null || bail "$NPM_MISSING"
+    rm -f "$PREFIX/.nb-install-failed" 2>/dev/null
     # the install runs inside the background task, never in this preprocessing
     RUN="$(q "$SELF") --data $(q "$DATA") --run $(q "$DIR")"
   else
