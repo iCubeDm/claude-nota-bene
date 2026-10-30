@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AUDIO, IMAGE, MODEL, VIDEO } from './kinds.ts';
+import { AUDIO, IMAGE, isModelFile, useModel3d, VIDEO } from './kinds.ts';
 
 /**
  * File-type icons (M6-11), after IntelliJ's new UI: a coloured letter mark for source and config files, a coloured
@@ -71,7 +71,7 @@ export function iconOf(path: string): IconId {
   if (IMAGE.test(name)) return 'image';
   if (VIDEO.test(name)) return 'video';
   if (AUDIO.test(name)) return 'audio';
-  if (MODEL.test(name)) return 'model';
+  if (isModelFile(name)) return 'model';
   const dot = name.lastIndexOf('.');
   return (dot > 0 && BY_EXT[name.slice(dot + 1)]) || 'file';
 }
@@ -81,6 +81,7 @@ export function iconOf(path: string): IconId {
  * text, a selection and a copy stay the file name alone.
  */
 export function FileIcon({ path, dir = false, open = false, size = 14 }: { path?: string; dir?: boolean; open?: boolean; size?: number }) {
+  useModel3d(); // the icon of a .glb follows the flag
   const id: IconId = dir ? (open ? 'dirOpen' : 'dir') : iconOf(path ?? '');
   const m = MARKS[id];
   if ('text' in m) {

@@ -7,6 +7,7 @@ import { setLang } from '@/i18n/index.ts';
 import type { CameraPose, ModelViewer, ViewerOptions } from '@/model/api.ts';
 import { addShape, selectDraft, setMode } from '@/media/markup/slice.ts';
 import { makeStore, serverEvent } from '@/store/store.ts';
+import { setModel3d } from '../kinds.ts';
 import { filesSlice } from '../slice.ts';
 import { FileView } from '../FileView.tsx';
 
@@ -55,13 +56,14 @@ const modelComment = (id: string, camera: CameraPose | undefined, o: Partial<Com
 
 beforeEach(() => {
   setLang('en');
+  setModel3d(true);
   clips = [];
   created = [];
   loadGate = null;
   prepare.mockReset();
   vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(100), { status: 200, headers: { 'content-length': '100', etag: '"v1"' } })));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); setModel3d(false); });
 
 async function open(o: { protocol?: number; comments?: Comment[]; jump?: string } = {}) {
   const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });

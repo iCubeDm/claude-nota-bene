@@ -56,6 +56,8 @@ export async function startServer(o: {
   /** the checkout the server runs from (Settings → About's version); default: two levels above this file */
   repoDir?: string;
   webDist: string;
+  /** the experimental 3D model viewer (/model, Blender); default: env NOTA_BENE_EXPERIMENTAL_3D=1 */
+  experimental3d?: boolean;
   allowedOrigins?: string[];
   /** idle compaction timing and the settings.json check (tests shorten / stub them) */
   idle?: IdleConfig;
@@ -115,7 +117,9 @@ export async function startServer(o: {
         setTimeout(() => (o.exit ?? process.exit)(code), 100);
       });
     };
-    const blend = new BlendConverter({ stateDir });
+    // experimental 3D is off unless asked for: no converter means /model is a plain 404 and Blender is never looked up
+    const model3d = o.experimental3d ?? process.env.NOTA_BENE_EXPERIMENTAL_3D === '1';
+    const blend = model3d ? new BlendConverter({ stateDir }) : undefined;
     const marks = new MarkFiles({ root, stateDir });
     const sessionsRoute: http.RequestListener = (req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -184,7 +188,7 @@ export async function startServer(o: {
       info: () => {
         const { id, root, title, model } = manager.info();
         // busy and clients: for another window's Settings → Windows
-        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend.available() };
+        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend?.available() ?? false };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);
@@ -224,7 +228,7 @@ export async function startServer(o: {
     // the hello every socket gets, owner or not
     const sendHello = (ws: WebSocket) => {
       try {
-        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: caps }));
+        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...caps, model3d } }));
       } catch (e) {
         reportError(hub, 'hello', e);
       }
@@ -496,7 +500,7 @@ export async function startServer(o: {
       hubs.delete(hub);
       if (heartbeat) clearInterval(heartbeat);
       manager.close();
-      blend.dispose();
+      blend?.dispose();
       for (const c of wss.clients) c.terminate();
       wss.close(() => {
         server.close(() => resolve());

@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 // copied from the prototype
 export const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
 export const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
@@ -8,12 +10,32 @@ export const MD = /\.(md|markdown)$/i;
 
 export type FileKind = 'md' | 'image' | 'video' | 'audio' | 'model' | 'text';
 
+/**
+ * Experimental 3D (server env NOTA_BENE_EXPERIMENTAL_3D=1, announced in `hello.capabilities.model3d`). Off, a model
+ * file is any other unsupported binary: kind `text`, the generic icon, and the three chunks are never fetched. Off until
+ * the hello says otherwise, so nothing 3D loads on a guess. Module state (not redux) because kindOf/iconOf are pure
+ * helpers called from many places; a component that calls them re-renders on a change through `useModel3d`.
+ */
+let model3d = false;
+const model3dListeners = new Set<() => void>();
+export function setModel3d(on: boolean): void {
+  if (on === model3d) return;
+  model3d = on;
+  for (const fn of model3dListeners) fn();
+}
+export const isModel3d = (): boolean => model3d;
+export function useModel3d(): boolean {
+  return useSyncExternalStore((fn) => { model3dListeners.add(fn); return () => model3dListeners.delete(fn); }, isModel3d);
+}
+/** A model file (.glb .gltf .blend) AND the viewer is on. */
+export const isModelFile = (path: string): boolean => model3d && MODEL.test(path);
+
 export function kindOf(path: string): FileKind {
   if (MD.test(path)) return 'md';
   if (IMAGE.test(path)) return 'image';
   if (VIDEO.test(path)) return 'video';
   if (AUDIO.test(path)) return 'audio';
-  if (MODEL.test(path)) return 'model';
+  if (isModelFile(path)) return 'model';
   return 'text';
 }
 

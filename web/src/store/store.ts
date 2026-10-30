@@ -19,6 +19,7 @@ import { agentName, itemsOf, subagentsSlice } from '../subagent/slice.ts';
 import { toast } from '../shell/toast.ts';
 import { recordCompactMs } from '../feed/compactTiming.ts';
 import { feedUiSlice, TOOL_SRC } from '../feed/uiSlice.ts';
+import { setModel3d } from '../files/kinds.ts';
 import { persistListeners, type PersistState } from './persist.ts';
 import { emptyFeed, historyPrepended, prependHistory, reduce, type FeedState } from './feed.ts';
 
@@ -164,6 +165,7 @@ export function makeStore(o: {
         } else store.dispatch(connState('occupied'));
       } else if (ev.kind === 'taken-over') store.dispatch(connState('taken'));
       else if (ev.kind === 'replay') takeoverWanted = false; // a replay goes to the owner only: the takeover went through
+      if (ev.kind === 'hello') setModel3d(ev.capabilities?.model3d === true); // before the dispatch: views read it on re-render
       store.dispatch(serverEvent(ev));
     },
     (s) => {

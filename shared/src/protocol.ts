@@ -104,6 +104,8 @@ export type ModelChoice = { model: string; effort?: EffortLevel };
  */
 export type Capabilities = {
   compact: boolean; clear: boolean; modes: Mode[]; usage: boolean; fileSuggestions: boolean; fork: boolean; idleCompact: boolean; models: boolean;
+  /** the server runs with the experimental 3D viewer on (env NOTA_BENE_EXPERIMENTAL_3D=1); absent / false: model files are plain files. Set by the server, not by the agent. */
+  model3d?: boolean;
 };
 /** Claude Code's set; the web assumes it when `hello` carries none (a server older than protocol 5). */
 export const CLAUDE_CAPABILITIES: Capabilities = {

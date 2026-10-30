@@ -9,7 +9,7 @@ import { seekAndPause } from '@/media/mediaController.ts';
 import { selectDraft } from '@/media/markup/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
-import { fileUrl, kindOf } from './kinds.ts';
+import { fileUrl, kindOf, useModel3d } from './kinds.ts';
 import { isFixed, sourcesKnown, useSources } from './sources.ts';
 import { SourceChip } from './SourcePicker.tsx';
 import { clearJump, selectJump } from './slice.ts';
@@ -28,6 +28,7 @@ import { useMediaMarkup } from './view/useMediaMarkup.ts';
 export function FileView({ path, active, src = 'here', refName }: { path: string; active: boolean; src?: string; refName?: string }) {
   const t = useT();
   const dispatch = useAppDispatch();
+  useModel3d(); // kindOf follows the flag: re-render when the hello flips it
   const kind = kindOf(path);
   // not text: no text load. A model rides the media reload machinery (cache-busting `bust`, held while marking) but is
   // neither markable nor a player: the MediaController and the markup never see it

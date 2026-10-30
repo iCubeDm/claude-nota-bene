@@ -1,7 +1,10 @@
-import { expect, it } from 'vitest';
-import { fileUrl, isPath, kindOf, modelUrl } from './kinds.ts';
+import { afterEach, expect, it } from 'vitest';
+import { fileUrl, isPath, kindOf, modelUrl, setModel3d } from './kinds.ts';
+
+afterEach(() => setModel3d(false));
 
 it('kindOf covers each regex', () => {
+  setModel3d(true);
   expect(kindOf('a/README.md')).toBe('md');
   expect(kindOf('x.MARKDOWN')).toBe('md');
   expect(kindOf('p.PNG')).toBe('image');
@@ -46,4 +49,12 @@ it('modelUrl: a .blend goes through /model (converted by Blender), a glb / gltf 
   expect(modelUrl('m/a b.blend', 'here')).toBe('/model?path=m%2Fa%20b.blend');
   expect(modelUrl('m/a.BLEND', 'wt-1')).toBe('/model?path=m%2Fa.BLEND&src=wt-1');
   expect(modelUrl('m/a.glb', 'wt-1')).toBe('/file?path=m%2Fa.glb&src=wt-1');
+});
+
+it('kindOf: with experimental 3D off a model file is plain text, like any unsupported binary', () => {
+  for (const p of ['m/robot.glb', 'ROBOT.GLB', 'scene.gltf', 'scene.blend']) expect([p, kindOf(p)]).toEqual([p, 'text']);
+  setModel3d(true);
+  expect(kindOf('scene.blend')).toBe('model');
+  setModel3d(false);
+  expect(kindOf('scene.blend')).toBe('text');
 });

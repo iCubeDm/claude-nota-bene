@@ -26,8 +26,8 @@ afterEach(async () => {
   fs.rmSync(dist, { recursive: true, force: true });
 });
 
-async function boot() {
-  const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false });
+async function boot(extra: { experimental3d?: boolean } = {}) {
+  const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false, ...extra });
   closers.push(s.close);
   return s;
 }
@@ -103,7 +103,7 @@ describe('server', () => {
     const a = await connect(s.url);
     await until(() => a.events.some((e) => e.kind === 'hello'));
     const kinds = a.events.map((e) => e.kind);
-    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL, capabilities: CLAUDE_CAPABILITIES });
+    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...CLAUDE_CAPABILITIES, model3d: false } });
     expect(kinds.indexOf('hello')).toBeGreaterThan(kinds.indexOf('stats'));
   });
 
@@ -182,9 +182,9 @@ describe('server', () => {
     }
   });
 
-  it('/info.blender says whether a Blender is found (NOTA_BENE_BLENDER is authoritative)', async () => {
+  it('/info.blender says whether a Blender is found (NOTA_BENE_BLENDER is authoritative); experimental 3D on', async () => {
     const prev = process.env.NOTA_BENE_BLENDER;
-    const s = await boot();
+    const s = await boot({ experimental3d: true });
     const has = async () => ((await (await fetch(`${s.url}/info`)).json()) as { blender: boolean }).blender;
     try {
       process.env.NOTA_BENE_BLENDER = '/nonexistent/blender';
@@ -194,6 +194,46 @@ describe('server', () => {
     } finally {
       if (prev === undefined) delete process.env.NOTA_BENE_BLENDER; else process.env.NOTA_BENE_BLENDER = prev;
     }
+  });
+
+  describe('experimental 3D flag', () => {
+    it('off (the default): /model is a 404, /info.blender is false even with a Blender configured, hello says model3d false', async () => {
+      const prev = process.env.NOTA_BENE_BLENDER;
+      process.env.NOTA_BENE_BLENDER = process.execPath;
+      try {
+        const s = await boot();
+        expect((await fetch(`${s.url}/model?path=a.blend`)).status).toBe(404);
+        expect(((await (await fetch(`${s.url}/info`)).json()) as { blender: boolean }).blender).toBe(false);
+        const c = await connect(s.url);
+        await until(() => c.events.some((e) => e.kind === 'hello'));
+        const hello = c.events.find((e) => e.kind === 'hello') as { capabilities: { model3d?: boolean } };
+        expect(hello.capabilities.model3d).toBe(false);
+      } finally {
+        if (prev === undefined) delete process.env.NOTA_BENE_BLENDER; else process.env.NOTA_BENE_BLENDER = prev;
+      }
+    });
+
+    it('on: the route exists (a missing file is not the unrouted 404), hello says model3d true', async () => {
+      const s = await boot({ experimental3d: true });
+      const r = await fetch(`${s.url}/model?path=a.blend`, { headers: { 'sec-fetch-site': 'same-origin' } });
+      expect(await r.text()).not.toBe('not found');
+      const c = await connect(s.url);
+      await until(() => c.events.some((e) => e.kind === 'hello'));
+      expect((c.events.find((e) => e.kind === 'hello') as { capabilities: { model3d?: boolean } }).capabilities.model3d).toBe(true);
+    });
+
+    it('NOTA_BENE_EXPERIMENTAL_3D=1 turns it on when the option is not given', async () => {
+      const prev = process.env.NOTA_BENE_EXPERIMENTAL_3D;
+      process.env.NOTA_BENE_EXPERIMENTAL_3D = '1';
+      try {
+        const s = await boot();
+        const c = await connect(s.url);
+        await until(() => c.events.some((e) => e.kind === 'hello'));
+        expect((c.events.find((e) => e.kind === 'hello') as { capabilities: { model3d?: boolean } }).capabilities.model3d).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.NOTA_BENE_EXPERIMENTAL_3D; else process.env.NOTA_BENE_EXPERIMENTAL_3D = prev;
+      }
+    });
   });
 
   it('a taken port rejects startServer with the listen error (instead of hanging)', async () => {

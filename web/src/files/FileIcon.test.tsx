@@ -1,19 +1,29 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { FileIcon, iconOf } from './FileIcon.tsx';
+import { setModel3d } from './kinds.ts';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setModel3d(false); });
 
 it('maps the plan\'s extensions, media and well-known names (M6-11)', () => {
   const cases: [string, string][] = [
     ['src/a.ts', 'ts'], ['b.tsx', 'ts'], ['c.js', 'js'], ['bin/x.mjs', 'js'], ['tsconfig.json', 'json'],
     ['docs/A.MD', 'md'], ['theme.css', 'css'], ['index.html', 'html'], ['tool.py', 'py'], ['run.sh', 'sh'],
     ['ci.yml', 'yml'], ['ci.yaml', 'yml'], ['Cargo.toml', 'toml'],
-    ['scene_v6.png', 'image'], ['a.JPG', 'image'], ['icon.svg', 'image'], ['clip_вход.mp4', 'video'], ['x.mov', 'video'], ['v.mp3', 'audio'], ['m/robot.glb', 'model'], ['scene.GLTF', 'model'],
+    ['scene_v6.png', 'image'], ['a.JPG', 'image'], ['icon.svg', 'image'], ['clip_вход.mp4', 'video'], ['x.mov', 'video'], ['v.mp3', 'audio'],
     ['web/package.json', 'npm'], ['README.md', 'readme'], ['readme', 'readme'], ['.gitignore', 'git'], ['Dockerfile', 'docker'], ['dockerfile.dev', 'docker'],
     ['LICENSE', 'file'], ['.env', 'file'], ['notes.txt', 'file'], ['archive.tar.gz', 'file'],
   ];
   for (const [p, id] of cases) expect([p, iconOf(p)]).toEqual([p, id]);
+});
+
+it('a model file has the model icon only while experimental 3D is on; off it is a plain file', () => {
+  expect(iconOf('m/robot.glb')).toBe('file');
+  expect(iconOf('scene.blend')).toBe('file');
+  setModel3d(true);
+  expect(iconOf('m/robot.glb')).toBe('model');
+  expect(iconOf('scene.GLTF')).toBe('model');
+  expect(iconOf('s.blend')).toBe('model');
 });
 
 it('a folder is closed or open; a letter mark is text, a glyph is strokes', () => {

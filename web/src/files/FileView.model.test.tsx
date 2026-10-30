@@ -1,10 +1,11 @@
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { Provider } from 'react-redux';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
 import { FileView } from './FileView.tsx';
+import { setModel3d } from './kinds.ts';
 
 vi.mock('@/model/viewer.ts', () => ({
   createViewer: () => ({
@@ -13,7 +14,8 @@ vi.mock('@/model/viewer.ts', () => ({
     snapshot: vi.fn(), dispose: vi.fn(), canvas: document.createElement('canvas'), setFrozen: vi.fn(), renderNow: vi.fn(),
   }),
 }));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+beforeEach(() => setModel3d(true));
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); setModel3d(false); });
 
 it('a .glb tab is fetched once as bytes: no HEAD / Range probe / text, no markup, a reload button', async () => {
   setLang('en');

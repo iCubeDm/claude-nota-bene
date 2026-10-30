@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ClientMessage, ServerEvent } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES } from '@nota-bene/shared';
+import { isModel3d, setModel3d } from '../files/kinds.ts';
 import { devToolsEnabled, interrupt, makeStore, selectBusy, selectFeed, sendMessage } from './store.ts';
 
 function fake() {
@@ -14,7 +16,7 @@ function fake() {
   return { sent, connect, ev: (e: ServerEvent) => onEvent(e), state: (s: 'open' | 'closed') => onState(s) };
 }
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); setModel3d(false); });
 
 it('inbound frames reach the feed', () => {
   const f = fake();
@@ -84,4 +86,16 @@ it('a live compaction records its duration for the next estimate; a replayed one
   f.ev({ kind: 'agent', ts: 2, e: cb });
   expect(JSON.parse(localStorage.getItem('nb.compactMs')!)).toEqual([42000]);
   localStorage.clear();
+});
+
+it('hello.capabilities.model3d switches the 3D viewer; a hello without it (or an older server) leaves it off', () => {
+  const f = fake();
+  makeStore({ url: 'u', connect: f.connect });
+  expect(isModel3d()).toBe(false);
+  f.ev({ kind: 'hello', protocol: 9, capabilities: { ...CLAUDE_CAPABILITIES, model3d: true } });
+  expect(isModel3d()).toBe(true);
+  f.ev({ kind: 'hello', protocol: 9, capabilities: CLAUDE_CAPABILITIES }); // e.g. the server restarted without the flag
+  expect(isModel3d()).toBe(false);
+  f.ev({ kind: 'hello', protocol: 4 });
+  expect(isModel3d()).toBe(false);
 });
