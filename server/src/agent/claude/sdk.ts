@@ -2,7 +2,7 @@ import { getSessionInfo, getSessionMessages, getSubagentMessages, listSessions, 
 import type { ModelInfo, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type ModelOption, type SlashCommand } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
-import { offered, pickCommands, toSlash } from './commands.ts';
+import { CommandTap, offered, pickCommands, toSlash } from './commands.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
 import { agentOfCall, findSubagentMeta, hitFresh, hitGet, hitSet, isRunning, noMetaAdd, noMetaHas } from './subagents.ts';
@@ -72,8 +72,8 @@ class SdkSession implements AgentSession {
   private readonly input = new InputQueue();
   private readonly q: ReturnType<typeof query>;
   private readonly warmup: NodeJS.Timeout;
-  // the commands the CLI tags as bound to its terminal, from the first init (a turn's start): never offered
-  private terminal: string[] = [];
+  // the commands the CLI tags as bound to its terminal arrive with the first init (a turn's start), after the list was first asked for
+  private readonly tap = new CommandTap<SDKMessage>();
 
   constructor(o: Parameters<AgentBackend['start']>[0]) {
     this.q = query({
@@ -97,23 +97,21 @@ class SdkSession implements AgentSession {
             : { behavior: 'deny', message: 'User denied this action in the UI.' },
       },
     });
-    this.messages = offered(mapFrames(this.noted(this.q)), () => this.terminal);
+    this.messages = offered(mapFrames(this.noted(this.q)), () => this.tap.terminal);
     // warm the CLI's file index (it answers [] for a few seconds after start); the failure does not matter
     this.warmup = setTimeout(() => void this.fileSuggestions('').catch(() => {}), 2000);
     this.warmup.unref();
   }
 
-  /** the frames unchanged; the init's terminal-only command names are kept on the way */
+  /** the frames, plus a repeat of the command list when the first init tags some of it as terminal-only */
   private async *noted(frames: AsyncIterable<SDKMessage>): AsyncGenerator<SDKMessage> {
-    for await (const m of frames) {
-      const t = (m as { subtype?: string; terminal_slash_commands?: unknown }).terminal_slash_commands;
-      if (m.type === 'system' && m.subtype === 'init') this.terminal = Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : [];
-      yield m;
-    }
+    for await (const m of frames) yield* this.tap.through(m);
   }
 
   async supportedCommands(): Promise<SlashCommand[]> {
-    return pickCommands((await this.q.supportedCommands()).map(toSlash), this.terminal);
+    const rows = await this.q.supportedCommands();
+    this.tap.rows = rows;
+    return pickCommands(rows.map(toSlash), this.tap.terminal);
   }
 
   async fileSuggestions(query: string): Promise<string[]> {

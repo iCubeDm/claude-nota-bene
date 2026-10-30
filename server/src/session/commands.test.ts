@@ -21,6 +21,23 @@ describe('CommandKeeper', () => {
     expect(k.commands).toEqual([c('a'), c('b')]);
   });
 
+  it('a list that was asked for does not overwrite a newer one the agent pushed meanwhile', async () => {
+    const seen: SlashCommand[][] = [];
+    const k = new CommandKeeper((ev) => seen.push(ev.commands));
+    let answer!: (l: SlashCommand[]) => void;
+    const loading = k.load({ supportedCommands: () => new Promise((r) => { answer = r; }) }, () => true);
+    k.set([c('pushed')]);
+    answer([c('old')]);
+    await loading;
+    expect(k.commands).toEqual([c('pushed')]);
+    expect(seen).toEqual([[c('pushed')]]);
+  });
+
+  it('a CLI that never answers is given up on: load rejects after the timeout', async () => {
+    const k = new CommandKeeper(() => {}, 20);
+    await expect(k.load({ supportedCommands: () => new Promise(() => {}) }, () => true)).rejects.toThrow(/timed out/);
+  });
+
   it('an agent that is no longer the current one changes nothing', async () => {
     const seen: unknown[] = [];
     const k = new CommandKeeper((ev) => seen.push(ev));

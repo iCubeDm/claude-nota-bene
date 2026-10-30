@@ -107,7 +107,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
   function startAgent(g: number): AgentSession {
     const a = backend.start({ ...who.startOptions(), permissionMode: modes.mode, ...models.forStart(who.root), ask: permissions.ask(() => slot.gen, g) });
     if (backend.capabilities.models) models.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) report('models', e); });
-    cmds.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) report('commands', e); });
+    cmds.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) console.error('[commands]', e); }); // optional: the menu stays closed, typing works, no toast
     return a;
   }
 

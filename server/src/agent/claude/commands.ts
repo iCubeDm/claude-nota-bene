@@ -39,3 +39,29 @@ export function pickCommands(rows: SlashCommand[], terminal: readonly string[] =
 export async function* offered(events: AsyncIterable<AgentEvent>, terminal: () => readonly string[]): AsyncGenerator<AgentEvent> {
   for await (const e of events) yield e.t === 'commands' ? { ...e, commands: pickCommands(e.commands, terminal()) } : e;
 }
+
+type Frame = { type?: string; subtype?: string; terminal_slash_commands?: unknown; commands?: unknown };
+
+/**
+ * Watches the CLI's frames for what the menu list depends on: the commands it tags as terminal-only (its first init, a turn's
+ * start, comes after the list was first asked for) and the last unfiltered list. When an init changes the terminal set, a
+ * `commands_changed` frame with that list is added after it, so the list is filtered again with what is known now.
+ */
+export class CommandTap<F extends object> {
+  terminal: string[] = [];
+  /** the last list as the CLI gave it (asked or pushed), unfiltered; null before any */
+  rows: Row[] | null = null;
+
+  *through(frame: F): Iterable<F> {
+    const m = frame as Frame;
+    yield frame;
+    if (m.type !== 'system') return;
+    if (m.subtype === 'commands_changed' && Array.isArray(m.commands)) this.rows = m.commands as Row[];
+    else if (m.subtype === 'init') {
+      const next = Array.isArray(m.terminal_slash_commands) ? m.terminal_slash_commands.filter((x): x is string => typeof x === 'string') : [];
+      const changed = JSON.stringify(next) !== JSON.stringify(this.terminal);
+      this.terminal = next;
+      if (changed && this.rows) yield { type: 'system', subtype: 'commands_changed', commands: this.rows } as unknown as F;
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_OK, pickCommands, toSlash } from './commands.ts';
+import { BUILTIN_OK, CommandTap, pickCommands, toSlash } from './commands.ts';
 
 const row = (name: string, o: Record<string, unknown> = {}) => ({ name, description: `${name} d`, argumentHint: '', ...o });
 
@@ -31,5 +31,27 @@ describe('pickCommands', () => {
 
   it('the allowlist holds no command that changes state the UI shows elsewhere', () => {
     for (const n of ['model', 'effort', 'fast', 'advisor', 'output-style', 'config', 'autocompact', 'color', 'focus', 'doctor', 'reload-plugins']) expect(BUILTIN_OK.has(n)).toBe(false);
+  });
+});
+
+describe('CommandTap', () => {
+  const frames = (tap: CommandTap<object>, f: object) => [...tap.through(f)] as { subtype?: string; commands?: unknown }[];
+
+  it('an init that brings terminal-only names adds the cached list again, once', () => {
+    const tap = new CommandTap<object>();
+    tap.rows = [row('a'), row('b')];
+    const out = frames(tap, { type: 'system', subtype: 'init', terminal_slash_commands: ['b'] });
+    expect(out.map((f) => f.subtype)).toEqual(['init', 'commands_changed']);
+    expect(out[1].commands).toEqual(tap.rows);
+    expect(tap.terminal).toEqual(['b']);
+    expect(frames(tap, { type: 'system', subtype: 'init', terminal_slash_commands: ['b'] })).toHaveLength(1); // every turn inits: only news counts
+  });
+
+  it('no cached list yet: nothing to add; a pushed list is cached', () => {
+    const tap = new CommandTap<object>();
+    expect(frames(tap, { type: 'system', subtype: 'init', terminal_slash_commands: ['b'] })).toHaveLength(1);
+    frames(tap, { type: 'system', subtype: 'commands_changed', commands: [row('z')] });
+    expect(tap.rows).toEqual([row('z')]);
+    expect(frames(tap, { type: 'assistant' })).toHaveLength(1);
   });
 });
