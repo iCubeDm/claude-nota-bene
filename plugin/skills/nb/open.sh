@@ -24,6 +24,8 @@
 # is, anything else (spaces, quotes, $, parentheses, non-ASCII) is single-quoted, so bash and zsh read each back exactly and
 # Claude Code accepts the text (it refuses backslash-escaped spaces and $'\320...' escapes).
 # --wait polls --find every 0.5 s for up to 40 s (NB_WAIT_SECS, test only) and prints "NB: opened URL for DIR<note>."
+# The URL the skill shows carries the login fragment (#t=TOKEN, from the launcher's --url): it logs a second browser in. The
+# token is never in a command line: the browser is opened by the launcher (--front), on a page in the state dir.
 # Without --plan the window is started with --detach (terminal use).
 # The launcher is bin/nota-bene.mjs (--find / --last / --detach). It keeps one window per folder (its launch lock),
 # so two /nb at once end with one window; this script finds, words and relays. Runs on bash 3.2 (macOS).
@@ -159,7 +161,8 @@ if [ "${1:-}" = --wait ]; then
   fi
   for ((i = 0; i < SECS * 2; i++)); do
     PORT="$(node "$BIN" --find "$WDIR" 2>/dev/null)" && [ -n "$PORT" ] && {
-      echo "NB: opened http://127.0.0.1:$PORT for $WDIR$WNOTE."; exit 0; }
+      URL="$(node "$BIN" --url "$PORT" 2>/dev/null)"; [ -n "$URL" ] || URL="http://127.0.0.1:$PORT"
+      echo "NB: opened $URL for $WDIR$WNOTE."; exit 0; }
     sleep 0.5
   done
   echo "NB: the window did not come up in ${SECS}s — see the background task's output."
@@ -194,24 +197,16 @@ already() { # $1 = URL of a window already serving this folder
   fi
   exit 0
 }
-bring() { # $1 = port of a window found here: bring it to front ourselves
-  [ -n "$OPENER" ] && "$OPENER" "http://127.0.0.1:$1" >/dev/null 2>&1
-  already "http://127.0.0.1:$1"
+bring() { # $1 = port of a window found here: bring it to front ourselves (the launcher opens its login page)
+  [ -n "$OPENER" ] && node "$BIN" --front "$1" >/dev/null 2>&1
+  local url; url="$(node "$BIN" --url "$1" 2>/dev/null)"
+  already "${url:-http://127.0.0.1:$1}"
 }
 
-# a window already serving this folder: the registry (verified by /info, stale entries pruned) ...
-[ -z "$FIRST_RUN" ] && { PORT="$(node "$BIN" --find "$DIR" 2>/dev/null)" && [ -n "$PORT" ] && bring "$PORT"; }
-# ... or any port of the range whose /info has this root: a lost registry write.
-# 4780 is the dev server (npm run dev), never a window. Without curl the bin's own re-check still finds them.
-if command -v curl >/dev/null; then
-  FROM=4777 TO=4799 SKIP=4780
-  if [[ "${NOTA_BENE_PORT_RANGE:-}" =~ ^([0-9]+)-([0-9]+)$ ]]; then FROM=${BASH_REMATCH[1]} TO=${BASH_REMATCH[2]} SKIP=; fi
-  for p in $(seq "$FROM" "$TO"); do
-    [ "$p" = "$SKIP" ] && continue
-    root="$(curl -s --max-time 0.5 "http://127.0.0.1:$p/info" | sed -n 's/.*"root":"\([^"]*\)".*/\1/p')"
-    [ "$root" = "$DIR" ] && bring "$p"
-  done
-fi
+# a window already serving this folder: the registry (verified by /info, stale entries pruned), or any port of the range whose
+# /info has this root (a lost registry write; 4780 is the dev server, never a window). The launcher asks, logged in with the
+# port's credential: /info wants one, and a bare curl would have to put the token on a command line.
+[ -z "$FIRST_RUN" ] && { PORT="$(node "$BIN" --find "$DIR" --scan 2>/dev/null)" && [ -n "$PORT" ] && bring "$PORT"; }
 
 ARGS=(--detach) NOTE=""
 if [ "$MODE" = last ]; then
@@ -278,7 +273,7 @@ fi
 # brought that window to front)
 ERR="$(mktemp "${TMPDIR:-/tmp}/nb-open.XXXXXX")"
 OUT="$(node "$BIN" "$DIR" "${ARGS[@]}" 2>"$ERR" </dev/null)"; RC=$?
-LINE='^(opened|already-open) (http://127\.0\.0\.1:([0-9]+))$'
+LINE='^(opened|already-open) (http://127\.0\.0\.1:([0-9]+)(/#t=[0-9a-f]+)?)$'
 if [ $RC -eq 0 ] && [[ "$OUT" =~ $LINE ]]; then
   rm -f "$ERR"
   VERB="${BASH_REMATCH[1]}" URL="${BASH_REMATCH[2]}" PORT="${BASH_REMATCH[3]}"

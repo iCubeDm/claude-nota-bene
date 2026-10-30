@@ -4,9 +4,16 @@
 // package bundles this file and the server to plain JS (scripts/build-package.mjs).
 //
 //   nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
-//   nota-bene --find DIR   prints the port of a live window serving DIR (exit 0), or exits 1
+//   nota-bene --find DIR [--scan]   prints the port of a live window serving DIR (exit 0), or exits 1; --scan also asks
+//                          the other ports of the range (a window whose registry write was lost)
 //   nota-bene --last DIR   prints DIR's saved session id if its transcript still exists (exit 0), or exits 1
-//   --detach prints exactly one line, `opened URL` or `already-open URL` (exit 0), or an error and the log tail (exit 1)
+//   nota-bene --url PORT   prints the window's login URL (http://127.0.0.1:PORT/#t=TOKEN), for a second browser
+//   nota-bene --front PORT brings the window to front in the browser, logged in
+//   --detach prints exactly one line, `opened URL` or `already-open URL` (exit 0), or an error and the log tail (exit 1);
+//   the URL carries the login fragment `#t=TOKEN` (the foreground line and the log never do)
+//
+// The access token (server/src/auth.ts) is never put in argv: a browser is opened on a page in the state dir (mode 600) that
+// redirects to the URL with the fragment, and the helpers send a per-port credential read from the token file.
 //
 // One window per folder: a launch takes the folder's lock, then gives way to a window already serving it.
 // A picked port avoids 4780 (dev) and 4790-4795 (smoke, tests) unless NOTA_BENE_PORT_RANGE is set.
@@ -18,12 +25,13 @@
 // switched), and drops --resume/--fork/--new for --continue. The registry entry stays through the restart gap (it is
 // removed only when the launcher ends), so no other launch picks the port meanwhile; a 98 on a relaunch gives up.
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { accessToken } from '../server/src/auth.ts';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
 import {
@@ -36,7 +44,7 @@ const SELF = fileURLToPath(import.meta.url);
 // under node_modules) at the same relative place
 const MAIN = path.join(REPO, fs.existsSync(path.join(REPO, 'server/src/main.js')) ? 'server/src/main.js' : 'server/src/main.ts');
 const USAGE = 'Usage: nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]\n'
-  + '       nota-bene --find DIR | --last DIR\n'
+  + '       nota-bene --find DIR [--scan] | --last DIR | --url PORT | --front PORT\n'
   + '       nota-bene --help | --version';
 const RESTART = 75;
 const LISTEN_FAILED = 98; // server/src/main.ts LISTEN_FAILED
@@ -65,7 +73,8 @@ const realDir = (d) => fs.realpathSync.native(path.resolve(d));
 
 export function parseArgs(argv) {
   const o = { dir: undefined, port: undefined, resume: undefined, fork: false, new: false, continue: false,
-    detach: false, open: true, help: false, version: false, fake: undefined, allowOrigins: [], find: undefined, last: undefined };
+    detach: false, open: true, help: false, version: false, fake: undefined, allowOrigins: [], find: undefined, last: undefined,
+    scan: false, url: undefined, front: undefined };
   const value = (i) => {
     if (argv[i] === undefined) throw new Error(`${USAGE}\nMissing value for ${argv[i - 1]}`);
     return argv[i];
@@ -86,6 +95,9 @@ export function parseArgs(argv) {
     else if (a === '--allow-origin') o.allowOrigins.push(value(++i));
     else if (a === '--find') o.find = value(++i);
     else if (a === '--last') o.last = value(++i);
+    else if (a === '--scan') o.scan = true;
+    else if (a === '--url') o.url = value(++i);
+    else if (a === '--front') o.front = value(++i);
     else if (a === '--help' || a === '-h') o.help = true;
     else if (a === '--version' || a === '-v') o.version = true;
     else if (a.startsWith('-') && a.length > 1) throw new Error(`${USAGE}\nUnknown option: ${a}`); // not a folder named like a flag
@@ -349,12 +361,23 @@ async function servingWindow(root) {
 
 // --- helpers for the /nb skill ---------------------------------------------------------------------------------
 
-async function find(dir) {
-  const hit = await windowFor(realDir(dir));
-  if (!hit) return 1;
-  process.stdout.write(`${hit.port}\n`);
+async function find(dir, scan = false) {
+  const root = realDir(dir);
+  const port = scan ? await servingWindow(root) : (await windowFor(root))?.port;
+  if (port === undefined) return 1;
+  process.stdout.write(`${port}\n`);
   return 0;
 }
+
+/** `http://127.0.0.1:PORT` for a port, or a loopback http URL as given (the dev server's); null for anything else. */
+export function baseUrlOf(what) {
+  if (/^\d{1,5}$/.test(what) && Number(what) > 0 && Number(what) < 65536) return `http://127.0.0.1:${Number(what)}`;
+  const m = /^(http:\/\/(?:127\.0\.0\.1|localhost):\d{1,5})\/?$/.exec(what);
+  return m ? m[1] : null;
+}
+
+/** The URL that logs a browser in: the base plus the token in the fragment (which no server, proxy or log ever sees). */
+export const loginUrl = (base) => `${base}/#t=${accessToken()}`;
 
 function last(dir) {
   const id = lastSession(realDir(dir));
@@ -376,10 +399,51 @@ function refuse(dir) {
   return dir === home || dir === '/';
 }
 
-function openBrowser(url) {
-  const p = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { stdio: 'ignore', detached: true });
+const OPEN_PAGE_KEEP_MS = 30_000;
+
+/**
+ * The page the browser is opened on: `open URL` would put the token in argv, where `ps` shows it to every user. So the
+ * browser gets a file in the state dir (dir 700, file 600; only this user can read it, as the token file itself) that
+ * redirects to the login URL. Removed shortly after, and older ones are swept at each write.
+ */
+export function writeOpenPage(base) {
+  const dir = path.join(stateDir(), 'open');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const n of fs.readdirSync(dir)) {
+    try {
+      if (Date.now() - fs.statSync(path.join(dir, n)).mtimeMs > 10 * 60_000) fs.rmSync(path.join(dir, n), { force: true });
+    } catch {
+      // gone already
+    }
+  }
+  const target = JSON.stringify(loginUrl(base));
+  const file = path.join(dir, `open-${randomBytes(6).toString('hex')}.html`);
+  fs.writeFileSync(file, `<!doctype html><meta charset="utf-8"><title>Nota Bene</title>\n<script>location.replace(${target})</script>\n<noscript><meta http-equiv="refresh" content="0;url=${loginUrl(base)}"></noscript>\n`, { mode: 0o600 });
+  setTimeout(() => fs.rmSync(file, { force: true }), OPEN_PAGE_KEEP_MS).unref();
+  return file;
+}
+
+/** Opens (or brings to front) the window in the browser, logged in. `base` is `http://127.0.0.1:PORT`. */
+function openBrowser(base, wait = false) {
+  let target;
+  try {
+    target = writeOpenPage(base);
+  } catch (e) {
+    say(`cannot write the page that logs the browser in (${e.message}); opening the window without it`);
+    target = base;
+  }
+  const p = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { stdio: 'ignore', detached: true });
   p.on('error', () => {});
-  p.unref();
+  if (!wait) {
+    p.unref();
+    return undefined;
+  }
+  // a caller that exits right after (--front) waits for the opener to hand the page over (bounded)
+  return new Promise((resolve) => {
+    p.on('exit', resolve);
+    p.on('error', resolve);
+    setTimeout(resolve, 3000).unref();
+  });
 }
 
 const entryOf = (port) => readWindows()[String(port)];
@@ -413,7 +477,7 @@ async function detach(o, argv, autoPort, buildOutput) {
       if (w.root !== o.dir || !(w.launcherPid === child.pid || (gone && exitCode === 0 && pidAlive(w.pid)))) continue;
       if ((await probeInfo(Number(key)))?.root === o.dir) {
         // ours, or the window our launcher gave way to (it lost a port race to a launcher of the same folder)
-        process.stdout.write(`${w.launcherPid === child.pid ? 'opened' : 'already-open'} http://127.0.0.1:${key}\n`);
+        process.stdout.write(`${w.launcherPid === child.pid ? 'opened' : 'already-open'} ${loginUrl(`http://127.0.0.1:${key}`)}\n`);
         return 0;
       }
     }
@@ -617,8 +681,18 @@ async function main(argv) {
     return 0;
   }
   try {
-    if (o.find !== undefined) return await find(o.find);
+    if (o.find !== undefined) return await find(o.find, o.scan);
     if (o.last !== undefined) return last(o.last);
+    if (o.url !== undefined || o.front !== undefined) {
+      const base = baseUrlOf(o.url ?? o.front);
+      if (!base) {
+        say(`not a window port or a loopback URL: ${o.url ?? o.front}`);
+        return 2;
+      }
+      if (o.url !== undefined) process.stdout.write(`${loginUrl(base)}\n`);
+      else await openBrowser(base, true);
+      return 0;
+    }
     o.dir = realDir(o.dir ?? '.');
   } catch (e) {
     say(e.message);
@@ -646,7 +720,7 @@ async function main(argv) {
       if (port !== undefined) {
         const url = `http://127.0.0.1:${port}`;
         if (o.open) openBrowser(url); // bring it to front
-        process.stdout.write(o.detach ? `already-open ${url}\n` : `nota-bene: already open at ${url}\n`);
+        process.stdout.write(o.detach ? `already-open ${loginUrl(url)}\n` : `nota-bene: already open at ${url}\n`);
         return 0;
       }
     }

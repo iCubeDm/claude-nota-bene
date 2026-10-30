@@ -1,6 +1,6 @@
 // Spawns the real launcher (bin/nota-bene.mjs) with the fake agent, a temp NOTA_BENE_HOME and ports 4791-4795.
 // Every launcher runs in its own process group; afterEach SIGKILLs the groups, so no server outlives a test.
-import { type ChildProcess, execFileSync, spawn, spawnSync } from 'node:child_process';
+import { type ChildProcess, execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -127,9 +127,14 @@ async function firstFree(from: number, to: number): Promise<number> {
   throw new Error(`no free port in ${from}-${to}`);
 }
 
+/** The access token of the test's state dir (the real server creates it at start). */
+const tokenOf = () => fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
+const authHeaders = () => ({ authorization: `Bearer ${tokenOf()}` });
+const loginRe = '#t=[0-9a-f]{64}';
+
 async function info(port: number): Promise<{ root: string; supervised: boolean } | null> {
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/info`, { signal: AbortSignal.timeout(500) });
+    const r = await fetch(`http://127.0.0.1:${port}/info`, { headers: authHeaders(), signal: AbortSignal.timeout(500) });
     return r.ok ? ((await r.json()) as { root: string; supervised: boolean }) : null;
   } catch {
     return null;
@@ -173,7 +178,7 @@ describe('nota-bene launcher', () => {
     expect(argsOf(first.pid)).toContain('--new');
     const res = await fetch('http://127.0.0.1:4792/restart-server', {
       method: 'POST',
-      headers: { origin: 'http://127.0.0.1:4792' },
+      headers: { origin: 'http://127.0.0.1:4792', ...authHeaders() },
     });
     expect(res.status).toBe(200);
     const next = await waitFor(() => {
@@ -302,7 +307,7 @@ describe('nota-bene launcher', () => {
     }));
     launch(['--port', '4792'], {}, fake);
     const first = await waitFor(() => windows()['4792']);
-    const ws = new WebSocket('ws://127.0.0.1:4792/ws');
+    const ws = new WebSocket('ws://127.0.0.1:4792/ws', { headers: authHeaders() });
     await new Promise((res, rej) => {
       ws.onopen = res;
       ws.onerror = rej;
@@ -313,7 +318,7 @@ describe('nota-bene launcher', () => {
     ws.close();
     const res = await fetch('http://127.0.0.1:4792/restart-server', {
       method: 'POST',
-      headers: { origin: 'http://127.0.0.1:4792' },
+      headers: { origin: 'http://127.0.0.1:4792', ...authHeaders() },
     });
     expect(res.status).toBe(200);
     const next = await waitFor(() => {
@@ -390,7 +395,7 @@ describe('nota-bene launcher', () => {
       timeout: 25000,
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe('opened http://127.0.0.1:4793\n');
+    expect(r.stdout).toBe(`opened http://127.0.0.1:4793/#t=${tokenOf()}\n`);
     const w = windows()['4793']!; // the URL comes only after the registry has the window
     expect(w.root).toBe(project);
     expect(alive(w.launcherPid!)).toBe(true);
@@ -402,7 +407,7 @@ describe('nota-bene launcher', () => {
     expect(r2.out()).toBe('nota-bene: already open at http://127.0.0.1:4793\n');
     const d2 = launch(['--detach']);
     expect(await d2.exited, d2.err()).toBe(0);
-    expect(d2.out()).toBe('already-open http://127.0.0.1:4793\n');
+    expect(d2.out()).toBe(`already-open http://127.0.0.1:4793/#t=${tokenOf()}\n`);
     expect(Object.keys(windows())).toEqual(['4793']);
     // a window missing from the registry (a failed registry write) is found by /info
     const other = path.join(tmp, 'project-b');
@@ -412,7 +417,7 @@ describe('nota-bene launcher', () => {
     try {
       const d3 = launch(['--detach'], {}, FAKE, other);
       expect(await d3.exited, d3.err()).toBe(0);
-      expect(d3.out()).toBe('already-open http://127.0.0.1:4792\n');
+      expect(d3.out()).toBe(`already-open http://127.0.0.1:4792/#t=${tokenOf()}\n`);
       expect(Object.keys(windows())).toEqual(['4793']);
     } finally {
       s2.closeAllConnections();
@@ -430,7 +435,7 @@ describe('nota-bene launcher', () => {
     expect(urlB).toBe(urlA);
     const entries = Object.entries(windows()).filter(([, w]) => w.root === project);
     expect(entries).toHaveLength(1);
-    expect(urlA).toBe(`http://127.0.0.1:${entries[0]![0]}`);
+    expect(urlA).toBe(`http://127.0.0.1:${entries[0]![0]}/#t=${tokenOf()}`);
     const roots = [];
     for (let p = 4791; p <= 4795; p++) roots.push((await info(p))?.root);
     expect(roots.filter((r) => r === project)).toHaveLength(1);
@@ -452,7 +457,7 @@ describe('nota-bene launcher', () => {
     const r = launch(['--detach']);
     expect(await r.exited, r.err()).toBe(0);
     expect(Date.now() - t0).toBeLessThan(10_000); // not the 30 s wait-then-go-unguarded
-    expect(r.out()).toMatch(/^opened http:\/\/127\.0\.0\.1:\d+\n$/);
+    expect(r.out()).toMatch(new RegExp(`^opened http://127\\.0\\.0\\.1:\\d+/${loginRe}\\n$`));
     expect(fs.existsSync(launchLock())).toBe(false);
   }, 20000);
 
@@ -640,4 +645,111 @@ describe('--help, --version and a stray dash', () => {
       expect(r.stderr).toContain('Usage: nota-bene');
     }
   });
+});
+
+describe('the access token', () => {
+  /** a PATH dir whose `open` / `xdg-open` record their argument instead of starting a browser */
+  function stubOpener(): { path: string; log: string } {
+    const d = path.join(tmp, 'opener');
+    fs.mkdirSync(d);
+    const log = path.join(tmp, 'opened.log');
+    for (const n of ['open', 'xdg-open']) {
+      fs.writeFileSync(path.join(d, n), `#!/bin/sh\necho "$1" >> "${log}"\n`);
+      fs.chmodSync(path.join(d, n), 0o755);
+    }
+    return { path: `${d}:${process.env.PATH}`, log };
+  }
+  const logLines = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []);
+
+  it('two first launches at once (two folders, a fresh state dir) agree on one token', async () => {
+    const other = path.join(tmp, 'project-b');
+    fs.mkdirSync(other);
+    launch(['--port', '4791']);
+    launch(['--port', '4792'], {}, FAKE, other);
+    await waitFor(() => windows()['4791'] && windows()['4792']);
+    expect(await info(4791)).toMatchObject({ root: project });
+    expect(await info(4792)).toMatchObject({ root: other });
+    expect(fs.statSync(path.join(home, 'token')).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(home).mode & 0o777).toBe(0o700);
+  }, 20000);
+
+  it('the foreground output, the log, and every process\'s argv are free of the token and the credential', async () => {
+    const r = launch(['--port', '4791']);
+    const w = await waitFor(() => windows()['4791']);
+    const token = tokenOf();
+    const { portCredential } = await import('../server/src/auth.ts');
+    const secrets = [token, portCredential(token, 4791)];
+    const other = path.join(tmp, 'project-b');
+    fs.mkdirSync(other);
+    const d = spawnSync(process.execPath, [BIN, other, '--port', '4793', '--detach', '--fake', FAKE, '--no-open'], { env: env(), encoding: 'utf8', timeout: 25000 });
+    expect(d.status).toBe(0);
+    expect(d.stdout).toBe(`opened http://127.0.0.1:4793/#t=${token}\n`); // the one place the URL carries the token
+    const log = fs.readFileSync(path.join(tmp, 'nota-bene-4793.log'), 'utf8');
+    const ps = execFileSync('ps', ['-axo', 'args='], { encoding: 'utf8' });
+    for (const secret of secrets) {
+      expect(r.out()).not.toContain(secret);
+      expect(r.err()).not.toContain(secret);
+      expect(log).not.toContain(secret);
+      expect(ps).not.toContain(secret);
+    }
+    expect(argsOf(w.pid)).not.toContain(token);
+  }, 40000);
+
+  it('--url prints the login URL; --front opens a page in the state dir (mode 600), never the token in argv', async () => {
+    launch(['--port', '4791']);
+    await waitFor(() => windows()['4791']);
+    const token = tokenOf();
+    const u = bin(['--url', '4791']);
+    expect([u.status, u.stdout]).toEqual([0, `http://127.0.0.1:4791/#t=${token}\n`]);
+    expect(bin(['--url', 'http://localhost:5173']).stdout).toBe(`http://localhost:5173/#t=${token}\n`);
+    for (const bad of ['http://evil.example:80', 'file:///etc/passwd', 'abc', '99999']) expect(bin(['--url', bad]).status, bad).toBe(2);
+
+    const op = stubOpener();
+    const f = bin(['--front', '4791'], { PATH: op.path });
+    expect(f.status, f.stderr).toBe(0);
+    await waitFor(() => logLines(op.log).length > 0);
+    const [arg] = logLines(op.log);
+    expect(arg).not.toContain(token);
+    expect(arg).not.toMatch(/^https?:/);
+    expect(path.dirname(arg!)).toBe(path.join(home, 'open'));
+    expect(fs.statSync(arg!).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(path.join(home, 'open')).mode & 0o777).toBe(0o700);
+    expect(fs.readFileSync(arg!, 'utf8')).toContain(`http://127.0.0.1:4791/#t=${token}`);
+  }, 20000);
+
+  it('the browser the launcher opens gets that page too (first start, and an already-open window)', async () => {
+    const op = stubOpener();
+    const run = spawn(process.execPath, [BIN, project, '--port', '4791', '--fake', FAKE], { env: env({ PATH: op.path }), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    groups.add(run.pid!);
+    await waitFor(() => windows()['4791'] && logLines(op.log).length > 0);
+    const second = spawnSync(process.execPath, [BIN, project, '--fake', FAKE], { env: env({ PATH: op.path }), encoding: 'utf8', timeout: 15000 });
+    expect(second.stdout).toBe('nota-bene: already open at http://127.0.0.1:4791\n'); // the foreground line has no token
+    await waitFor(() => logLines(op.log).length === 2);
+    for (const arg of logLines(op.log)) {
+      expect(arg).not.toMatch(/^https?:/);
+      expect(fs.statSync(arg).mode & 0o777).toBe(0o600);
+    }
+  }, 30000);
+
+  it('--find --scan also finds a window the registry does not know (it asks the ports of the range, logged in)', async () => {
+    const seen: string[] = [];
+    const s = http.createServer((req, res) => {
+      seen.push(String(req.headers.authorization));
+      res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: project }));
+    });
+    await new Promise<void>((r) => s.listen(4794, '127.0.0.1', () => r()));
+    try {
+      expect(bin(['--find', project]).status).toBe(1); // the registry alone does not
+      // async: the fake window lives in this process and must be able to answer while the launcher asks
+      const f = await new Promise<{ code: number; out: string }>((resolve) => {
+        execFile(process.execPath, [BIN, '--find', project, '--scan'], { env: env() }, (e, out) => resolve({ code: e ? ((e as { code?: number }).code ?? -1) : 0, out }));
+      });
+      expect([f.code, f.out.trim()]).toEqual([0, '4794']);
+      const { portCredential } = await import('../server/src/auth.ts');
+      expect(seen).toContain(`Bearer ${portCredential(tokenOf(), 4794)}`);
+    } finally {
+      s.closeAllConnections();
+      await new Promise((r) => s.close(r));
+    }
+  }, 20000);
 });

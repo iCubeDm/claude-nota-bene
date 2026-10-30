@@ -38,7 +38,7 @@ beforeAll(() => {
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 const argv = process.argv.slice(2);
-if (argv[0] === '--find' || argv[0] === '--last') {
+if (['--find', '--last', '--url', '--front'].includes(argv[0])) {
   const r = spawnSync(process.execPath, [process.env.STUB_REAL_BIN, ...argv], { stdio: 'inherit' });
   process.exit(r.status ?? 1);
 }
@@ -174,6 +174,17 @@ const opened = (): string[] => {
     return [];
   }
 };
+
+/** The access token of the test's state dir (the launcher creates it on first use). */
+const tokenOf = (): string => fs.readFileSync(path.join(nbHome, 'token'), 'utf8').trim();
+/** The login URL the skill prints for a window on `port`. */
+const tokUrl = (port: number): string => `http://127.0.0.1:${port}/#t=${tokenOf()}`;
+/** What the browser was asked to open: pages in the state dir (never a URL, so never a token in argv); the URL each redirects to. */
+const openedUrls = (): string[] => opened().map((f) => {
+  expect(f).not.toMatch(/^https?:/);
+  expect(fs.statSync(f).mode & 0o777).toBe(0o600);
+  return /location\.replace\("([^"]+)"\)/.exec(fs.readFileSync(f, 'utf8'))![1]!;
+});
 
 /** A directory holding executables: [name, script] are written, [name, path] of an existing file are symlinked. */
 function binDir(name: string, tools: [string, string][]): string {
@@ -316,8 +327,8 @@ describe('an existing window', () => {
     register(4792, project, process.pid);
     const r = await nb('');
     expect(r.code).toBe(0);
-    expect(r.out).toBe('NB: already open at http://127.0.0.1:4792 (brought to front).\n');
-    expect(opened()).toEqual(['http://127.0.0.1:4792']);
+    expect(r.out).toBe(`NB: already open at ${tokUrl(4792)} (brought to front).\n`);
+    expect(openedUrls()).toEqual([tokUrl(4792)]);
     expect(launches()).toEqual([]);
   });
 
@@ -325,7 +336,7 @@ describe('an existing window', () => {
     await fakeWindow(4792, project);
     register(4792, project, process.pid);
     const r = await nb('fork');
-    expect(r.out).toBe('NB: a window is already open on this folder at http://127.0.0.1:4792 (brought to front). It was '
+    expect(r.out).toBe(`NB: a window is already open on this folder at ${tokUrl(4792)} (brought to front). It was `
       + 'NOT switched to this conversation: switching restarts it and may cut a running turn. To move this conversation '
       + 'there, quit the terminal claude and pick it in Sessions ▾.\n');
     expect(launches()).toEqual([]);
@@ -336,16 +347,16 @@ describe('an existing window', () => {
     register(4792, project, process.pid);
     const r = await nb('fork', { sid: 'garbage' });
     expect(r.code).toBe(0);
-    expect(r.out).toMatch(/^NB: a window is already open on this folder at http:\/\/127\.0\.0\.1:4792 \(brought to front\)\. It was NOT switched/);
-    expect(opened()).toEqual(['http://127.0.0.1:4792']);
+    expect(r.out).toMatch(/^NB: a window is already open on this folder at http:\/\/127\.0\.0\.1:4792\/#t=[0-9a-f]{64} \(brought to front\)\. It was NOT switched/);
+    expect(openedUrls()).toEqual([tokUrl(4792)]);
   });
 
   it('an unregistered window (a lost registry write) is found by the /info scan', async () => {
     await fakeWindow(4791, path.join(tmp, 'elsewhere'));
     await fakeWindow(4793, project);
     const r = await nb('new');
-    expect(r.out).toBe('NB: already open at http://127.0.0.1:4793 (brought to front).\n');
-    expect(opened()).toEqual(['http://127.0.0.1:4793']);
+    expect(r.out).toBe(`NB: already open at ${tokUrl(4793)} (brought to front).\n`);
+    expect(openedUrls()).toEqual([tokUrl(4793)]);
     expect(launches()).toEqual([]);
   });
 
@@ -381,38 +392,19 @@ describe('the environment', () => {
       + 'shell (e.g. nvm alias default).\n');
   });
 
-  // only the tools open.sh needs: no curl, no open / xdg-open, and a uname that says Linux
+  // only the tools open.sh needs: no open / xdg-open, and a uname that says Linux
   const sandbox = () => binDir('sandbox', [
     ...['dirname', 'tr', 'sed', 'seq', 'mktemp', 'cat', 'rm'].map((t): [string, string] => [t, which(t)]),
     ['node', process.execPath],
     ['uname', '#!/bin/sh\necho Linux\n'],
   ]);
 
-  it('without curl the /info scan is skipped (the launch goes to the bin, whose re-check covers it)', async () => {
-    await fakeWindow(4793, project); // unregistered: only a scan would see it
-    const r = await nb('new', { env: { PATH: sandbox() } });
-    expect(r.out).toMatch(/^NB: opened http:\/\/127\.0\.0\.1:4795 for /);
-    expect(launches()).toEqual([[project, '--detach', '--new']]);
-  });
-
   it('on Linux without xdg-open it says to open the URL instead of "brought to front"', async () => {
     await fakeWindow(4792, project);
     register(4792, project, process.pid);
     const r = await nb('', { env: { PATH: sandbox() } });
     expect(r.code).toBe(0);
-    expect(r.out).toBe('NB: already open at http://127.0.0.1:4792 (open it in your browser).\n');
-  });
-
-  it('the /info scan covers 4777-4799 but skips the dev port 4780 (curl stubbed: no real port is touched)', async () => {
-    const log = path.join(tmp, 'curl.log');
-    fs.rmSync(log, { force: true });
-    const d = binDir('fakecurl', [['curl', `#!/bin/sh\nfor a; do last="$a"; done\necho "$last" >> "${log}"\n`]]);
-    const r = await nb('new', { env: { PATH: `${d}:${path.join(tmp, 'path')}:${path.dirname(process.execPath)}:${process.env.PATH}`, NOTA_BENE_PORT_RANGE: '' } });
-    expect(r.out).toMatch(/^NB: opened /);
-    const ports = fs.readFileSync(log, 'utf8').trim().split('\n').map((u) => Number(/:(\d+)\/info$/.exec(u)![1]));
-    const expected = [];
-    for (let p = 4777; p <= 4799; p++) if (p !== 4780) expected.push(p);
-    expect(ports).toEqual(expected);
+    expect(r.out).toBe(`NB: already open at ${tokUrl(4792)} (open it in your browser).\n`);
   });
 });
 
@@ -432,7 +424,7 @@ describe('two /nb calls on one folder at the same moment', () => {
     const roots: string[] = [];
     for (let p = 4791; p <= 4795; p++) {
       try {
-        const r = await fetch(`http://127.0.0.1:${p}/info`, { signal: AbortSignal.timeout(500) });
+        const r = await fetch(`http://127.0.0.1:${p}/info`, { headers: { authorization: `Bearer ${tokenOf()}` }, signal: AbortSignal.timeout(500) });
         roots.push(((await r.json()) as { root: string }).root);
       } catch {
         // nothing there
@@ -493,16 +485,16 @@ describe('--plan', () => {
     await fakeWindow(4792, project);
     register(4792, project, process.pid);
     let r = await plan('');
-    expect(r.out).toBe('NB: already open at http://127.0.0.1:4792 (brought to front).\n');
-    expect(opened()).toEqual(['http://127.0.0.1:4792']);
+    expect(r.out).toBe(`NB: already open at ${tokUrl(4792)} (brought to front).\n`);
+    expect(openedUrls()).toEqual([tokUrl(4792)]);
     r = await plan('fork');
-    expect(r.out).toMatch(/^NB: a window is already open on this folder at http:\/\/127\.0\.0\.1:4792 .*NOT switched/);
+    expect(r.out).toMatch(/^NB: a window is already open on this folder at http:\/\/127\.0\.0\.1:4792\/#t=[0-9a-f]{64} .*NOT switched/);
     await fakeWindow(4793, path.join(tmp, 'elsewhere'));
     const other = path.join(project, 'sub');
     fs.mkdirSync(other);
     await fakeWindow(4794, other); // unregistered: found by the /info scan
     r = await plan('new', { cwd: other });
-    expect(r.out).toBe('NB: already open at http://127.0.0.1:4794 (brought to front).\n');
+    expect(r.out).toBe(`NB: already open at ${tokUrl(4794)} (brought to front).\n`);
     expect(launches()).toEqual([]);
   });
 
@@ -547,7 +539,7 @@ describe('--plan', () => {
     register(4792, odd, process.pid);
     for (const shell of shells) {
       const w = await sh(['-c', wait!], { shell, cwd: tmp });
-      expect(w).toEqual({ code: 0, out: `NB: opened http://127.0.0.1:4792 for ${odd}.\n` });
+      expect(w).toEqual({ code: 0, out: `NB: opened ${tokUrl(4792)} for ${odd}.\n` });
     }
   });
 });
@@ -557,7 +549,7 @@ describe('--wait', () => {
     await fakeWindow(4793, project);
     register(4793, project, process.pid);
     const r = await sh([stubApp, '--wait', project, ' (forked from this conversation)']);
-    expect(r).toEqual({ code: 0, out: `NB: opened http://127.0.0.1:4793 for ${project} (forked from this conversation).\n` });
+    expect(r).toEqual({ code: 0, out: `NB: opened ${tokUrl(4793)} for ${project} (forked from this conversation).\n` });
   });
 
   it('polls until a window that comes up later is registered', async () => {
@@ -565,7 +557,7 @@ describe('--wait', () => {
     await new Promise((res) => setTimeout(res, 1200));
     await fakeWindow(4794, project);
     register(4794, project, process.pid);
-    expect(await waiting).toEqual({ code: 0, out: `NB: opened http://127.0.0.1:4794 for ${project}.\n` });
+    expect(await waiting).toEqual({ code: 0, out: `NB: opened ${tokUrl(4794)} for ${project}.\n` });
   });
 
   it('times out (NB_WAIT_SECS, test only) with a pointer to the task output, exit 1', async () => {
@@ -682,7 +674,7 @@ describe('the package lookup (plugin install)', () => {
     await fakeWindow(4792, project);
     register(4792, project, process.pid);
     const r = await plan('');
-    expect(r.out).toBe('NB: already open at http://127.0.0.1:4792 (brought to front).\n');
+    expect(r.out).toBe(`NB: already open at ${tokUrl(4792)} (brought to front).\n`);
   });
 
   it('the version is pinned: a plugin update installs beside the old version and leaves it untouched', async () => {
@@ -753,7 +745,7 @@ describe('the package lookup (plugin install)', () => {
     const wait = sh([pkgOpen, '--data', data, '--wait', project, ' (note)'], { env: { NB_INSTALL_WAIT_SECS: '30' } });
     const [w] = await Promise.all([wait, run]);
     expect(w.code).toBe(0);
-    expect(w.out).toBe(`NB: opened http://127.0.0.1:4792 for ${project} (note).\n`);
+    expect(w.out).toBe(`NB: opened ${tokUrl(4792)} for ${project} (note).\n`);
     expect(Date.now() - t0).toBeGreaterThanOrEqual(1900);
   });
 

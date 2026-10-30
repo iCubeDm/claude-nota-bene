@@ -102,11 +102,14 @@ it('a read-only install runs: --find / --last answer, a window serves /info and 
         if (m) { clearTimeout(t); clearInterval(iv); res(m[1]!); }
       }, 100);
     });
-    const info = await (await fetch(`${url}/info`)).json() as { codeChanged: boolean; blender: boolean };
+    const token = fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
+    const auth = { headers: { authorization: `Bearer ${token}` } };
+    expect((await fetch(`${url}/info`)).status).toBe(401); // the packaged server wants the token too
+    const info = await (await fetch(`${url}/info`, auth)).json() as { codeChanged: boolean; blender: boolean };
     expect(info.codeChanged).toBe(false);
     expect(info.blender).toBe(false);
     expect(await (await fetch(`${url}/`)).text()).toContain('Nota Bene');
-    const about = await (await fetch(`${url}/system/about`)).json() as { version: string };
+    const about = await (await fetch(`${url}/system/about`, auth)).json() as { version: string };
     expect(about.version).toBe(JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8')).version);
     let found = run(['--find', project]);
     for (let n = 0; n < 50 && found.status !== 0; n++) { // the registry entry is written just after the listen
