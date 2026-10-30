@@ -44,7 +44,7 @@ flowchart LR
 | `server/` | Node ≥ 23.6 исполняет `.ts` напрямую, без сборки. Зависимости: `@anthropic-ai/claude-agent-sdk` и `ws`, больше ничего (HTTP-фреймворка нет). |
 | `web/` | React 19, Redux Toolkit 2, Radix UI, Tailwind 4, Vite 8. Markdown на `marked` + `dompurify` + `highlight.js` + `mermaid`. |
 | `bin/nota-bene.mjs` | Лаунчер: выбор порта, блокировка папки, сборка устаревшего `web/dist`, супервизия. |
-| `skill/` | Скилл `/nb` для Claude Code: `open.sh --plan / --wait`. |
+| `plugin/skills/nb/` | Скилл `/nb` для Claude Code (внутри плагина `plugin/`): `open.sh --plan / --wait / --run`. |
 | `e2e/` | Playwright на фейковом агенте (`server/src/agent/fake.ts`, `--fake script.json`). |
 
 ## 2. Процессы и жизненный цикл

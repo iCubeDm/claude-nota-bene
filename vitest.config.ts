@@ -15,7 +15,7 @@ export default defineConfig({
         test: {
           name: 'launcher',
           environment: 'node',
-          include: ['bin/**/*.test.ts', 'skill/**/*.test.ts'],
+          include: ['bin/**/*.test.ts', 'plugin/**/*.test.ts'],
           fileParallelism: false,
         },
       },

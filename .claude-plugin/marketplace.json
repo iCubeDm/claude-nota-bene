@@ -1,0 +1,15 @@
+{
+  "name": "nota-bene",
+  "description": "Nota Bene: a browser IDE over Claude Code.",
+  "owner": {
+    "name": "iCubeDm",
+    "url": "https://github.com/iCubeDm"
+  },
+  "plugins": [
+    {
+      "name": "nota-bene",
+      "source": "./plugin",
+      "description": "Open Nota Bene, a browser IDE over Claude Code, from /nb."
+    }
+  ]
+}

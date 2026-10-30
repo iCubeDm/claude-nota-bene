@@ -15,8 +15,17 @@ npm install
 
 ## Install the `/nb` skill
 
+As a Claude Code plugin (the first `/nb` installs the `nota-bene-ide` npm package, about 330 MB, into the plugin's data dir):
+
+```
+/plugin marketplace add iCubeDm/nota-bene-ide
+/plugin install nota-bene@nota-bene
+```
+
+The plugin's skill is `/nota-bene:nb`; a bare `/nb` works too when no other skill has that name. Or, from a checkout:
+
 ```sh
-ln -sfn "$PWD/skill" ~/.claude/skills/nb
+ln -sfn "$PWD/plugin/skills/nb" ~/.claude/skills/nb
 ```
 
 This replaces an existing `~/.claude/skills/nb` link.
