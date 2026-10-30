@@ -253,7 +253,7 @@ export class ShellRunner {
     clearTimeout(r.flush);
     r.done = true;
     if (this.current === r) this.current = null;
-    if (!r.killTimer) this.signalRest(r); // the pipes closed before the shell's exit was seen: the group still goes
+    if (!r.killTimer && !r.exit) this.signalRest(r); // no exit seen (a failed spawn path): the group still goes; after an exit it was already checked
     if (!r.killTimer) live.delete(r); // nothing left to kill; otherwise it stays until the KILL or an empty group
     if (r.quiet) return;
     const code = r.exit?.code ?? null;

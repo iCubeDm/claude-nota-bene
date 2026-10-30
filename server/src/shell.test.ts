@@ -415,6 +415,7 @@ describe('signals that end the server', () => {
     c.send({ type: 'shell-run', id: 'r1', cmd: `(trap '' TERM; touch ${tmp}/ready; while :; do sleep 0.05; done) & while [ ! -f ${tmp}/ready ]; do sleep 0.02; done; echo $! > ${pidFile}` });
     await until(() => !!endOf(c)); // the shell is gone, the block closed; the straggler ignores TERM and its KILL is 3 s away
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    closers.push(async () => { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } });
     expect(alive(pid)).toBe(true);
     child.kill('SIGTERM');
     await exited;
