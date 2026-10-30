@@ -163,11 +163,18 @@ test('typing ":smi" in the composer opens the emoji list; Enter inserts 😄 and
 // M6-06: the user's message is markdown (and a single newline stays a line break)
 test('language toggle switches the placeholder @chat', async ({ page }) => {
   await open(page);
+  // the choice is saved in the server's prefs (shared by every window, and by the later tests of this server): wait for each save
+  // to be answered, and end on en, so no later @chat test sees hello.lang = ru
+  const saved = (lang: string) => page.waitForResponse((r) => r.url().endsWith('/system/prefs') && r.request().method() === 'POST' && r.request().postData()?.includes(`"${lang}"`) === true);
   await expect(page.getByPlaceholder(en.composerPh)).toBeVisible();
+  let done = saved('ru');
   await page.locator('#langBtn').click();
   await expect(page.getByPlaceholder(ru.composerPh)).toBeVisible();
+  expect((await done).ok()).toBe(true);
+  done = saved('en');
   await page.locator('#langBtn').click();
   await expect(page.getByPlaceholder(en.composerPh)).toBeVisible();
+  expect((await done).ok()).toBe(true);
 });
 
 test('tool line expands to the command and the output, also after a reload (hub replay) @chat', async ({ page }) => {
