@@ -9,6 +9,7 @@ import { ModePill } from '@/controls/ModePill.tsx';
 import { nextMode, pickMode, selectCapabilities, selectMode, selectSuggestion, selectSwitching } from '@/controls/slice.ts';
 import { ShortcodePicker } from '@/comments/ShortcodePicker.tsx';
 import { MentionPicker } from './MentionPicker.tsx';
+import { SlashPicker } from './SlashPicker.tsx';
 import { Meters } from '@/stats/Meters.tsx';
 import { CtxNudge } from '@/stats/CtxNudge.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
@@ -121,7 +122,7 @@ export function Composer() {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // an open @ / : picker takes Tab at window capture and stops it, so this is only reached with no picker to serve
+    // an open @ / : / picker takes Tab at window capture and stops it, so this is only reached with no picker to serve
     if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.nativeEvent.isComposing && showSug) {
       e.preventDefault();
       dispatch(setDraft(suggestion));
@@ -183,6 +184,7 @@ export function Composer() {
         )}
         </div>
         <MentionPicker target={ref} />
+        <SlashPicker target={ref} />
         <ShortcodePicker target={ref} />
         <span className="inline-flex" title={switching ? t('switching') : building ? t('buildingImage') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>

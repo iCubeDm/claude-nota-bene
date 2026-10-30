@@ -112,6 +112,8 @@ export const en: Dict = {
   'emojiRecent': 'Recent',
   'emojiNone': 'Nothing found',
   atNone: 'no matches',
+  slashLabel: 'Commands and skills',
+  slashBuiltin: 'built-in',
   'emojiGroup_smileys-emotion': 'Smileys & emotion',
   'emojiGroup_people-body': 'People & body',
   'emojiGroup_animals-nature': 'Animals & nature',

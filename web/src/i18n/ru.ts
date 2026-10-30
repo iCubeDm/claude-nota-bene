@@ -110,6 +110,8 @@ export const ru = {
   'emojiRecent': 'Недавние',
   'emojiNone': 'Ничего не найдено',
   atNone: 'нет совпадений',
+  slashLabel: 'Команды и навыки',
+  slashBuiltin: 'встроенная',
   'emojiGroup_smileys-emotion': 'Смайлики и эмоции',
   'emojiGroup_people-body': 'Люди и тело',
   'emojiGroup_animals-nature': 'Животные и природа',

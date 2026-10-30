@@ -1,5 +1,5 @@
 import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
-import { CLAUDE_CAPABILITIES, MODES, type Capabilities, type EffortLevel, type IdleCompact, type Mode, type ModelOption } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, MODES, type Capabilities, type EffortLevel, type IdleCompact, type Mode, type ModelOption, type SlashCommand } from '@nota-bene/shared';
 import { t } from '../i18n/index.ts';
 import { toast } from '../shell/toast.ts';
 import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
@@ -22,6 +22,8 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
   model: { model: string | null; effort?: EffortLevel } | null;
   /** the models the agent offers (empty until it is up, or for a server older than protocol 6) */
   models: ModelOption[];
+  /** the slash commands and skills of the session, for the composer's `/` menu (empty until the agent is up, or for a server older than protocol 10) */
+  commands: SlashCommand[];
   /** idle compaction of this project, as the server last said (null until it has) */
   idleCompact: IdleCompact | null;
   /** what the connected server announced in `hello` (0: an older server, or none yet); see PROTOCOL */
@@ -35,7 +37,7 @@ export type ControlsState = { mode: Mode | null; modeBeforePlan: Mode | null; re
 };
 
 /** The mode as the UI shows it: null until the server has told us (or the user picked one). */
-const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, model: null, models: [], idleCompact: null, protocol: 0, capabilities: null };
+const initial: ControlsState = { mode: null, modeBeforePlan: null, restoreAfterPlan: null, switching: null, modeInFlight: [], restarting: false, suggestion: '', seen: null, model: null, models: [], commands: [], idleCompact: null, protocol: 0, capabilities: null };
 
 /** Entering `plan` from X remembers X (prototype setModeUI). */
 function setMode(s: ControlsState, m: Mode): void {
@@ -87,6 +89,7 @@ export const controlsSlice = createSlice({
       }
       if (ev.kind === 'model') s.model = { model: ev.model, ...(ev.effort && { effort: ev.effort }) };
       if (ev.kind === 'models') s.models = ev.models;
+      if (ev.kind === 'commands') s.commands = ev.commands;
       if (ev.kind === 'idle-compact') s.idleCompact = ev.state;
       // stale once the conversation moves on: a user turn (live or replayed), a reset, a replay, another session
       // plan-restore belongs to one conversation; a reconnect may have lost the sends still in flight
@@ -141,6 +144,7 @@ export const pickMode = (mode: Mode): AppThunk => (dispatch, getState, { send })
 
 export const selectModel = (s: RootState): ControlsState['model'] => s.controls.model;
 export const selectModels = (s: RootState): ModelOption[] => s.controls.models;
+export const selectCommands = (s: RootState): SlashCommand[] => s.controls.commands;
 /** the model switch is usable: a server that has it (protocol 6, `capabilities.models`) */
 export const selectModelSwitchable = (s: RootState): boolean =>
   s.controls.protocol >= 6 && (s.controls.capabilities ?? CLAUDE_CAPABILITIES).models === true && s.controls.models.length > 0;
