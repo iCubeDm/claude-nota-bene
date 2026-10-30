@@ -56,6 +56,15 @@ export type SessionManager = {
   /** false: no foreground task matched the call */
   backgroundTask(toolUseId: string): Promise<boolean>;
   taskOutput(taskId: string): Promise<{ output: string; totalBytes: number; truncated: boolean }>;
+  /**
+   * Protocol 11, `! cmd`: runs `cmd` as a shell command in the root, outside the agent (no turn, no `busy`). null: started;
+   * 'running': one is running already; 'switching': a switch is in progress; 'closed'. Its block goes to the hub.
+   */
+  shellRun(id: string, cmd: string): 'running' | 'switching' | 'closed' | null;
+  /** Stops the run `id` (TERM, then KILL); another id is no news. */
+  shellStop(id: string): void;
+  /** The output so far of the run in progress, for a socket that attached meanwhile (null: none running or no output yet). */
+  shellSnapshot(): { id: string; text: string } | null;
   /** Context, plan limits and cost as last measured (what a new socket gets). */
   stats(): Stats;
   /** A socket attached: the stats catch up when the skipped 5-minute ticks left them stale. */

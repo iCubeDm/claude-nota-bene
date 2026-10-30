@@ -20,6 +20,7 @@ import { ModelKeeper } from './session/model.ts';
 import type { SessionOptions } from './session/options.ts';
 import { PermissionBroker } from './session/permissions.ts';
 import { Phase, SwitchError } from './session/phase.ts';
+import { ShellRunner } from './session/shell.ts';
 import { SendQueue } from './session/sendQueue.ts';
 import { checkTarget } from './session/target.ts';
 import { TitleTracker } from './session/title.ts';
@@ -86,6 +87,8 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     onError: report,
     phase: () => phase.kind,
   });
+  // `! cmd` runs (protocol 11): outside the agent and the turn ledger; the root is read per run, a switch moves it
+  const shell = new ShellRunner({ emit: (ev, opt) => hub.emit(ev, opt), root: () => who.root, report, ...(o.shell ?? {}) });
   const queue = new SendQueue({ gen: () => slot.gen, agent: () => slot.ensure(), running: (id) => turns.running(id), isCurrent: (a) => slot.agent === a, interruptMs: o.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS, report, fail: (e, id) => failTurn(e, id) });
   /** A send not yet answered, a waiting permission, or a switch in progress (R-M4-4); `closed` is not part of it. */
   const busy = () => phase.switching || activity(turns, permissions) !== 'idle';
@@ -180,6 +183,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     turns.reset();
     hub.reset();
     titles.reset();
+    shell.dropQueue(); // a new conversation: what the old one never heard is not its business
     const next = who.reset(e.newId);
     hub.emit({ kind: 'agent', e }, { store: false });
     who.announce();
@@ -227,6 +231,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       if (restart && working()) await slot.stopTurn(o.interruptTimeoutMs ?? INTERRUPT_TIMEOUT_MS);
       tornDown = true;
       // 1. stop everything of the old session; nothing it does later may reach the hub (the slot's generation)
+      shell.stopAll(); // a `! cmd` run: a restart too, the feed is rebuilt from the transcript
       stats.stop();
       cmds.set([]); // the new project has its own skills; the new agent brings them
       idle.disarm(); // the new session gets compacted only after a turn of its own
@@ -237,6 +242,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       queue.reset();
       // 2. the new session's state
       const same = who.enter(id, real);
+      if (!same) shell.dropQueue(); // another conversation; a restart keeps the runs waiting for the agent
       modes.enter(who.root);
       models.enter(who.root);
       stats.reset();
@@ -309,7 +315,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       const command = trackedCommand(text, cmds.commands);
       turns.sent(id, command ? { command } : {});
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
-      queue.push({ id, text, force, images: payload }); // handed over in order, after a forced send's interrupt
+      queue.push({ id, text: shell.take(text), force, images: payload }); // the feed shows `text`; the agent also hears of the `! cmd` runs since its last message // handed over in order, after a forced send's interrupt
       return null;
     },
     refusal: refused,
@@ -363,10 +369,18 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     stopTask: (id) => (slot.agent ? slot.agent.stopTask(id) : Promise.reject(new Error('no agent'))),
     backgroundTask: (call) => (slot.agent ? slot.agent.backgroundTask(call) : Promise.reject(new Error('no agent'))),
     taskOutput: (id) => (slot.agent ? slot.agent.taskOutput(id) : Promise.reject(new Error('no agent'))),
+    shellRun(id, cmd) {
+      if (phase.kind === 'closed') return 'closed';
+      if (phase.switching) return 'switching';
+      return shell.run(id, cmd) ? null : 'running';
+    },
+    shellStop: (id) => shell.stop(id),
+    shellSnapshot: () => shell.snapshot(),
     stats: () => stats.current(),
     clientAttached: () => stats.onAttach(),
     close() {
       phase.close();
+      shell.stopAll();
       stats.stop();
       idle.stop();
       titles.stop();

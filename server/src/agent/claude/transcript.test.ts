@@ -166,3 +166,25 @@ describe('transcriptToEvents: slash commands', () => {
     expect(transcriptToEvents([user('v1', '<local-command-caveat>The command below was run directly in Claude Code.</local-command-caveat>')], store())).toEqual([]);
   });
 });
+
+describe('transcriptToEvents: the `! cmd` runs in front of a message', () => {
+  const user = (uuid: string, text: string) => ({ type: 'user', uuid, session_id: 's', parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content: text } }) as unknown as SessionMessage;
+  const block = (cmd: string, out: string, err = '') => `<bash-input>${cmd}</bash-input>\n<bash-stdout>${out}</bash-stdout><bash-stderr>${err}</bash-stderr>`;
+
+  it('become shell blocks again, then the message without them', () => {
+    const events = transcriptToEvents([user('m1', `${block('git status', 'clean')}\n\n${block('false', '', 'no')}\n\nand now?`)], store());
+    expect(events).toEqual([
+      { kind: 'shell-start', id: 'm1:sh0', cmd: 'git status', ts: 0 },
+      { kind: 'shell-end', id: 'm1:sh0', cmd: 'git status', output: 'clean', truncated: false, code: null, ts: 0 },
+      { kind: 'shell-start', id: 'm1:sh1', cmd: 'false', ts: 0 },
+      { kind: 'shell-end', id: 'm1:sh1', cmd: 'false', output: 'no', truncated: false, code: null, ts: 0 },
+      { kind: 'user', id: 'm1', text: 'and now?', historic: true, ts: 0 },
+    ]);
+  });
+
+  it('a message that was only runs has no bubble', () => {
+    const events = transcriptToEvents([user('m2', block('true', '(Bash completed with no output)'))], store());
+    expect(events.map((e) => e.kind)).toEqual(['shell-start', 'shell-end']);
+    expect(events[1]).toMatchObject({ output: '' });
+  });
+});

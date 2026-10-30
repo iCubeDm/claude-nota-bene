@@ -102,6 +102,8 @@ export type FakeCommand = { name: string; description: string; argumentHint?: st
 /** What the fake knows of tasks, shared by its sessions: the scripted shells, how far each was read, and what was asked. */
 type TaskState = {
   shells: FakeShell[]; reads: Map<string, number>; stopped: Set<string>; stops: string[]; backgrounds: string[];
+  /** the text of every send, as the agent got it (after the server added to it) */
+  prompts: string[];
   /** what `backgroundTask` answers: true (default), false (nothing matched) or 'throw' (background tasks disabled) */
   background: boolean | 'throw';
   /** task ids `stopTask` refuses (rejects) */ refuseStop: string[];
@@ -200,6 +202,7 @@ class FakeSession implements FakeAgentSession {
 
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: unknown[] }): void {
     if (this.closed) return;
+    this.tasks.prompts.push(m.text);
     // like the CLI, the plain string `/compact` or `/clear` is a command, not a prompt
     const command = /^\/compact(\s|$)/.test(m.text) ? 'compact' : /^\/clear(\s|$)/.test(m.text) ? 'clear' : undefined;
     this.pending.push({ uuid: m.uuid, text: m.text, images: m.images?.length ?? 0, ...(command ? { command } : {}) });
@@ -474,8 +477,10 @@ export function fakeBackend(
   setModels: (string | null)[]; setEfforts: (EffortLevel | null)[];
   /** every stopTask / backgroundTask call, in order */
   stops: string[]; backgrounds: string[];
+  /** the text of every send, in order, as the agent got it */
+  prompts: string[];
 } {
-  const tasks: TaskState = { shells: o.shells ?? [], reads: new Map(), stopped: new Set(), stops: [], backgrounds: [], background: o.background ?? true, refuseStop: o.refuseStop ?? [] };
+  const tasks: TaskState = { shells: o.shells ?? [], reads: new Map(), stopped: new Set(), stops: [], backgrounds: [], prompts: [], background: o.background ?? true, refuseStop: o.refuseStop ?? [] };
   const startModes: Mode[] = [];
   const setModes: Mode[] = [];
   const setModels: (string | null)[] = [];
@@ -498,6 +503,7 @@ export function fakeBackend(
     starts,
     stops: tasks.stops,
     backgrounds: tasks.backgrounds,
+    prompts: tasks.prompts,
     start: (s) => {
       startModes.push(s.permissionMode);
       starts.push({

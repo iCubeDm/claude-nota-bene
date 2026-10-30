@@ -17,6 +17,8 @@ export type SessionOptions = {
   historyTimeoutMs?: number;
   /** idle compaction timing (tests shorten it); default from the env, see idle.ts */
   idle?: IdleConfig;
+  /** the `! cmd` runner's timing and environment (tests shorten the timeout and the kill delay) */
+  shell?: { timeoutMs?: number; killMs?: number; env?: () => NodeJS.ProcessEnv };
   /** `"idleCompaction": false` in Claude Code's settings (tests stub it) */
   idleOffInSettings?: () => boolean;
 };

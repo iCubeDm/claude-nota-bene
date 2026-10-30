@@ -1,6 +1,7 @@
 import type { SDKMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ImageRef, ServerEvent } from '@nota-bene/shared';
 import { isImageType } from '../../attachments.ts';
+import { splitBashBlocks } from '../../session/shellText.ts';
 import { isWire, mapSdk } from './map.ts';
 import type { AttachmentStore } from '../../attachments.ts';
 
@@ -60,6 +61,13 @@ export function transcriptToEvents(msgs: SessionMessage[], attachments: Attachme
       });
       let text = blocks.filter((b, i) => b.type === 'text' && !labels.has(i)).map((b) => b.text ?? '').join('\n');
       if (!own && !images.length) {
+        // the `! cmd` runs the server put in front of this message (session/shellText.ts bashBlock): blocks again, then the message itself
+        const bash = splitBashBlocks(text);
+        bash.runs.forEach((r, i) => {
+          const id = `${sm.uuid}:sh${i}`;
+          out.push({ kind: 'shell-start', id, cmd: r.cmd, ts: TS }, { kind: 'shell-end', id, cmd: r.cmd, output: r.output, truncated: false, code: null, ts: TS });
+        });
+        text = bash.rest;
         if (CAVEAT.test(text)) continue;
         const printed = COMMAND_OUT.exec(text);
         if (printed) {

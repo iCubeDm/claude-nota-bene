@@ -63,6 +63,8 @@ export async function startServer(o: {
   /** idle compaction timing and the settings.json check (tests shorten / stub them) */
   idle?: IdleConfig;
   idleOffInSettings?: () => boolean;
+  /** the `! cmd` runner's timing and environment (tests shorten the timeout and the kill delay) */
+  shell?: { timeoutMs?: number; killMs?: number; env?: () => NodeJS.ProcessEnv };
   /** one tab at a time (R-M7-5); default true. Tests that need several live sockets pass false */
   oneTab?: boolean;
   /** tests shorten the reload grace (R-M7-6) and the heartbeat (R-M7-7) */
@@ -85,6 +87,7 @@ export async function startServer(o: {
       ...(o.resume && o.fork && o.backend.capabilities.fork ? { fork: true } : {}),
       ...(o.idle ? { idle: o.idle } : {}),
       ...(o.idleOffInSettings ? { idleOffInSettings: o.idleOffInSettings } : {}),
+      ...(o.shell ? { shell: o.shell } : {}),
     });
     const store = new CommentStore({ dir: path.join(stateDir(), 'comments') });
     // comments are live state, not history: never stored in the replay, a new socket gets the set directly
@@ -281,6 +284,13 @@ export async function startServer(o: {
       } catch (e) {
         reportError(hub, 'stats', e);
       }
+      // a `! cmd` run in progress: the replay holds its start, this brings the output printed so far (live chunks follow)
+      try {
+        const snap = manager.shellSnapshot();
+        if (snap) ws.send(JSON.stringify({ kind: 'shell-out', id: snap.id, text: snap.text }));
+      } catch (e) {
+        reportError(hub, 'shell', e);
+      }
       // what this server understands (see PROTOCOL); last, so the state above keeps its order
       sendHello(ws);
       ws.on('close', () => {
@@ -386,6 +396,15 @@ export async function startServer(o: {
               (moved) => { if (!moved) reportError(hub, 'task', new Error('nothing to move to the background: the task is not running in the foreground')); },
               (e) => reportError(hub, 'task', e),
             );
+            break;
+          case 'shell-run': {
+            const why = manager.shellRun(msg.id, msg.cmd);
+            if (why === 'running') reportError(hub, 'shell', new Error('a command is already running'));
+            else if (why === 'switching') reportError(hub, 'shell', new Error('the session is switching; the command was not run'));
+            break;
+          }
+          case 'shell-stop':
+            manager.shellStop(msg.id);
             break;
           case 'idle-compact':
             if (!(caps.idleCompact && caps.compact)) return refuse('idle-compact');
