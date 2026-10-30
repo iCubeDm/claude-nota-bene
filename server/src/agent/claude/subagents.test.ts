@@ -133,7 +133,7 @@ describe('agentOfCall: a call no meta names', () => {
   it('a SendMessage whose `to` is a listed agent id reads that agent through its own meta', () => {
     const r = root();
     const msgs = call('toolu_S', 'SendMessage', { to: 'a1', message: 'again' });
-    expect(agentOfCall(msgs, 'toolu_S', ['a1'], r, SID, false)).toEqual({ agentId: 'a1', type: 'general-purpose', description: 'Re-review', running: false });
+    expect(agentOfCall(msgs, 'toolu_S', ['a1'], r, SID, false)).toEqual({ agentId: 'a1', type: 'general-purpose', description: 'Re-review', running: false, viaSend: true });
     expect(findSubagentMetaByAgent(r, SID, 'a1')).toMatchObject({ toolUseId: 'toolu_A' });
   });
   it('`to` as a name, an unlisted id, a path-like or missing value is a miss', () => {
@@ -145,7 +145,7 @@ describe('agentOfCall: a call no meta names', () => {
   it('an Agent call is still found by `agentId:` in its result; a call not in the transcript is a miss', () => {
     const r = root();
     expect(agentOfCall(call('toolu_X', 'Agent', { description: 'd', subagent_type: 'Explore' }, 'agentId: a1'), 'toolu_X', ['a1'], r, SID, false))
-      .toEqual({ agentId: 'a1', type: 'Explore', description: 'd', running: false });
+      .toEqual({ agentId: 'a1', type: 'Explore', description: 'd', running: false, viaSend: false });
     expect(agentOfCall([], 'toolu_X', ['a1'], r, SID, false)).toBeNull();
   });
 });
