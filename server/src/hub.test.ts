@@ -139,6 +139,20 @@ describe('EventHub.cut (R-M7-1, R-M7-2)', () => {
     expect(replayOf(hub).events).toEqual([task('t1', 'started'), task('t2', 'started'), ask('p2'), task('t1', 'progress'), task('t2', 'done'), session, user('b'), boundary]);
   });
 
+  it('a resumed agent (a second `started` of its id carrying the SendMessage call) replays to the same state after a cut (R-M7-12)', () => {
+    const hub = new EventHub();
+    const t = (phase: 'started' | 'progress' | 'done', call?: string): Stored => agent({ t: 'task', id: 'k', phase, desc: 'rev', type: 'local_agent', ...(call ? { call } : {}) });
+    const before = [t('started', 'toolu_A'), t('progress'), t('done'), t('started', 'toolu_SEND'), t('progress')];
+    for (const ev of before) hub.emit(ev);
+    const whole = reduceTasks({}, { kind: 'replay', events: [...before, boundary], ts: 0 } as ServerEvent);
+    expect(whole.k).toMatchObject({ call: 'toolu_A', status: 'running' });
+    hub.emit(boundary);
+    hub.cut({ archive: () => 1 });
+    const kept = replayOf(hub).events;
+    expect(reduceTasks({}, { kind: 'replay', events: kept, ts: 0 } as ServerEvent)).toEqual(whole);
+    expect(hub.callState('toolu_A').live).toBe(true);
+  });
+
   it('segments never overlap: a kept item is archived once, and dropped from the hub once nothing needs it', () => {
     const hub = new EventHub();
     const archived: ServerEvent[][] = [];

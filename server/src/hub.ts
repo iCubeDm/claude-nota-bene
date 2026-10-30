@@ -123,7 +123,8 @@ export class EventHub {
 
 /**
  * The indexes of the task events a replay needs for the tasks the state holds at the boundary (the running ones and the
- * last few finished): per id, after its last `started`, that `started`, the last `progress` before it ended, the first
+ * last few finished): per id, its FIRST `started` (a resume restarts the id with the SendMessage call's id, and the reducer keeps
+ * the call of the first start) and, after its last `started`, that `started`, the last `progress` before it ended, the first
  * `done` (the reducer ignores a second end), the last `updated` that names a desc and the last that carries `bg`. That is all the web's
  * reduceTasks reads (a progress overwrites tokens, tool and summary of a running task; an updated with a desc overwrites
  * the desc, one without changes nothing), so the trimmed events replay to the same state. The rest is archived.
@@ -131,10 +132,14 @@ export class EventHub {
 function runningTasks(before: ServerEvent[]): Set<number> {
   const live = new Set(Object.keys(reduceTasks({}, { kind: 'replay', events: before, ts: 0 } as ServerEvent)));
   const last = new Map<string, Map<string, number>>(); // id -> phase -> index
+  const first = new Map<string, number>(); // id -> index of its first `started`
   before.forEach((ev, i) => {
     if (ev.kind !== 'agent' || ev.e.t !== 'task' || !live.has(ev.e.id)) return;
     const { id, phase } = ev.e;
-    if (phase === 'started') last.set(id, new Map([[phase, i]]));
+    if (phase === 'started') {
+      if (!first.has(id)) first.set(id, i);
+      last.set(id, new Map([[phase, i]]));
+    }
     const m = last.get(id);
     if (!m) return;
     if (phase === 'done') {
@@ -146,5 +151,5 @@ function runningTasks(before: ServerEvent[]): Set<number> {
       if (ev.e.bg !== undefined) m.set('updatedBg', i);
     }
   });
-  return new Set([...last.values()].flatMap((m) => [...m.values()]));
+  return new Set([...last.values()].flatMap((m) => [...m.values()]).concat([...first.values()]));
 }
