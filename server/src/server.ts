@@ -25,7 +25,7 @@ import { codeChecker } from './codeStamp.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
 import { controlToken, systemRoutes } from './system.ts';
-import { CHALLENGE_RE, KEY_PROTOCOL, accessToken, authenticated, isNonce, keyCredential, newNonce, proofFor, sameSecret, sessionCookie } from './auth.ts';
+import { CHALLENGE_RE, KEY_PROTOCOL, accessToken, authenticated, isNonce, keyCredential, loginCredential, newNonce, proofFor, sameSecret, sessionCookie } from './auth.ts';
 
 /** how long a newcomer waits for the owner to close before it is told `occupied` (R-M7-6) */
 export const TAKEOVER_GRACE_MS = 700;
@@ -117,8 +117,10 @@ export async function startServer(o: {
     const codeChanged = codeChecker({ repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..') });
     // the access token: read once at start (a rotated file takes effect at the next start). Auth is on unless a test says no
     const token = o.insecureNoAuth ? null : accessToken();
+    // made at start, never by a request: an unauthenticated /control/* must not be able to create the file
+    const control = controlToken();
     const nonce = o.nonce !== undefined && isNonce(o.nonce) ? o.nonce : newNonce();
-    const authorize = token === null ? undefined : (req: http.IncomingMessage, write: boolean) => authenticated(req.headers, token, ownPort, nonce, write);
+    const authorize = token === null ? undefined : (req: http.IncomingMessage, needKey: boolean) => authenticated(req.headers, token, ownPort, nonce, needKey);
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -174,12 +176,13 @@ export async function startServer(o: {
         if (tooBig) return;
         let given: unknown;
         try {
-          given = (JSON.parse(body) as { token?: unknown }).token;
+          given = (JSON.parse(body) as { login?: unknown }).login;
         } catch {
           return plain(400, 'bad request');
         }
         if (token === null) return plain(200, '{"ok":true}', { 'content-type': 'application/json; charset=utf-8' });
-        if (typeof given !== 'string' || !sameSecret(given, token)) return plain(401, 'unauthorized');
+        // the login value of THIS launch and port, never the raw token: a URL that leaked is good until the launcher exits
+        if (typeof given !== 'string' || !sameSecret(given, loginCredential(token, ownPort, nonce))) return plain(401, 'unauthorized');
         plain(200, JSON.stringify({ ok: true, key: keyCredential(token, ownPort, nonce) }), { 'content-type': 'application/json; charset=utf-8', 'set-cookie': sessionCookie(token, ownPort, nonce), 'cache-control': 'no-store' });
       });
     };
@@ -242,16 +245,17 @@ export async function startServer(o: {
         }),
       },
       webDist: o.webDist,
-      controlToken,
+      controlToken: () => control,
       info: () => {
         const { id, root, title, model } = manager.info();
         // busy and clients: for another window's Settings → Windows
-        return { root, session: id, title, model, keyRequired: token !== null, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend?.available() ?? false };
+        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend?.available() ?? false };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);
     const wss = new WebSocketServer({
       server,
+      path: '/ws',
       // the page's key travels as the `nb.<key>` subprotocol (never in the URL); echo it or the browser drops the socket
       handleProtocols: (protocols) => [...protocols].find((p) => p.startsWith(KEY_PROTOCOL)) ?? false,
       verifyClient: ({ req }, done) => {

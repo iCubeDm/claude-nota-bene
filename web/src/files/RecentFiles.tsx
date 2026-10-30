@@ -6,6 +6,7 @@ import { fileTabId, openFile, selectTabs, type SavedFile } from '@/tabs/slice.ts
 import { FileIcon } from './FileIcon.tsx';
 import { focusTab } from '@/tabs/TabStrip.tsx';
 import { readRecent, recentModal } from './recent.ts';
+import { apiFetch } from '@/net/auth.ts';
 
 const DEBOUNCE_MS = 120;
 const SEARCH_MAX = 30;
@@ -50,7 +51,7 @@ export function RecentFiles() {
     if (!open || !needle) { setFound([]); setAnswered(''); return; }
     const ctl = new AbortController();
     const timer = setTimeout(() => {
-      fetch(`/complete?q=${encodeURIComponent(needle)}`, { signal: ctl.signal })
+      apiFetch(`/complete?q=${encodeURIComponent(needle)}`, { signal: ctl.signal })
         .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
         .then((hits) => { setFound(hits.filter((p) => !p.endsWith('/'))); setAnswered(needle); }, (e: unknown) => {
           // offline or a server error: say so as "nothing" rather than searching forever (an abort is a newer query)

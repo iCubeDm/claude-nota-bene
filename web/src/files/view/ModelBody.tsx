@@ -5,6 +5,7 @@ import { publishViewPose, registerModelViewer, unregisterModelViewer } from '@/m
 import { RefusedResource, resolveModelUrl } from '@/model/resolve.ts';
 import { BLEND, fileUrl, modelUrl } from '../kinds.ts';
 import { ModelMarkup } from './ModelMarkup.tsx';
+import { apiFetch } from '@/net/auth.ts';
 
 /** Above this a model is not fetched at all: the whole file lives in memory twice (bytes, then the parsed scene). */
 export const MODEL_MAX_BYTES = 256 * 1024 * 1024;
@@ -61,7 +62,7 @@ class TooBig extends Error {
 export async function fetchModel(
   url: string, signal: AbortSignal, known: string | null, onProgress: (pct: number | null) => void, max = MODEL_MAX_BYTES,
 ): Promise<{ bytes: ArrayBuffer | null; etag: string | null; same: boolean }> {
-  const res = await fetch(url, { signal });
+  const res = await apiFetch(url, { signal });
   if (res.status === 404) throw new Gone();
   if (res.status === 501) throw new NoBlender();
   if (!res.ok) {

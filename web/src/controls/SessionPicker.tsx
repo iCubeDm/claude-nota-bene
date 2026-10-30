@@ -5,6 +5,7 @@ import { selectBusy, selectSession, useAppDispatch, useAppSelector } from '@/sto
 import { ConfirmDialog } from './ConfirmDialog.tsx';
 import { selectSwitching, switchSession } from './slice.ts';
 import { REFUSED, useNote } from './useNote.ts';
+import { apiFetch } from '@/net/auth.ts';
 
 /** GET /sessions (server/src/sessions.ts SessionsView). */
 export type SessionsView = {
@@ -91,7 +92,7 @@ export function SessionPicker() {
     setQ('');
     setView(null);
     const seq = ++loadSeq.current;
-    void fetch('/sessions')
+    void apiFetch('/sessions')
       .then(async (r) => {
         if (!r.ok) throw new Error(brief(r.status, await r.text().catch(() => '')));
         const v: unknown = await r.json();

@@ -3,6 +3,7 @@ import type { SubagentView } from '@nota-bene/shared';
 import { emptyFeed, reduce, type FeedItem, type FeedState } from '../store/feed.ts';
 import type { AppThunk, RootState } from '../store/store.ts';
 import { openAgent } from '../tabs/slice.ts';
+import { apiFetch } from '@/net/auth.ts';
 
 /**
  * Subagent conversations (M2 step 1), by the tool-use id of the Agent call that started each. Fetched whole from
@@ -77,7 +78,7 @@ export const fetchSubagent = (tool: string, signal?: AbortSignal): AppThunk<Prom
   const { protocol } = getState().controls;
   if (protocol > 0 && protocol < AGENT_PROTOCOL) return old(); // known old: not even asked
   try {
-    const r = await fetch(`/subagent?session=${encodeURIComponent(session)}&tool=${encodeURIComponent(tool)}`, { signal });
+    const r = await apiFetch(`/subagent?session=${encodeURIComponent(session)}&tool=${encodeURIComponent(tool)}`, { signal });
     if (stale()) return 'stale';
     if (r.status === 404 || r.status === 409) return (dispatch(failed({ tool, session, status: 'gone' })), 'gone');
     if (!r.ok) return (dispatch(failed({ tool, session, status: 'error', error: `HTTP ${r.status}` })), 'error');

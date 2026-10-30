@@ -10,7 +10,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { proofFor } from '../server/src/auth.ts';
+import { loginCredential, proofFor } from '../server/src/auth.ts';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const SKILL = fileURLToPath(new URL('../plugin/skills/nb', import.meta.url)); // not beside the test: the plugin dir ships to users
@@ -180,8 +180,8 @@ const opened = (): string[] => {
 
 /** The access token of the test's state dir (the launcher creates it on first use). */
 const tokenOf = (): string => fs.readFileSync(path.join(nbHome, 'token'), 'utf8').trim();
-/** The login URL the skill prints for a window on `port`. */
-const tokUrl = (port: number): string => `http://127.0.0.1:${port}/#t=${tokenOf()}`;
+/** The login URL the launcher builds for a window on `port` (the fake windows' launch nonce): in the redirect pages, never in the skill's output. */
+const tokUrl = (port: number): string => `http://127.0.0.1:${port}/#t=${loginCredential(tokenOf(), port, 'f0'.repeat(16))}`;
 /** The URL the skill prints: plain, the transcript and the API never see the token. */
 const plainUrl = (port: number): string => `http://127.0.0.1:${port}`;
 /** What the browser was asked to open: pages in the state dir (never a URL, so never a token in argv); the URL each redirects to. */

@@ -7,10 +7,13 @@
 // to every server it starts, so exit 75 and crash relaunches keep it; an unsupervised server makes its own). The nonce is
 // public, not a secret. A value captured from one launch is dead at the next, and one captured for a port is dead on any
 // other. Derived values, each with its own label:
-//   cookie  `nb_<port>`      HttpOnly, opens GET routes only (file views, images, media): a browser sends it to every
-//                            port on 127.0.0.1, so on its own it must not open the socket or any write
+//   cookie  `nb_<port>`      HttpOnly, opens only `/file` and `/attach/<id>` (what <img>, <video> and <audio> load without
+//                            headers): a browser sends it to every port on 127.0.0.1, so on its own it must not open
+//                            anything else (not /info, not the socket, not a write)
 //   key                      what the page keeps in localStorage (origin-scoped, port included); with the cookie it opens
-//                            /ws and every non-GET route (header `x-nota-bene-key`, or the `nb.<key>` WebSocket subprotocol)
+//                            every other route and /ws (header `x-nota-bene-key`, or the `nb.<key>` WebSocket subprotocol).
+//                            A new route needs the key unless it is added to COOKIE_ROUTES on purpose
+//   login                    what the URL fragment `#t=` carries and POST /auth accepts (never the raw token): one launch only
 //   helper bearer            what a helper sends as Authorization: both tiers
 //   proof                    what GET /hello answers for a challenge: a helper sends nothing (not even a derived value)
 //                            to a port until its listener proves it holds the token (verifiedBearer)
@@ -27,27 +30,33 @@ const TOKEN_RE = /^[0-9a-f]{64}$/;
 export const COOKIE_MAX_AGE_S = 365 * 24 * 3600;
 
 /**
- * Reads a state secret, fail-closed: a file owned by another user is refused (throws), one readable by group or other is
- * treated as leaked (null: the caller rotates it), and only ENOENT means "none yet". Any other read error throws: a token must
- * never be replaced because it could not be read.
+ * Reads a state secret with the ssh rule: only a missing file (ENOENT) means "none yet, make one". A symlink, a FIFO or other
+ * non-regular file, a file of another user, a file readable by group or other, and unreadable or garbage content all throw, naming
+ * the file and the fix. Nothing is ever replaced silently: a rotation under a live window would log everything out, and a
+ * rotation race could hand two processes two tokens.
  */
 function readSecret(file: string): string | null {
+  const fix = `fix it with \`chmod 600 ${file}\`, or delete it to make a new token (every open window then has to be reopened)`;
   let fd: number;
   try {
-    fd = fs.openSync(file, 'r');
+    // O_NOFOLLOW: a symlink is refused (ELOOP); O_NONBLOCK: a FIFO cannot hang the open
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw new Error(`cannot read ${file}: ${(e as Error).message}`);
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    if (code === 'ELOOP') throw new Error(`${file} is a symbolic link; refusing to read it. Delete it to make a new token`);
+    throw new Error(`cannot read ${file}: ${(e as Error).message}; ${fix}`);
   }
   try {
     const st = fs.fstatSync(fd);
-    if (!st.isFile()) throw new Error(`${file} is not a regular file`);
+    if (!st.isFile()) throw new Error(`${file} is not a regular file; refusing to read it. Delete it to make a new token`);
     if (process.getuid && st.uid !== process.getuid()) {
-      throw new Error(`${file} belongs to another user (uid ${st.uid}); refusing to use it. Remove it or point NOTA_BENE_HOME at a folder of your own`);
+      throw new Error(`${file} belongs to another user (uid ${st.uid}); refusing to use it. Delete it to make a new token`);
     }
-    if (st.mode & 0o077) return null; // readable by group or other: not a secret any more, rotate
+    if (st.mode & 0o077) throw new Error(`${file} is readable by other users (mode ${(st.mode & 0o777).toString(8)}); ${fix}`);
     const t = fs.readFileSync(fd, 'utf8').trim();
-    return TOKEN_RE.test(t) ? t : null;
+    if (!TOKEN_RE.test(t)) throw new Error(`${file} does not hold a token (64 hex characters); ${fix}`);
+    return t;
   } finally {
     fs.closeSync(fd);
   }
@@ -60,19 +69,18 @@ export function stateSecret(name: string): string {
   const have = readSecret(file);
   if (have) return have;
   const t = randomBytes(32).toString('hex');
-  // written whole to a tmp file, then linked in: the name appears only with its content (no reader sees it empty),
-  // and the link fails if another process got there first
+  // written whole to a tmp file ('wx': never into an existing one), then linked in: the name appears only with its content
+  // (no reader sees it empty), and the link fails if another process got there first
   const tmp = `${file}.tmp${process.pid}-${randomBytes(4).toString('hex')}`;
-  fs.writeFileSync(tmp, t, { mode: 0o600 });
+  fs.writeFileSync(tmp, t, { mode: 0o600, flag: 'wx' });
   try {
     fs.linkSync(tmp, file);
     return t;
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    const again = readSecret(file);
-    if (again) return again; // the other process's
-    fs.renameSync(tmp, file); // a garbage or loose file: replaced atomically
-    return t;
+    const other = readSecret(file); // the other process's (throws if what is there is bad)
+    if (other) return other;
+    throw new Error(`${file} vanished while it was being created; try again`);
   } finally {
     fs.rmSync(tmp, { force: true });
   }
@@ -93,6 +101,8 @@ const mac = (token: string, label: string, port: number, nonce: string): string 
 export const cookieCredential = (token: string, port: number, nonce: string): string => mac(token, 'cookie', port, nonce);
 /** the page's key: with the cookie, write tier */
 export const keyCredential = (token: string, port: number, nonce: string): string => mac(token, 'key', port, nonce);
+/** what the login URL carries and POST /auth accepts: one launch, one port */
+export const loginCredential = (token: string, port: number, nonce: string): string => mac(token, 'login', port, nonce);
 /** a helper's Authorization: both tiers */
 export const helperCredential = (token: string, port: number, nonce: string): string => mac(token, 'helper', port, nonce);
 
@@ -157,14 +167,24 @@ function keyOf(headers: IncomingHttpHeaders): string | undefined {
 }
 
 /**
- * Authenticated for this launch (`nonce`). A Bearer (the helper's, or the raw token) opens both tiers. The cookie opens the read
- * tier (GET/HEAD routes); `write` (the socket, every other method) also needs the page's key.
+ * The only routes the cookie opens without the key: what an element loads with no way to add a header (<img>, <video>,
+ * <audio>, a 3D loader's textures). `/model` is NOT among them: the viewer fetches it, so it goes through `apiFetch`. Anything
+ * not listed needs the key; a new route is in the key tier by default.
  */
-export function authenticated(headers: IncomingHttpHeaders, token: string, port: number, nonce: string, write: boolean): boolean {
+export function cookieRoute(method: string | undefined, rawPath: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  return rawPath === '/file' || (rawPath.startsWith('/attach/') && rawPath.length > '/attach/'.length);
+}
+
+/**
+ * Authenticated for this launch (`nonce`). A Bearer (the helper's, or the raw token) opens everything. The cookie opens a
+ * `cookieRoute`; `needKey` (every other route, and the socket) also needs the page's key.
+ */
+export function authenticated(headers: IncomingHttpHeaders, token: string, port: number, nonce: string, needKey: boolean): boolean {
   const m = /^Bearer (\S+)$/i.exec(headers.authorization ?? '');
   if (m && (sameSecret(m[1], helperCredential(token, port, nonce)) || sameSecret(m[1], token))) return true;
   if (!sameSecret(cookieValue(headers.cookie, cookieName(port)), cookieCredential(token, port, nonce))) return false;
-  return !write || sameSecret(keyOf(headers), keyCredential(token, port, nonce));
+  return !needKey || sameSecret(keyOf(headers), keyCredential(token, port, nonce));
 }
 
 /** The Set-Cookie value a successful /auth sends. */

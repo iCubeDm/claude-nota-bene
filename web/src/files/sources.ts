@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { Source } from '@nota-bene/shared';
+import { apiFetch } from '@/net/auth.ts';
 
 /**
  * Where files are read from (M3-16): this checkout ('here'), other worktrees and branches, all read-only. The list
@@ -60,7 +61,7 @@ export function loadSources(force = false): Promise<Source[]> {
   const mine = ++seq;
   const p = (async () => {
     try {
-      const r = await fetch('/sources');
+      const r = await apiFetch('/sources');
       const v: unknown = r.ok ? await r.json() : null;
       if (mine === seq && Array.isArray(v) && v.every(isSource)) setSources(v);
     } catch {

@@ -76,9 +76,10 @@ describe('control token', () => {
     expect(controlToken()).toBe(t);
     expect(fs.statSync(path.join(home, 'control-token')).mode & 0o777).toBe(0o600);
   });
-  it('a garbage token file is replaced', () => {
-    fs.writeFileSync(path.join(home, 'control-token'), 'nope');
-    expect(controlToken()).toMatch(/^[0-9a-f]{64}$/);
+  it('a garbage token file throws instead of being replaced (the ssh rule)', () => {
+    fs.writeFileSync(path.join(home, 'control-token'), 'nope', { mode: 0o600 });
+    expect(() => controlToken()).toThrow(/control-token/);
+    expect(fs.readFileSync(path.join(home, 'control-token'), 'utf8')).toBe('nope');
   });
 });
 
@@ -198,7 +199,7 @@ describe('defaults and about', () => {
     expect(readPrefs().defaultMode).toBe('plan');
     // a project with no mode of its own starts in the default
     const fresh = await boot(mkExtra('nb-system-fresh-'));
-    const ws = new WebSocket(fresh.url.replace('http', 'ws'));
+    const ws = new WebSocket(fresh.url.replace('http', 'ws') + '/ws');
     closers.push(async () => void ws.terminate());
     const mode = await new Promise<string>((res) => ws.on('message', (d) => {
       const e = JSON.parse(String(d)) as { kind: string; mode?: string };
@@ -210,7 +211,7 @@ describe('defaults and about', () => {
   it('the UI language is one global pref: validated, stored in prefs.json, merged with the default mode, sent in hello', async () => {
     const s = await boot();
     const hello = async (url: string) => {
-      const ws = new WebSocket(url.replace('http', 'ws'));
+      const ws = new WebSocket(url.replace('http', 'ws') + '/ws');
       closers.push(async () => void ws.terminate());
       return new Promise<{ lang?: string }>((res) => ws.on('message', (d) => {
         const e = JSON.parse(String(d)) as { kind: string; lang?: string };

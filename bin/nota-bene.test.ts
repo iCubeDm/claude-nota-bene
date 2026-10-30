@@ -145,6 +145,13 @@ async function fakeWindowHandler(root: string, seen: string[] = []) {
 const tokenOf = () => fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
 const authHeaders = () => ({ authorization: `Bearer ${tokenOf()}` });
 const loginRe = '#t=[0-9a-f]{64}';
+/** The login value the launcher puts in a window's URL: HMAC of its port and the launch's nonce (asked of the window itself). */
+async function loginOf(port: number): Promise<string> {
+  const { loginCredential } = await import('../server/src/auth.ts');
+  const n = ((await (await fetch(`http://127.0.0.1:${port}/hello?c=${'ab'.repeat(16)}`)).json()) as { n: string }).n;
+  return loginCredential(tokenOf(), port, n);
+}
+const loginUrlOf = async (port: number) => `http://127.0.0.1:${port}/#t=${await loginOf(port)}`;
 
 async function info(port: number): Promise<{ root: string; supervised: boolean } | null> {
   try {
@@ -409,7 +416,7 @@ describe('nota-bene launcher', () => {
       timeout: 25000,
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe(`opened http://127.0.0.1:4793/#t=${tokenOf()}\n`);
+    expect(r.stdout).toBe(`opened ${await loginUrlOf(4793)}\n`);
     const w = windows()['4793']!; // the URL comes only after the registry has the window
     expect(w.root).toBe(project);
     expect(alive(w.launcherPid!)).toBe(true);
@@ -421,7 +428,7 @@ describe('nota-bene launcher', () => {
     expect(r2.out()).toBe('nota-bene: already open at http://127.0.0.1:4793\n');
     const d2 = launch(['--detach']);
     expect(await d2.exited, d2.err()).toBe(0);
-    expect(d2.out()).toBe(`already-open http://127.0.0.1:4793/#t=${tokenOf()}\n`);
+    expect(d2.out()).toBe(`already-open ${await loginUrlOf(4793)}\n`);
     expect(Object.keys(windows())).toEqual(['4793']);
     // a window missing from the registry (a failed registry write) is found by /info
     const other = path.join(tmp, 'project-b');
@@ -432,7 +439,7 @@ describe('nota-bene launcher', () => {
     try {
       const d3 = launch(['--detach'], {}, FAKE, other);
       expect(await d3.exited, d3.err()).toBe(0);
-      expect(d3.out()).toBe(`already-open http://127.0.0.1:4792/#t=${tokenOf()}\n`);
+      expect(d3.out()).toBe(`already-open http://127.0.0.1:4792/#t=${(await import('../server/src/auth.ts')).loginCredential(tokenOf(), 4792, FAKE_NONCE)}\n`);
       expect(Object.keys(windows())).toEqual(['4793']);
     } finally {
       s2.closeAllConnections();
@@ -450,7 +457,7 @@ describe('nota-bene launcher', () => {
     expect(urlB).toBe(urlA);
     const entries = Object.entries(windows()).filter(([, w]) => w.root === project);
     expect(entries).toHaveLength(1);
-    expect(urlA).toBe(`http://127.0.0.1:${entries[0]![0]}/#t=${tokenOf()}`);
+    expect(urlA).toBe(await loginUrlOf(Number(entries[0]![0])));
     const roots = [];
     for (let p = 4791; p <= 4795; p++) roots.push((await info(p))?.root);
     expect(roots.filter((r) => r === project)).toHaveLength(1);
@@ -688,19 +695,21 @@ describe('the access token', () => {
     expect(fs.statSync(home).mode & 0o777).toBe(0o700);
   }, 20000);
 
-  it('the foreground output, the log, and every process\'s argv are free of the token and the credential', async () => {
+  it('the foreground output, the log, and every process\'s argv are free of the token, the login value and the credentials', async () => {
     const r = launch(['--port', '4791']);
     const w = await waitFor(() => windows()['4791']);
     const token = tokenOf();
     const { helperCredential } = await import('../server/src/auth.ts');
     const n = ((await (await fetch(`http://127.0.0.1:4791/hello?c=${'ab'.repeat(16)}`)).json()) as { n: string }).n;
-    const secrets = [token, helperCredential(token, 4791, n)];
+    const secrets = [token, helperCredential(token, 4791, n), await loginOf(4791)];
     const other = path.join(tmp, 'project-b');
     fs.mkdirSync(other);
     const d = spawnSync(process.execPath, [BIN, other, '--port', '4793', '--detach', '--fake', FAKE, '--no-open'], { env: env(), encoding: 'utf8', timeout: 25000 });
     expect(d.status).toBe(0);
-    expect(d.stdout).toBe(`opened http://127.0.0.1:4793/#t=${token}\n`); // the one place the URL carries the token
+    expect(d.stdout).toBe(`opened ${await loginUrlOf(4793)}\n`); // the one place the URL carries the login value (never the token)
+    expect(d.stdout).not.toContain(token);
     const log = fs.readFileSync(path.join(tmp, 'nota-bene-4793.log'), 'utf8');
+    expect(fs.statSync(path.join(tmp, 'nota-bene-4793.log')).mode & 0o777).toBe(0o600); // $TMPDIR may be a shared /tmp
     const ps = execFileSync('ps', ['-axo', 'args='], { encoding: 'utf8' });
     for (const secret of secrets) {
       expect(r.out()).not.toContain(secret);
@@ -711,13 +720,26 @@ describe('the access token', () => {
     expect(argsOf(w.pid)).not.toContain(token);
   }, 40000);
 
-  it('--url prints the login URL; --front opens a page in the state dir (mode 600), never the token in argv', async () => {
+  it('the detach log is not written through a symlink and is created 600', async () => {
+    const victim = path.join(tmp, 'victim');
+    fs.writeFileSync(victim, 'keep');
+    fs.symlinkSync(victim, path.join(tmp, 'nota-bene-4793.log'));
+    const other = path.join(tmp, 'project-b');
+    fs.mkdirSync(other);
+    const d = spawnSync(process.execPath, [BIN, other, '--port', '4793', '--detach', '--fake', FAKE, '--no-open'], { env: env(), encoding: 'utf8', timeout: 25000 });
+    expect(d.status).not.toBe(0);
+    expect(fs.readFileSync(victim, 'utf8')).toBe('keep');
+  }, 40000);
+
+  it('--url prints the login URL (the launch\'s login value, never the token); --front opens a page in the state dir (mode 600), never the URL in argv', async () => {
     launch(['--port', '4791']);
     await waitFor(() => windows()['4791']);
     const token = tokenOf();
+    const login = await loginOf(4791);
     const u = bin(['--url', '4791']);
-    expect([u.status, u.stdout]).toEqual([0, `http://127.0.0.1:4791/#t=${token}\n`]);
-    expect(bin(['--url', 'http://localhost:5173']).status).toBe(1); // a dev page that cannot prove itself gets no token
+    expect([u.status, u.stdout]).toEqual([0, `http://127.0.0.1:4791/#t=${login}\n`]);
+    expect(u.stdout).not.toContain(token);
+    expect(bin(['--url', 'http://localhost:5173']).status).toBe(1); // a dev page that cannot prove itself gets nothing
     for (const bad of ['http://evil.example:80', 'file:///etc/passwd', 'abc', '99999']) expect(bin(['--url', bad]).status, bad).toBe(2);
 
     const op = stubOpener();
@@ -726,11 +748,39 @@ describe('the access token', () => {
     await waitFor(() => logLines(op.log).length > 0);
     const [arg] = logLines(op.log);
     expect(arg).not.toContain(token);
+    expect(arg).not.toContain(login);
     expect(arg).not.toMatch(/^https?:/);
     expect(path.dirname(arg!)).toBe(path.join(home, 'open'));
+    expect(path.basename(arg!)).toMatch(/^open-[0-9a-f]+\.html$/);
     expect(fs.statSync(arg!).mode & 0o777).toBe(0o600);
     expect(fs.statSync(path.join(home, 'open')).mode & 0o777).toBe(0o700);
-    expect(fs.readFileSync(arg!, 'utf8')).toContain(`http://127.0.0.1:4791/#t=${token}`);
+    const page = fs.readFileSync(arg!, 'utf8');
+    expect(page).toContain(`http://127.0.0.1:4791/#t=${login}`);
+    expect(page).not.toContain(token);
+  }, 20000);
+
+  it('<state>/open: a symlinked dir is refused (nothing written through it), and only open-*.html pages are swept', async () => {
+    launch(['--port', '4791']);
+    await waitFor(() => windows()['4791']);
+    const elsewhere = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    fs.symlinkSync(elsewhere, path.join(home, 'open'));
+    const op = stubOpener();
+    const f = bin(['--front', '4791'], { PATH: op.path });
+    expect(f.status).toBe(0); // it still opens the window, without a login page
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+    expect(f.stderr).toMatch(/cannot write the page/);
+    await waitFor(() => logLines(op.log).length > 0);
+    expect(logLines(op.log)[0]).toBe('http://127.0.0.1:4791'); // plain: no login value in it
+    fs.rmSync(path.join(home, 'open'));
+    fs.mkdirSync(path.join(home, 'open'), { mode: 0o700 });
+    const old = (Date.now() - 20 * 60_000) / 1000;
+    for (const n of ['open-aaaa.html', 'keep-me.txt', 'open-bbbb.txt']) {
+      fs.writeFileSync(path.join(home, 'open', n), 'x');
+      fs.utimesSync(path.join(home, 'open', n), old, old);
+    }
+    expect(bin(['--front', '4791'], { PATH: op.path }).status).toBe(0);
+    expect(fs.readdirSync(path.join(home, 'open')).filter((n) => !/^open-[0-9a-f]{12}\.html$/.test(n)).sort()).toEqual(['keep-me.txt', 'open-bbbb.txt']);
   }, 20000);
 
   it('the browser the launcher opens gets that page too (first start, and an already-open window)', async () => {
@@ -739,7 +789,7 @@ describe('the access token', () => {
     groups.add(run.pid!);
     await waitFor(() => windows()['4791'] && logLines(op.log).length > 0);
     const second = spawnSync(process.execPath, [BIN, project, '--fake', FAKE], { env: env({ PATH: op.path }), encoding: 'utf8', timeout: 15000 });
-    expect(second.stdout).toBe('nota-bene: already open at http://127.0.0.1:4791\n'); // the foreground line has no token
+    expect([second.stdout, second.stderr]).toEqual(['nota-bene: already open at http://127.0.0.1:4791\n', '']); // the foreground line has no token
     await waitFor(() => logLines(op.log).length === 2);
     for (const arg of logLines(op.log)) {
       expect(arg).not.toMatch(/^https?:/);
@@ -796,7 +846,7 @@ describe('the launch nonce and the two tiers, through the real launcher', () => 
   const helloN = async (port: number) => ((await (await fetch(`http://127.0.0.1:${port}/hello?c=${'ab'.repeat(16)}`)).json()) as { n: string }).n;
   const loginAt = async (port: number) => {
     const origin = `http://127.0.0.1:${port}`;
-    const r = await fetch(`${origin}/auth`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ token: tokenOf() }) });
+    const r = await fetch(`${origin}/auth`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ login: await loginOf(port) }) });
     return { cookie: r.headers.get('set-cookie')!.split(';')[0]!, key: ((await r.json()) as { key: string }).key, origin };
   };
   const socket = (port: number, headers: Record<string, string>, protocols: string[] = []) => new Promise<{ ok: boolean; env?: string }>((resolve) => {
@@ -821,13 +871,46 @@ describe('the launch nonce and the two tiers, through the real launcher', () => 
     await waitFor(async () => (await info(4791)) !== null);
     expect(await helloN(4791)).toBe(n1);
     expect((await socket(4791, { cookie: login.cookie, origin: login.origin }, [`nb.${login.key}`])).ok).toBe(true); // an open tab keeps working
-    const withCookie = await fetch('http://127.0.0.1:4791/info', { headers: { cookie: login.cookie } });
+    const withCookie = await fetch('http://127.0.0.1:4791/info', { headers: { cookie: login.cookie, 'x-nota-bene-key': login.key } });
     expect(withCookie.status).toBe(200);
+    expect((await fetch('http://127.0.0.1:4791/info', { headers: { cookie: login.cookie } })).status).toBe(401); // the cookie alone opens only /file
     // a second launcher on another port has its own launch
     launch(['--port', '4792'], {}, FAKE, (() => { const d = path.join(tmp, 'project-b'); fs.mkdirSync(d); return d; })());
     await waitFor(() => windows()['4792']);
     expect(await helloN(4792)).not.toBe(n1);
-    expect((await fetch('http://127.0.0.1:4792/info', { headers: { cookie: login.cookie.replace('4791', '4792') } })).status).toBe(401);
+    expect((await fetch('http://127.0.0.1:4792/info', { headers: { cookie: login.cookie.replace('4791', '4792'), 'x-nota-bene-key': login.key } })).status).toBe(401);
+  }, 40000);
+
+  it('after a CRASH relaunch the nonce is new and the browser is opened on a fresh login: the old cookie, key and login value are dead', async () => {
+    const op = (() => {
+      const d = path.join(tmp, 'opener');
+      fs.mkdirSync(d);
+      const log = path.join(tmp, 'opened.log');
+      for (const n of ['open', 'xdg-open']) { fs.writeFileSync(path.join(d, n), `#!/bin/sh\necho "$1" >> "${log}"\n`); fs.chmodSync(path.join(d, n), 0o755); }
+      return { path: `${d}:${process.env.PATH}`, log };
+    })();
+    const run = spawn(process.execPath, [BIN, project, '--port', '4791', '--fake', FAKE], { env: env({ PATH: op.path }), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    groups.add(run.pid!);
+    const first = await waitFor(() => windows()['4791']);
+    const pages = () => (fs.existsSync(op.log) ? fs.readFileSync(op.log, 'utf8').trim().split('\n').filter(Boolean) : []);
+    await waitFor(() => pages().length === 1);
+    const n1 = await helloN(4791);
+    const old = await loginAt(4791);
+    const oldLogin = await loginOf(4791);
+    process.kill(first.pid, 'SIGKILL'); // a crash, not the user's restart
+    const next = await waitFor(() => { const w = windows()['4791']; return w && w.pid !== first.pid ? w : null; }, 15000);
+    expect(next.pid).not.toBe(first.pid);
+    await waitFor(async () => (await info(4791)) !== null, 15000);
+    const n2 = await helloN(4791);
+    expect(n2).not.toBe(n1);
+    expect((await fetch('http://127.0.0.1:4791/info', { headers: { cookie: old.cookie, 'x-nota-bene-key': old.key } })).status).toBe(401);
+    expect((await socket(4791, { cookie: old.cookie, origin: old.origin }, [`nb.${old.key}`])).ok).toBe(false);
+    const stale = await fetch('http://127.0.0.1:4791/auth', { method: 'POST', headers: { origin: old.origin, 'content-type': 'application/json' }, body: JSON.stringify({ login: oldLogin }) });
+    expect(stale.status).toBe(401);
+    await waitFor(() => pages().length === 2); // the user is offered a fresh login
+    const fresh = fs.readFileSync(pages()[1]!, 'utf8');
+    expect(fresh).toContain(`http://127.0.0.1:4791/#t=${await loginOf(4791)}`);
+    expect(fresh).not.toContain(oldLogin);
   }, 40000);
 
   it('the nonce is not in the environment a `!` command sees', async () => {

@@ -9,6 +9,9 @@ export function stateDir(): string {
   const dir = process.env.NOTA_BENE_HOME ?? path.join(os.homedir(), '.nota-bene');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (!tightened.has(dir)) {
+    if (process.getuid && fs.statSync(dir).uid !== process.getuid()) {
+      throw new Error(`the state folder ${dir} belongs to another user; refusing to use it. Point NOTA_BENE_HOME at a folder of your own`);
+    }
     tightened.add(dir);
     try {
       fs.chmodSync(dir, 0o700); // best effort: a dir that is not ours stays as it is

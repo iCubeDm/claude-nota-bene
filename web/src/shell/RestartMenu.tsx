@@ -3,6 +3,7 @@ import { useT } from '@/i18n/index.ts';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.tsx';
 import { restartAgent, restartServer, selectSwitching } from '@/controls/slice.ts';
 import { selectConn, useAppDispatch, useAppSelector } from '@/store/store.ts';
+import { apiFetch } from '@/net/auth.ts';
 
 export const INFO_POLL_MS = 20_000;
 
@@ -17,7 +18,7 @@ function useServerInfo(): { supervised: boolean; codeChanged: boolean } {
     if (conn !== 'open') return;
     let live = true;
     const read = () => {
-      fetch('/info').then((r) => r.json()).then((j: { supervised?: unknown; codeChanged?: unknown }) => {
+      apiFetch('/info').then((r) => r.json()).then((j: { supervised?: unknown; codeChanged?: unknown }) => {
         if (live) setInfo({ supervised: j.supervised === true, codeChanged: j.codeChanged === true });
       }).catch(() => { if (live) setInfo({ supervised: false, codeChanged: false }); });
     };

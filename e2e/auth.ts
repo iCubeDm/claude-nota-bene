@@ -12,6 +12,8 @@ export const e2eNonce = (fixture: string): string => createHash('sha256').update
 const mac = (token: string, label: string, port: number, nonce: string): string =>
   createHmac('sha256', token).update(`nota-bene:${label}:${port}:${nonce}`).digest('hex');
 export const e2eCookie = (fixture: string, port: number): string => mac(e2eToken(fixture), 'cookie', port, e2eNonce(fixture));
+/** what the login URL carries (`#t=`): the login value of this launch, not the token */
+export const e2eLogin = (fixture: string, port: number): string => mac(e2eToken(fixture), 'login', port, e2eNonce(fixture));
 export const e2eKey = (fixture: string, port: number): string => mac(e2eToken(fixture), 'key', port, e2eNonce(fixture));
 
 /** A Playwright storage state holding the login cookie and the page's key for `fixture`'s server. */

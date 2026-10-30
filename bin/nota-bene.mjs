@@ -31,7 +31,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { accessToken, newNonce, proveListener } from '../server/src/auth.ts';
+import { accessToken, loginCredential, newNonce, proveListener } from '../server/src/auth.ts';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
 import {
@@ -377,8 +377,25 @@ export function baseUrlOf(what) {
   return m ? m[1] : null;
 }
 
-/** The URL that logs a browser in: the base plus the token in the fragment (which no server, proxy or log ever sees). */
-export const loginUrl = (base) => `${base}/#t=${accessToken()}`;
+/**
+ * The URL that logs a browser in, or null when the listener did not prove itself (nothing is built for it). The fragment `#t=`
+ * carries the LOGIN value of that listener's launch (HMAC of port and nonce, never the raw token): a leaked URL opens that one
+ * window until its launcher exits. The fragment never reaches a server, a proxy or a log, but the page's own script reads it,
+ * hence the proof first. A localhost base is the dev page (Vite proxies /hello to the backend, whose proof is bound to the
+ * backend's port): the backend must prove itself directly and so must the page's port through the proxy. A program that relays
+ * /hello to the real backend still passes; that is dev only, and what a proxy is.
+ */
+export async function loginTarget(base) {
+  const m = /^http:\/\/(127\.0\.0\.1|localhost):(\d+)$/.exec(base);
+  if (!m) return null;
+  const port = Number(m[2]);
+  const dev = m[1] === 'localhost';
+  const bound = dev ? DEV_BACKEND_PORT : port;
+  const n = await proveListener({ dial: bound, timeoutMs: 1500 });
+  if (n === null) return null;
+  if (dev && (await proveListener({ dial: port, bound, host: 'localhost', timeoutMs: 1500 })) === null) return null;
+  return `${base}/#t=${loginCredential(accessToken(), bound, n)}`;
+}
 
 function last(dir) {
   const id = lastSession(realDir(dir));
@@ -403,50 +420,55 @@ function refuse(dir) {
 const OPEN_PAGE_KEEP_MS = 30_000;
 
 /**
- * The page the browser is opened on: `open URL` would put the token in argv, where `ps` shows it to every user. So the
+ * The page the browser is opened on: `open URL` would put the login URL in argv, where `ps` shows it to every user. So the
  * browser gets a file in the state dir (dir 700, file 600; only this user can read it, as the token file itself) that
- * redirects to the login URL. Removed 30 s after if this process is still running; whatever is left (a launcher that exited first) is swept at the next write once it is over 10 minutes old, so a page can outlive its launch by a while (same mode and trust as the token file).
+ * redirects to the login URL. Removed 30 s after if this process is still running; whatever is left (a launcher that exited
+ * first) is swept at the next write once it is over 10 minutes old, so a page can outlive its launch by a while (same mode and
+ * trust as the token file; the login value in it dies with the launch anyway). `url` is a loginTarget().
  */
-export function writeOpenPage(base) {
+export function writeOpenPage(url) {
   const dir = path.join(stateDir(), 'open');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = fs.lstatSync(dir);
+  if (!st.isDirectory()) throw new Error(`${dir} is not a plain folder (a symbolic link?); delete it`);
+  if (process.getuid && st.uid !== process.getuid()) throw new Error(`${dir} belongs to another user`);
   try {
     fs.chmodSync(dir, 0o700); // best effort, as the state dir
   } catch { /* not ours */ }
   for (const n of fs.readdirSync(dir)) {
+    if (!/^open-[0-9a-f]+\.html$/.test(n)) continue; // only our own pages
     try {
-      if (Date.now() - fs.statSync(path.join(dir, n)).mtimeMs > 10 * 60_000) fs.rmSync(path.join(dir, n), { force: true });
+      if (Date.now() - fs.lstatSync(path.join(dir, n)).mtimeMs > 10 * 60_000) fs.rmSync(path.join(dir, n), { force: true });
     } catch {
       // gone already
     }
   }
-  const target = JSON.stringify(loginUrl(base));
   const file = path.join(dir, `open-${randomBytes(6).toString('hex')}.html`);
-  fs.writeFileSync(file, `<!doctype html><meta charset="utf-8"><title>Nota Bene</title>\n<script>location.replace(${target})</script>\n<noscript><meta http-equiv="refresh" content="0;url=${loginUrl(base)}"></noscript>\n`, { mode: 0o600 });
+  fs.writeFileSync(file, `<!doctype html><meta charset="utf-8"><title>Nota Bene</title>\n<script>location.replace(${JSON.stringify(url)})</script>\n<noscript><meta http-equiv="refresh" content="0;url=${url}"></noscript>\n`, { mode: 0o600, flag: 'wx' });
   setTimeout(() => fs.rmSync(file, { force: true }), OPEN_PAGE_KEEP_MS).unref();
   return file;
 }
 
-/** Opens (or brings to front) the window in the browser, logged in. `base` is `http://127.0.0.1:PORT`. */
-function openBrowser(base, wait = false) {
-  let target;
+/**
+ * Opens (or brings to front) the window in the browser, logged in. `base` is `http://127.0.0.1:PORT`. A listener that cannot prove
+ * itself gets the plain base (no login value in it): the page then says it is not logged in. Resolves when the opener has handed
+ * the page over (bounded); callers that do not care just do not await it.
+ */
+async function openBrowser(base) {
+  let target = base;
   try {
-    target = writeOpenPage(base);
+    const url = await loginTarget(base);
+    if (url) target = writeOpenPage(url);
+    else say(`nothing on ${base} proved it is this state dir's window; opening it without a login`);
   } catch (e) {
     say(`cannot write the page that logs the browser in (${e.message}); opening the window without it`);
-    target = base;
   }
   const p = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { stdio: 'ignore', detached: true });
   p.on('error', () => {});
-  if (!wait) {
-    p.unref();
-    return undefined;
-  }
-  // a caller that exits right after (--front) waits for the opener to hand the page over (bounded)
   return new Promise((resolve) => {
     p.on('exit', resolve);
     p.on('error', resolve);
-    setTimeout(resolve, 3000).unref();
+    setTimeout(resolve, 3000).unref(); // bounded; the child keeps the loop alive until it hands the page over
   });
 }
 
@@ -459,7 +481,8 @@ const entryOf = (port) => readWindows()[String(port)];
  */
 async function detach(o, argv, autoPort, buildOutput) {
   const log = path.join(os.tmpdir(), `nota-bene-${o.port}.log`);
-  const fd = fs.openSync(log, 'w');
+  // mode 600 and no symlink following: $TMPDIR may be a shared /tmp
+  const fd = fs.openSync(log, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
   if (buildOutput) fs.writeSync(fd, buildOutput);
   const args = argv.filter((a) => a !== '--detach');
   if (autoPort) args.push('--port', String(o.port));
@@ -481,7 +504,7 @@ async function detach(o, argv, autoPort, buildOutput) {
       if (w.root !== o.dir || !(w.launcherPid === child.pid || (gone && exitCode === 0 && pidAlive(w.pid)))) continue;
       if ((await probeInfo(Number(key)))?.root === o.dir) {
         // ours, or the window our launcher gave way to (it lost a port race to a launcher of the same folder)
-        process.stdout.write(`${w.launcherPid === child.pid ? 'opened' : 'already-open'} ${loginUrl(`http://127.0.0.1:${key}`)}\n`);
+        process.stdout.write(`${w.launcherPid === child.pid ? 'opened' : 'already-open'} ${(await loginTarget(`http://127.0.0.1:${key}`)) ?? `http://127.0.0.1:${key}`}\n`);
         return 0;
       }
     }
@@ -575,8 +598,14 @@ async function supervise(o, autoPort, release, state) {
   let retried = false;
   // this launch's nonce (public; server/src/auth.ts): every server this launcher starts or relaunches gets the same one, so a
   // restart keeps open tabs logged in while a value captured from an earlier launch is dead
-  const nonce = newNonce();
+  // Exit 75 (the user's restart) keeps it; after a crash it is replaced and the browser is opened on a fresh login, so whatever
+  // the crashed launch handed out (a leaked URL, a cookie) dies with it
+  let nonce = newNonce();
+  let crashed = false;
   for (;;) {
+    if (crashed) {
+      nonce = newNonce();
+    }
     const env = serverEnv(process.env, process.pid);
     env.NOTA_BENE_NONCE = nonce;
     delete env.NOTA_BENE_AUTOPORT;
@@ -602,7 +631,8 @@ async function supervise(o, autoPort, release, state) {
           say(`cannot register the window: ${e.message}`); // the window works without it; --find falls back
         }
         release(); // registered: a later launch on the folder finds this window
-        if (first && o.open && !stopping) openBrowser(`http://127.0.0.1:${port}`);
+        if ((first || crashed) && o.open && !stopping) void openBrowser(`http://127.0.0.1:${port}`);
+        crashed = false;
         break;
       }
       await Promise.race([sleep(250), exited]);
@@ -627,7 +657,7 @@ async function supervise(o, autoPort, release, state) {
       // the bind test passed, then another launcher took the port first: if it serves this folder, it is ours
       const holder = await probeInfo(port, 1000);
       if (holder?.root === dir) {
-        if (o.open) openBrowser(`http://127.0.0.1:${port}`); // bring it to front
+        if (o.open) await openBrowser(`http://127.0.0.1:${port}`); // bring it to front
         process.stdout.write(`nota-bene: already open at http://127.0.0.1:${port}\n`);
         return 0;
       }
@@ -661,6 +691,7 @@ async function supervise(o, autoPort, release, state) {
         return code ?? 128 + (os.constants.signals[signal] ?? 0);
       }
       say(`server exited ${how} — relaunching (${n} crash(es) in the last minute)`);
+      crashed = true;
       await new Promise((r) => {
         wake = r;
         setTimeout(r, 1000);
@@ -697,24 +728,14 @@ async function main(argv) {
         say(`not a window port or a loopback URL: ${o.url ?? o.front}`);
         return 2;
       }
-      // the URL (and the page --front opens) carries the raw token in its fragment, which the page's own script can read: only a
-      // listener that proved it holds the token (GET /hello) gets it, whatever the URL form. A localhost URL is the dev page (Vite,
-      // which proxies /hello to the backend, whose proof is bound to the backend's port): the backend must prove itself directly
-      // and so must the page's port through the proxy. A program that relays /hello to the real backend still passes; that is
-      // dev only, and what a proxy is
-      const m = /^http:\/\/(127\.0\.0\.1|localhost):(\d+)$/.exec(base);
-      const dev = m[1] === 'localhost';
-      const port = Number(m[2]);
-      const proved = dev
-        ? (await proveListener({ dial: DEV_BACKEND_PORT, timeoutMs: 1500 })) !== null
-          && (await proveListener({ dial: port, bound: DEV_BACKEND_PORT, host: 'localhost', timeoutMs: 1500 })) !== null
-        : (await proveListener({ dial: port, timeoutMs: 1500 })) !== null;
-      if (!proved) {
-        say(`nothing on ${m[1]}:${port} proved it is a Nota Bene ${dev ? `dev page (backend on ${DEV_BACKEND_PORT})` : 'window'} of this state dir`);
+      const url = await loginTarget(base);
+      if (!url) {
+        say(`nothing on ${base} proved it is a Nota Bene ${base.includes('localhost') ? `dev page (backend on ${DEV_BACKEND_PORT})` : 'window'} of this state dir`);
         return 1;
       }
-      if (o.url !== undefined) process.stdout.write(`${loginUrl(base)}\n`);
-      else await openBrowser(base, true);
+      // the login value dies with that window's launcher: a URL kept from earlier needs a new --url
+      if (o.url !== undefined) process.stdout.write(`${url}\n`);
+      else await openBrowser(base);
       return 0;
     }
     o.dir = realDir(o.dir ?? '.');
@@ -743,8 +764,8 @@ async function main(argv) {
       const port = await servingWindow(o.dir);
       if (port !== undefined) {
         const url = `http://127.0.0.1:${port}`;
-        if (o.open) openBrowser(url); // bring it to front
-        process.stdout.write(o.detach ? `already-open ${loginUrl(url)}\n` : `nota-bene: already open at ${url}\n`);
+        if (o.open) await openBrowser(url); // bring it to front
+        process.stdout.write(o.detach ? `already-open ${(await loginTarget(url)) ?? url}\n` : `nota-bene: already open at ${url}\n`);
         return 0;
       }
     }

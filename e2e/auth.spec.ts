@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { e2eCookie, e2eToken, loggedIn } from './auth.ts';
+import { e2eCookie, e2eLogin, e2eToken, loggedIn } from './auth.ts';
 
 // The login (B1d): a window opened on `/#t=<token>` trades it for the cookie; a page with no login says how to reopen the
 // window instead of reconnecting forever. Runs on the chat fixture (4791), in fresh contexts without the config's cookie.
@@ -23,13 +23,13 @@ test('a page with no login shows the overlay and stops reconnecting @chat', asyn
 test('the URL fragment logs in, is taken out of the address bar, and the window works @chat', async ({ browser, baseURL }) => {
   const ctx = await browser.newContext({ baseURL, locale: 'en-US', storageState: { cookies: [], origins: [] } });
   const page = await ctx.newPage();
-  await page.goto(`/#t=${e2eToken('chat')}`);
+  await page.goto(`/#t=${e2eLogin('chat', PORT)}`);
   await expect(page.locator('#composer-input')).toBeEnabled();
   await expect(overlay(page)).toHaveCount(0);
   expect(new URL(page.url()).hash).toBe('');
   const cookie = (await ctx.cookies()).find((c) => c.name === `nb_${PORT}`)!;
   expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'Strict', path: '/' });
-  expect(cookie.value).not.toBe(e2eToken('chat')); // the cookie is the port's credential, not the token
+  expect(cookie.value).not.toBe(e2eToken('chat')); // the cookie is a derived credential, not the token
   expect(await page.evaluate(() => document.cookie)).not.toContain('nb_'); // HttpOnly: the page cannot read it
   expect(await page.evaluate(() => localStorage.getItem('nb.key'))).toMatch(/^[0-9a-f]{64}$/); // the key that opens the socket and writes
   // images and media are plain subresource loads: the cookie goes with them
@@ -67,5 +67,21 @@ test('the cookie alone (no key in the page) reads files but cannot open the sock
   await page.goto('/');
   await expect(overlay(page)).toBeVisible();
   expect(e2eCookie('chat', PORT)).not.toBe(e2eToken('chat'));
+  await ctx.close();
+});
+
+test('the raw token in the fragment logs nobody in: only the launch\'s login value does @chat', async ({ browser, baseURL }) => {
+  const ctx = await browser.newContext({ baseURL, locale: 'en-US', storageState: { cookies: [], origins: [] } });
+  const page = await ctx.newPage();
+  await page.goto(`/#t=${e2eToken('chat')}`);
+  await expect(overlay(page)).toBeVisible();
+  expect((await ctx.cookies()).length).toBe(0);
+  await ctx.close();
+});
+
+test('the cookie alone opens /file and nothing else of the API @chat', async ({ browser, baseURL }) => {
+  const ctx = await browser.newContext({ baseURL, locale: 'en-US', storageState: { cookies: loggedIn('chat', PORT).cookies, origins: [] } });
+  expect((await ctx.request.get('/file?path=README.md')).status()).not.toBe(401);
+  for (const p of ['/info', '/tree?path=', '/sessions', '/sources', '/complete?q=a', '/system/about']) expect((await ctx.request.get(p)).status(), p).toBe(401);
   await ctx.close();
 });

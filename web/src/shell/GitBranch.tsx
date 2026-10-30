@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/i18n/index.ts';
 import { selectSession, selectTurnSeq, useAppSelector } from '@/store/store.ts';
+import { apiFetch } from '@/net/auth.ts';
 
 type GitStatus = { branch: string | null; detached: boolean; dirty: boolean };
 const THROTTLE = 3_000;
@@ -27,7 +28,7 @@ function useGitStatus(root: string | undefined, turnSeq: number): GitStatus | nu
     const fetchNow = async () => {
       last.current = Date.now();
       try {
-        const r = await fetch('/git-status');
+        const r = await apiFetch('/git-status');
         if (!r.ok) return; // git timed out (503): keep what is shown
         const v: unknown = await r.json();
         if (mine === gen.current) setStatus(isStatus(v) ? v : null);

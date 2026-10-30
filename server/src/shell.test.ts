@@ -47,7 +47,7 @@ async function boot(o: { turns?: FakeTurn[]; oneTab?: boolean; shell?: { timeout
 
 type Client = { ws: WebSocket; events: ServerEvent[]; send(m: unknown): void };
 async function connect(url: string, headers: Record<string, string> = {}): Promise<Client> {
-  const ws = new WebSocket(url.replace('http', 'ws'), { headers });
+  const ws = new WebSocket(url.replace('http', 'ws') + '/ws', { headers });
   const events: ServerEvent[] = [];
   ws.on('message', (d) => events.push(JSON.parse(String(d)) as ServerEvent));
   await new Promise<void>((res, rej) => { ws.once('open', () => res()); ws.once('error', rej); });
@@ -338,7 +338,7 @@ describe('it adds no way in but the owner’s socket', () => {
 
   it('a socket from a foreign origin is not let in', async () => {
     const s = await boot();
-    const ws = new WebSocket(s.url.replace('http', 'ws'), { headers: { Origin: 'https://evil.example' } });
+    const ws = new WebSocket(s.url.replace('http', 'ws') + '/ws', { headers: { Origin: 'https://evil.example' } });
     closers.push(async () => { ws.terminate(); });
     const status = await new Promise<number>((resolve) => {
       ws.once('unexpected-response', (_q, res) => resolve(res.statusCode!));

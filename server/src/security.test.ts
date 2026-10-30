@@ -46,7 +46,7 @@ function get(port: number, p: string, headers: Record<string, string>): Promise<
 // resolves with the first frame, or the HTTP status of a rejected upgrade
 function wsTry(url: string, origin?: string): Promise<{ frame?: string; status?: number }> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url.replace('http', 'ws'), origin ? { headers: { Origin: origin } } : {});
+    const ws = new WebSocket(url.replace('http', 'ws') + '/ws', origin ? { headers: { Origin: origin } } : {});
     closers.push(async () => { ws.terminate(); });
     ws.once('message', (d) => resolve({ frame: String(d) }));
     ws.once('unexpected-response', (_req, res) => resolve({ status: res.statusCode! }));

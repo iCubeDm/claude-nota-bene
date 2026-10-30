@@ -3,6 +3,7 @@ import { useT } from '@/i18n/index.ts';
 import { setValueAndCaret } from '@/comments/insertText.ts';
 import { FileIcon } from '@/files/FileIcon.tsx';
 import { placeListFor, revealSelected } from './placeList.ts';
+import { apiFetch } from '@/net/auth.ts';
 
 // copied from the prototype: `@` at a word start, up to the caret
 export const AT_RE = /(^|\s)@("[^"]*|[^\s"]*)$/;
@@ -55,7 +56,7 @@ export function MentionPicker({ target, shell }: { target: RefObject<HTMLTextAre
       const mine = ++seq;
       ctl?.abort();
       ctl = new AbortController();
-      fetch(`/complete?q=${encodeURIComponent(q)}`, { signal: ctl.signal })
+      apiFetch(`/complete?q=${encodeURIComponent(q)}`, { signal: ctl.signal })
         .then((r) => (r.ok ? (r.json() as Promise<string[]>) : Promise.reject(new Error(String(r.status)))))
         .then((items) => {
           if (mine !== seq) return; // a newer keystroke won

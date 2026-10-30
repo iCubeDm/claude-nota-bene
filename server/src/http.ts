@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream';
 import type { EventHub } from './hub.ts';
 import { reportError } from './errors.ts';
+import { cookieRoute } from './auth.ts';
 import { CONTROL_HEADER, tokenOk } from './system.ts';
 
 const TYPES: Record<string, string> = {
@@ -52,8 +53,8 @@ export function httpHandler(o: {
    * (every `extra` route and `/info`) needs `authorize`; undefined = no check (tests only, see startServer).
    */
   open?: Record<string, RequestListener>;
-  /** `write`: any method other than GET/HEAD (the socket asks with write too) */
-  authorize?: (req: Parameters<RequestListener>[0], write: boolean) => boolean;
+  /** `needKey`: the route is not one the cookie alone may open (auth.ts cookieRoute); the socket always asks with it */
+  authorize?: (req: Parameters<RequestListener>[0], needKey: boolean) => boolean;
 }): RequestListener {
   const root = path.resolve(o.webDist);
 
@@ -83,7 +84,7 @@ export function httpHandler(o: {
       const control = rawPath.startsWith('/control/');
       if (control) {
         // token only, never a page: an Origin (any browser request) is refused even with a token
-        if (req.headers.origin !== undefined || !o.controlToken || !tokenOk(req.headers[CONTROL_HEADER], o.controlToken())) {
+        if (req.headers.origin !== undefined || !o.controlToken || typeof req.headers[CONTROL_HEADER] !== 'string' || !tokenOk(req.headers[CONTROL_HEADER], o.controlToken())) {
           text(res, 403, 'forbidden');
           return;
         }
@@ -102,7 +103,7 @@ export function httpHandler(o: {
       const prefix = PREFIX_ROUTES.find((p) => rawPath.startsWith(p));
       const route = o.extra?.[prefix ?? rawPath];
       // data is behind the login; the static app shell below is public (it holds no secrets). /control/ has its own token
-      if ((route || rawPath === '/info') && !control && o.authorize && !o.authorize(req, req.method !== 'GET' && req.method !== 'HEAD')) {
+      if ((route || rawPath === '/info') && !control && o.authorize && !o.authorize(req, !cookieRoute(req.method, rawPath))) {
         text(res, 401, 'unauthorized');
         return;
       }

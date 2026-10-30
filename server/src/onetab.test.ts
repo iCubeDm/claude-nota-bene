@@ -35,8 +35,11 @@ async function boot(o: { grace?: number; heartbeat?: number; turns?: Parameters<
 }
 
 type Client = { ws: WebSocket; events: ServerEvent[]; closed: Promise<number> };
+/** the socket's address: the server answers upgrades at /ws only (a query, if any, stays) */
+const wsUrl = (url: string): string => { const u = url.replace('http', 'ws'); return /\/ws(\?|$)/.test(u) ? u : u.replace(/(\?|$)/, '/ws$1'); };
+
 async function connect(url: string, o: { autoPong?: boolean } = {}): Promise<Client> {
-  const ws = new WebSocket(url.replace('http', 'ws'), { autoPong: o.autoPong ?? true });
+  const ws = new WebSocket(wsUrl(url), { autoPong: o.autoPong ?? true });
   const events: ServerEvent[] = [];
   ws.on('message', (d) => events.push(JSON.parse(String(d)) as ServerEvent));
   const closed = new Promise<number>((r) => ws.once('close', (code) => r(code)));

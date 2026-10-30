@@ -25,7 +25,7 @@ const uptime = (since: number, now = Date.now()) => {
 };
 
 async function getJson<T>(url: string): Promise<T> {
-  const r = await fetch(url);
+  const r = await apiFetch(url);
   if (!r.ok) throw new Error(`${url} ${r.status}`);
   return (await r.json()) as T;
 }

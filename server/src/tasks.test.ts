@@ -39,7 +39,7 @@ async function boot(o: { background?: boolean | 'throw'; refuseStop?: string[] }
   const backend = fakeBackend([turn], { shells, ...o });
   const s = await startServer({ insecureNoAuth: true, cwd: '/proj', port: 0, backend, webDist: dist, oneTab: false, resume: 'fake-session' });
   closers.push(s.close);
-  const ws = new WebSocket(s.url.replace('http', 'ws'));
+  const ws = new WebSocket(s.url.replace('http', 'ws') + '/ws');
   const events: ServerEvent[] = [];
   ws.on('message', (d) => events.push(JSON.parse(String(d)) as ServerEvent));
   await new Promise<void>((res, rej) => { ws.once('open', () => res()); ws.once('error', rej); });

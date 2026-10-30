@@ -14,7 +14,7 @@ describe('loginFromFragment', () => {
     const fetchFn = vi.fn(() => new Promise<Response>((r) => { pending = r; }));
     const done = loginFromFragment(loc(`#t=${TOKEN}`), { replaceState: replace } as unknown as History, fetchFn as unknown as typeof fetch);
     expect(replace).toHaveBeenCalledWith(null, '', '/some?x=1'); // gone from the bar and the history entry at once
-    expect(fetchFn).toHaveBeenCalledWith('/auth', expect.objectContaining({ method: 'POST', body: JSON.stringify({ token: TOKEN }) }));
+    expect(fetchFn).toHaveBeenCalledWith('/auth', expect.objectContaining({ method: 'POST', body: JSON.stringify({ login: TOKEN }) }));
     pending(new Response(JSON.stringify({ ok: true, key: 'k'.repeat(64) }), { status: 200 }));
     expect(await done).toBe(true);
     expect(getKey()).toBe('k'.repeat(64)); // kept for the writes and the socket
@@ -38,21 +38,19 @@ describe('loginFromFragment', () => {
 });
 
 describe('refusedForAuth', () => {
-  it('is true only for a 401 from /info', async () => {
+  it('is true only for a 401 from /info (no login, or a cookie and key of an earlier launch)', async () => {
     expect(await refusedForAuth((async () => new Response('', { status: 401 })) as typeof fetch)).toBe(true);
-    expect(await refusedForAuth((async () => new Response('{}', { status: 200 })) as typeof fetch)).toBe(false);
+    expect(await refusedForAuth((async () => new Response('{}', { status: 200 })) as typeof fetch)).toBe(false); // an older server needs no key
     expect(await refusedForAuth((async () => new Response('', { status: 502 })) as typeof fetch)).toBe(false);
     expect(await refusedForAuth((async () => { throw new TypeError('server is down'); }) as typeof fetch)).toBe(false);
   });
-});
-
-describe('refusedForAuth and the key', () => {
-  const info = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as typeof fetch;
-  it('a logged-in page that lost its key (cleared storage) is refused too, while a keyless older server is not', async () => {
-    expect(await refusedForAuth(info({ keyRequired: true }))).toBe(true);
-    expect(await refusedForAuth(info({}))).toBe(false); // an older server has no keys
+  it('asks with the page\'s key, so a cookie-only page (key lost) gets the 401', async () => {
+    const seen: (string | null)[] = [];
+    const f = (async (_: unknown, init?: RequestInit) => { seen.push(new Headers(init?.headers).get('x-nota-bene-key')); return new Response('', { status: 200 }); }) as unknown as typeof fetch;
+    await refusedForAuth(f);
     localStorage.setItem(KEY_STORAGE, 'k'.repeat(64));
-    expect(await refusedForAuth(info({ keyRequired: true }))).toBe(false);
+    await refusedForAuth(f);
+    expect(seen).toEqual([null, 'k'.repeat(64)]);
   });
 });
 
