@@ -127,3 +127,11 @@ it('Defaults: the mode is saved on the server; About shows the version', async (
   act(() => void fireEvent.change(screen.getByRole('combobox', { name: 'Interface language' }), { target: { value: 'ru' } }));
   expect(await screen.findByText('Окна')).toBeInTheDocument();
 });
+
+it('the language select follows a change made elsewhere (a hello), with no copy of its own', async () => {
+  setup();
+  const sel = (await screen.findByRole('combobox', { name: 'Interface language' })) as HTMLSelectElement;
+  expect(sel.value).toBe('en');
+  act(() => setLang('ru')); // what adoptServerLang does when the server's value arrives
+  expect(await screen.findByDisplayValue('Русский')).toBeInTheDocument();
+});

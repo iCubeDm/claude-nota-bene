@@ -78,7 +78,6 @@ export function SettingsView({ active }: { active: boolean }) {
   // the port whose action is in flight: that row's buttons are off until it settles (no double relays)
   const [pending, setPending] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [lang, setLangState] = useState(getLang());
 
   const act = (w: WindowRow, action: Action) => async () => {
     setNote(null);
@@ -185,7 +184,7 @@ export function SettingsView({ active }: { active: boolean }) {
 
       <Section title={t('setDefaults')}>
         <Row label={t('defLang')}>
-          <select aria-label={t('defLang')} value={lang} onChange={(e) => { const l = e.target.value as 'ru' | 'en'; chooseLang(l); setLangState(l); }}
+          <select aria-label={t('defLang')} value={getLang()} onChange={(e) => chooseLang(e.target.value as 'ru' | 'en')}
             className="rounded-md border border-border-soft bg-transparent px-2 py-1 text-[13px] text-foreground">
             <option value="ru">Русский</option>
             <option value="en">English</option>
