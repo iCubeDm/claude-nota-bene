@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loginFromFragment, refusedForAuth } from './auth.ts';
+import { afterEach } from 'vitest';
+import { KEY_STORAGE, apiFetch, getKey, loginFromFragment, refusedForAuth, socketProtocols } from './auth.ts';
+
+afterEach(() => localStorage.clear());
 
 const TOKEN = 'ab'.repeat(32);
 const loc = (hash: string) => ({ hash, pathname: '/some', search: '?x=1' }) as Location;
@@ -12,8 +15,9 @@ describe('loginFromFragment', () => {
     const done = loginFromFragment(loc(`#t=${TOKEN}`), { replaceState: replace } as unknown as History, fetchFn as unknown as typeof fetch);
     expect(replace).toHaveBeenCalledWith(null, '', '/some?x=1'); // gone from the bar and the history entry at once
     expect(fetchFn).toHaveBeenCalledWith('/auth', expect.objectContaining({ method: 'POST', body: JSON.stringify({ token: TOKEN }) }));
-    pending(new Response('{}', { status: 200 }));
+    pending(new Response(JSON.stringify({ ok: true, key: 'k'.repeat(64) }), { status: 200 }));
     expect(await done).toBe(true);
+    expect(getKey()).toBe('k'.repeat(64)); // kept for the writes and the socket
   });
 
   it('a refused token is false; a network error is false and does not throw', async () => {
@@ -39,5 +43,33 @@ describe('refusedForAuth', () => {
     expect(await refusedForAuth((async () => new Response('{}', { status: 200 })) as typeof fetch)).toBe(false);
     expect(await refusedForAuth((async () => new Response('', { status: 502 })) as typeof fetch)).toBe(false);
     expect(await refusedForAuth((async () => { throw new TypeError('server is down'); }) as typeof fetch)).toBe(false);
+  });
+});
+
+describe('refusedForAuth and the key', () => {
+  const info = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as typeof fetch;
+  it('a logged-in page that lost its key (cleared storage) is refused too, while a keyless older server is not', async () => {
+    expect(await refusedForAuth(info({ keyRequired: true }))).toBe(true);
+    expect(await refusedForAuth(info({}))).toBe(false); // an older server has no keys
+    localStorage.setItem(KEY_STORAGE, 'k'.repeat(64));
+    expect(await refusedForAuth(info({ keyRequired: true }))).toBe(false);
+  });
+});
+
+describe('apiFetch', () => {
+  it('adds the key header to a request, keeps the rest, and sends nothing extra without a key', async () => {
+    const calls: [unknown, RequestInit][] = [];
+    const f = (async (i: unknown, init: RequestInit) => { calls.push([i, init]); return new Response(''); }) as unknown as typeof fetch;
+    await apiFetch('/x', { method: 'POST', headers: { 'content-type': 'a/b' }, body: 'b' }, f);
+    expect(calls[0]![1].headers).toEqual({ 'content-type': 'a/b' }); // no key stored: untouched
+    localStorage.setItem(KEY_STORAGE, 'k'.repeat(64));
+    await apiFetch('/x', { method: 'POST', headers: { 'content-type': 'a/b' }, body: 'b' }, f);
+    const h = new Headers(calls[1]![1].headers);
+    expect([h.get('content-type'), h.get('x-nota-bene-key'), calls[1]![1].method, calls[1]![1].body]).toEqual(['a/b', 'k'.repeat(64), 'POST', 'b']);
+  });
+  it('the socket carries the key as a subprotocol, only when there is one', () => {
+    expect(socketProtocols()).toEqual([]);
+    localStorage.setItem(KEY_STORAGE, 'k'.repeat(64));
+    expect(socketProtocols()).toEqual([`nb.${'k'.repeat(64)}`]);
   });
 });

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { apiFetch } from '../net/auth.ts';
 import { en } from './en.ts';
 import { ru } from './ru.ts';
 
@@ -40,7 +41,7 @@ let unsynced: Lang | null = null;
 export function persistLang(l: Lang, ifUnset = false): void {
   if (!ifUnset) unsynced = l;
   try {
-    void fetch('/system/prefs', {
+    void apiFetch('/system/prefs', {
       method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang: l, ...(ifUnset ? { ifUnset: true } : {}) }),
     }).then((r) => { if (r.ok && !ifUnset && unsynced === l) unsynced = null; }, () => {});
   } catch { /* no fetch: the local cache still holds the choice */ }

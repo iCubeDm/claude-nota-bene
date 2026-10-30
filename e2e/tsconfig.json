@@ -9,5 +9,5 @@
     "lib": ["esnext", "dom"],
     "types": ["node"]
   },
-  "include": ["*.ts", "../web/src/i18n/*.ts"]
+  "include": ["*.ts", "../web/src/i18n/*.ts", "../web/src/net/auth.ts"]
 }

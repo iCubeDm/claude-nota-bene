@@ -187,18 +187,22 @@ case "$DIR" in "$HOME"|"$HOME_P"|/) echo "NB: refusing to open the whole $DIR as
 
 # how a window comes to front (the bin uses the same: open on macOS, xdg-open elsewhere); without one, the user opens it
 if [ "$(uname)" = Darwin ]; then OPENER=open; else OPENER="$(command -v xdg-open)"; fi
-if [ -n "$OPENER" ]; then FRONT="brought to front"; else FRONT="open it in your browser"; fi
+FRONTED=""   # set once a browser was really pointed at the window
+front_note() { # $1 = URL: what to tell the user about the browser (never "brought to front" unless it was)
+  if [ -n "$FRONTED" ]; then echo "brought to front"
+  else echo "no browser could be opened from here: run \`nota-bene --url ${1##*:}\` in a terminal for a login link"; fi
+}
 
 already() { # $1 = URL of a window already serving this folder
   if [ "$MODE" = fork ]; then
-    echo "NB: a window is already open on this folder at $1 ($FRONT). It was NOT switched to this conversation: switching restarts it and may cut a running turn. To move this conversation there, quit the terminal claude and pick it in Sessions ▾."
+    echo "NB: a window is already open on this folder at $1 ($(front_note "$1")). It was NOT switched to this conversation: switching restarts it and may cut a running turn. To move this conversation there, quit the terminal claude and pick it in Sessions ▾."
   else
-    echo "NB: already open at $1 ($FRONT)."
+    echo "NB: already open at $1 ($(front_note "$1"))."
   fi
   exit 0
 }
 bring() { # $1 = port of a window found here: bring it to front ourselves (the launcher opens its login page)
-  [ -n "$OPENER" ] && node "$BIN" --front "$1" >/dev/null 2>&1
+  [ -n "$OPENER" ] && node "$BIN" --front "$1" >/dev/null 2>&1 && FRONTED=1
   already "http://127.0.0.1:$1"
 }
 
@@ -277,6 +281,7 @@ if [ $RC -eq 0 ] && [[ "$OUT" =~ $LINE ]]; then
   rm -f "$ERR"
   VERB="${BASH_REMATCH[1]}" PORT="${BASH_REMATCH[3]}"
   URL="http://127.0.0.1:$PORT"   # the launcher's line carries #t=TOKEN; the skill's output must not
+  [ -n "$OPENER" ] && FRONTED=1   # the launcher opened (or fronted) the login page itself
   [ "$VERB" = already-open ] && already "$URL"
   T="${TMPDIR:-/tmp}"
   echo "NB: opened $URL for $DIR$NOTE. Log: ${T%/}/nota-bene-$PORT.log"
@@ -284,6 +289,6 @@ if [ $RC -eq 0 ] && [[ "$OUT" =~ $LINE ]]; then
 fi
 # the launcher's error (its "nota-bene: " prefix becomes ours), then the log tail it printed
 { [ -s "$ERR" ] && cat "$ERR" || echo "nota-bene: the launcher failed (exit code $RC)${OUT:+: $OUT}"; } \
-  | sed '1{s/^nota-bene: //;s/^/NB: /;}'
+  | sed -e 's/#t=[0-9a-fA-F]*//g' -e '1{s/^nota-bene: //;s/^/NB: /;}'
 rm -f "$ERR"
 exit 1

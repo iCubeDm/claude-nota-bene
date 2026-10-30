@@ -1,11 +1,12 @@
 import type { MediaAnchor } from '@nota-bene/shared';
 import { prepareImage, uploadImage } from '@/attachments/image.ts';
 import { t } from '@/i18n/index.ts';
+import { apiFetch } from '@/net/auth.ts';
 import { renderMarks } from './render.ts';
 
 async function putMark(id: string, name: 'frame.jpg' | 'layer.png', b: Blob): Promise<void> {
   const type = name === 'frame.jpg' ? 'image/jpeg' : 'image/png';
-  const r = await fetch(`/marks/${id}/${name}`, { method: 'POST', headers: { 'content-type': type }, body: b });
+  const r = await apiFetch(`/marks/${id}/${name}`, { method: 'POST', headers: { 'content-type': type }, body: b });
   if (!r.ok) throw new Error(`${name} ${r.status}`);
 }
 
@@ -15,7 +16,7 @@ async function putMark(id: string, name: 'frame.jpg' | 'layer.png', b: Blob): Pr
  */
 export async function deleteMarks(id: string): Promise<void> {
   try {
-    const r = await fetch(`/marks/${id}`, { method: 'DELETE' });
+    const r = await apiFetch(`/marks/${id}`, { method: 'DELETE' });
     if (!r.ok && r.status !== 409) console.warn(`DELETE /marks/${id}: ${r.status}`);
   } catch (e) {
     console.warn(`DELETE /marks/${id}:`, e);

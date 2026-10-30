@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isNonce } from './auth.ts';
 import { fakeFromScript } from './agent/fake.ts';
 import { sdkBackend } from './agent/claude/sdk.ts';
 import { startServer } from './server.ts';
@@ -88,6 +89,7 @@ export function dropInheritedLauncherEnv(env: NodeJS.ProcessEnv, ppid: number): 
   if (env.NOTA_BENE_LAUNCHER_PID === undefined || pid === ppid) return false;
   delete env.NOTA_BENE_LAUNCHER_PID;
   delete env.NOTA_BENE_SUPERVISED;
+  delete env.NOTA_BENE_NONCE; // that launcher's launch, not ours
   return true;
 }
 
@@ -103,6 +105,9 @@ async function main(): Promise<void> {
   const backend = args.fake
     ? fakeFromScript(JSON.parse(fs.readFileSync(args.fake, 'utf8')), args.dir)
     : sdkBackend();
+  // the launcher's launch nonce (public, but it stays out of the agent's and the `!` commands' environment all the same)
+  const nonce = isNonce(process.env.NOTA_BENE_NONCE) ? process.env.NOTA_BENE_NONCE : undefined;
+  delete process.env.NOTA_BENE_NONCE;
   const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
   let started: Awaited<ReturnType<typeof startServer>>;
   try {
@@ -113,6 +118,7 @@ async function main(): Promise<void> {
       ...launchTarget(args),
       webDist,
       allowedOrigins: args.allowOrigins,
+      ...(nonce ? { nonce } : {}),
     });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).syscall !== 'listen') throw e;

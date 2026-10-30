@@ -2,9 +2,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const tightened = new Set<string>();
+
+/** The state dir. It holds the access token, so it is private to the user: created 700, and tightened to 700 once per process. */
 export function stateDir(): string {
   const dir = process.env.NOTA_BENE_HOME ?? path.join(os.homedir(), '.nota-bene');
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); // holds the access token: private to the user
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (!tightened.has(dir)) {
+    tightened.add(dir);
+    try {
+      fs.chmodSync(dir, 0o700); // best effort: a dir that is not ours stays as it is
+    } catch { /* not ours */ }
+  }
   return dir;
 }
 

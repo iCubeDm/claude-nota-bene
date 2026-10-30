@@ -7,7 +7,7 @@ const viteConfig = Object.values(import.meta.glob('../vite.config.ts', { query: 
 
 it('the Vite dev proxy covers every server path the app fetches', () => {
   const fetched = new Set<string>();
-  for (const src of Object.values(sources)) for (const m of src.matchAll(/fetch\(\s*[`'"](\/[a-z-]+)/g)) fetched.add(m[1]!);
+  for (const src of Object.values(sources)) for (const m of src.matchAll(/[fF]etch\(\s*[`'"](\/[a-z-]+)/g)) fetched.add(m[1]!);
   expect(fetched.has('/marks')).toBe(true); // the scan itself works
   const list = /\[([^\]]*)\]\.map\(\(p\) => \[p, backend\]\)/.exec(viteConfig)?.[1] ?? '';
   const proxied = [...list.matchAll(/'(\/[a-z-]+)'/g)].map((m) => m[1]!);

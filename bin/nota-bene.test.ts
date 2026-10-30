@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import WS from 'ws';
 import { shellEnv } from '../server/src/session/shellText.ts';
 // @ts-expect-error plain ESM, no types
 import { acquireLaunchLock, buildLock, candidatePorts, ensureBuild, needsBuild, portFree, serverEnv } from './nota-bene.mjs';
@@ -127,6 +128,7 @@ async function firstFree(from: number, to: number): Promise<number> {
   throw new Error(`no free port in ${from}-${to}`);
 }
 
+const FAKE_NONCE = 'f0'.repeat(16);
 /** A request handler for a fake window: proves itself on /hello as a window of this state dir would, then answers /info with `root`. */
 async function fakeWindowHandler(root: string, seen: string[] = []) {
   const { proofFor } = await import('../server/src/auth.ts');
@@ -134,7 +136,7 @@ async function fakeWindowHandler(root: string, seen: string[] = []) {
     seen.push(`${req.url} ${req.headers.authorization}`);
     const m = /^\/hello\?c=([0-9a-f]+)$/.exec(req.url ?? '');
     const port = (req.socket.address() as net.AddressInfo | null)?.port ?? req.socket.localPort!;
-    if (m) return void res.setHeader('content-type', 'application/json').end(JSON.stringify({ proof: proofFor(tokenOf(), port, m[1]!) }));
+    if (m) return void res.setHeader('content-type', 'application/json').end(JSON.stringify({ proof: proofFor(tokenOf(), port, FAKE_NONCE, m[1]!), n: FAKE_NONCE }));
     res.setHeader('content-type', 'application/json').end(JSON.stringify({ root }));
   };
 }
@@ -690,8 +692,9 @@ describe('the access token', () => {
     const r = launch(['--port', '4791']);
     const w = await waitFor(() => windows()['4791']);
     const token = tokenOf();
-    const { portCredential } = await import('../server/src/auth.ts');
-    const secrets = [token, portCredential(token, 4791)];
+    const { helperCredential } = await import('../server/src/auth.ts');
+    const n = ((await (await fetch(`http://127.0.0.1:4791/hello?c=${'ab'.repeat(16)}`)).json()) as { n: string }).n;
+    const secrets = [token, helperCredential(token, 4791, n)];
     const other = path.join(tmp, 'project-b');
     fs.mkdirSync(other);
     const d = spawnSync(process.execPath, [BIN, other, '--port', '4793', '--detach', '--fake', FAKE, '--no-open'], { env: env(), encoding: 'utf8', timeout: 25000 });
@@ -714,7 +717,7 @@ describe('the access token', () => {
     const token = tokenOf();
     const u = bin(['--url', '4791']);
     expect([u.status, u.stdout]).toEqual([0, `http://127.0.0.1:4791/#t=${token}\n`]);
-    expect(bin(['--url', 'http://localhost:5173']).stdout).toBe(`http://localhost:5173/#t=${token}\n`);
+    expect(bin(['--url', 'http://localhost:5173']).status).toBe(1); // a dev page that cannot prove itself gets no token
     for (const bad of ['http://evil.example:80', 'file:///etc/passwd', 'abc', '99999']) expect(bin(['--url', bad]).status, bad).toBe(2);
 
     const op = stubOpener();
@@ -756,9 +759,9 @@ describe('the access token', () => {
         execFile(process.execPath, [BIN, '--find', project, '--scan'], { env: env() }, (e, out) => resolve({ code: e ? ((e as { code?: number }).code ?? -1) : 0, out }));
       });
       expect([f.code, f.out.trim()]).toEqual([0, '4794']);
-      const { portCredential } = await import('../server/src/auth.ts');
+      const { helperCredential } = await import('../server/src/auth.ts');
       expect(seen[0]).toMatch(/^\/hello\?c=[0-9a-f]{32} undefined$/); // the challenge first, with no Authorization
-      expect(seen.at(-1)).toBe(`/info Bearer ${portCredential(tokenOf(), 4794)}`);
+      expect(seen.at(-1)).toBe(`/info Bearer ${helperCredential(tokenOf(), 4794, FAKE_NONCE)}`);
     } finally {
       s.closeAllConnections();
       await new Promise((r) => s.close(r));
@@ -787,4 +790,87 @@ describe('the access token', () => {
       await new Promise((r) => s.close(r));
     }
   }, 20000);
+});
+
+describe('the launch nonce and the two tiers, through the real launcher', () => {
+  const helloN = async (port: number) => ((await (await fetch(`http://127.0.0.1:${port}/hello?c=${'ab'.repeat(16)}`)).json()) as { n: string }).n;
+  const loginAt = async (port: number) => {
+    const origin = `http://127.0.0.1:${port}`;
+    const r = await fetch(`${origin}/auth`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ token: tokenOf() }) });
+    return { cookie: r.headers.get('set-cookie')!.split(';')[0]!, key: ((await r.json()) as { key: string }).key, origin };
+  };
+  const socket = (port: number, headers: Record<string, string>, protocols: string[] = []) => new Promise<{ ok: boolean; env?: string }>((resolve) => {
+    const ws = new WS(`ws://127.0.0.1:${port}/ws`, protocols, { headers });
+    ws.on('message', () => resolve({ ok: true }));
+    ws.on('unexpected-response', () => resolve({ ok: false }));
+    ws.on('error', () => resolve({ ok: false }));
+    setTimeout(() => { ws.terminate(); resolve({ ok: false }); }, 3000).unref();
+    ws.on('open', () => setTimeout(() => ws.close(), 200));
+  });
+
+  it('exit 75 relaunches with the same nonce: the same cookie and key still work; a new launch has another nonce and kills the old ones', async () => {
+    launch(['--port', '4791']);
+    const first = await waitFor(() => windows()['4791']);
+    const n1 = await helloN(4791);
+    const login = await loginAt(4791);
+    expect((await socket(4791, { cookie: login.cookie, origin: login.origin }, [`nb.${login.key}`])).ok).toBe(true);
+    expect((await socket(4791, { cookie: login.cookie, origin: login.origin })).ok).toBe(false); // the cookie alone: no socket
+    const res = await fetch('http://127.0.0.1:4791/restart-server', { method: 'POST', headers: { origin: login.origin, ...authHeaders() } });
+    expect(res.status).toBe(200);
+    await waitFor(() => { const w = windows()['4791']; return w && w.pid !== first.pid ? w : null; });
+    await waitFor(async () => (await info(4791)) !== null);
+    expect(await helloN(4791)).toBe(n1);
+    expect((await socket(4791, { cookie: login.cookie, origin: login.origin }, [`nb.${login.key}`])).ok).toBe(true); // an open tab keeps working
+    const withCookie = await fetch('http://127.0.0.1:4791/info', { headers: { cookie: login.cookie } });
+    expect(withCookie.status).toBe(200);
+    // a second launcher on another port has its own launch
+    launch(['--port', '4792'], {}, FAKE, (() => { const d = path.join(tmp, 'project-b'); fs.mkdirSync(d); return d; })());
+    await waitFor(() => windows()['4792']);
+    expect(await helloN(4792)).not.toBe(n1);
+    expect((await fetch('http://127.0.0.1:4792/info', { headers: { cookie: login.cookie.replace('4791', '4792') } })).status).toBe(401);
+  }, 40000);
+
+  it('the nonce is not in the environment a `!` command sees', async () => {
+    launch(['--port', '4791']);
+    await waitFor(() => windows()['4791']);
+    const n = await helloN(4791);
+    const out = await new Promise<string>((resolve) => {
+      const ws = new WS('ws://127.0.0.1:4791/ws', { headers: authHeaders() });
+      ws.on('open', () => ws.send(JSON.stringify({ type: 'shell-run', id: 'e', cmd: 'env' })));
+      ws.on('message', (d) => { const e = JSON.parse(String(d)); if (e.kind === 'shell-end') { ws.close(); resolve(String(e.output)); } });
+      setTimeout(() => resolve('timeout'), 8000).unref();
+    });
+    expect(out).toContain('NOTA_BENE_HOME'); // the command ran
+    expect(out).not.toContain(n);
+    expect(out).not.toContain('NOTA_BENE_NONCE');
+  }, 20000);
+
+  it('--url and --front with a localhost URL to an impostor send nothing and open nothing', async () => {
+    fs.writeFileSync(path.join(home, 'token'), 'd'.repeat(64), { mode: 0o600 });
+    const seen: string[] = [];
+    const mk = async (port: number) => {
+      const srv = http.createServer((req, res) => { seen.push(`${port}${req.url} ${req.headers.authorization} ${req.headers.cookie}`); res.setHeader('content-type', 'application/json').end(JSON.stringify({ proof: 'ab'.repeat(32), n: 'ab'.repeat(16) })); });
+      await new Promise<void>((r) => srv.listen(port, '127.0.0.1', () => r()));
+      return srv;
+    };
+    const imps = [await mk(4793), await mk(4794)];
+    const dir = path.join(tmp, 'opener');
+    fs.mkdirSync(dir);
+    const log = path.join(tmp, 'opened.log');
+    for (const n of ['open', 'xdg-open']) { fs.writeFileSync(path.join(dir, n), `#!/bin/sh\necho "$1" >> "${log}"\n`); fs.chmodSync(path.join(dir, n), 0o755); }
+    try {
+      const run = (args: string[]) => new Promise<{ code: number; out: string }>((resolve) => {
+        execFile(process.execPath, [BIN, ...args], { env: env({ PATH: `${dir}:${process.env.PATH}` }) }, (e, out) => resolve({ code: e ? ((e as { code?: number }).code ?? -1) : 0, out }));
+      });
+      for (const args of [['--url', 'http://localhost:4793'], ['--front', 'http://localhost:4794'], ['--url', 'http://127.0.0.1:4793'], ['--front', '4794']]) {
+        const r = await run(args);
+        expect([args.join(' '), r.code, r.out]).toEqual([args.join(' '), 1, '']);
+      }
+      expect(fs.existsSync(log)).toBe(false);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((x) => x.includes('/hello?c=') && x.endsWith(' undefined undefined'))).toBe(true);
+    } finally {
+      for (const s of imps) { s.closeAllConnections(); await new Promise((r) => s.close(r)); }
+    }
+  }, 30000);
 });

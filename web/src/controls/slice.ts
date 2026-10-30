@@ -1,6 +1,7 @@
 import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
 import { CLAUDE_CAPABILITIES, MODES, type Capabilities, type EffortLevel, type IdleCompact, type Mode, type ModelOption, type SlashCommand } from '@nota-bene/shared';
 import { t } from '../i18n/index.ts';
+import { apiFetch } from '../net/auth.ts';
 import { toast } from '../shell/toast.ts';
 import { connState, serverEvent, type AppThunk, type RootState } from '../store/store.ts';
 
@@ -264,7 +265,7 @@ export const restartServer = (): AppThunk<Promise<boolean>> => async (dispatch, 
     toast(t('restartFail'), msg);
   };
   try {
-    const r = await fetch('/restart-server', { method: 'POST' });
+    const r = await apiFetch('/restart-server', { method: 'POST' });
     if (!r.ok) { giveUp((await r.text().catch(() => '')) || String(r.status)); return false; }
   } catch (e) {
     giveUp(e instanceof Error ? e.message : String(e));

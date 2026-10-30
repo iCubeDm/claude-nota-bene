@@ -10,8 +10,10 @@ class FakeWS {
   onclose: ((e: { code: number }) => void) | null = null;
   onmessage: ((e: { data: string }) => void) | null = null;
   url: string;
-  constructor(url: string) {
+  protocols: string[];
+  constructor(url: string, protocols: string[] = []) {
     this.url = url;
+    this.protocols = protocols;
     FakeWS.instances.push(this);
   }
   send(d: string) {
@@ -211,5 +213,18 @@ describe('a refused socket (no login)', () => {
     await settle();
     vi.advanceTimersByTime(5000);
     expect(FakeWS.instances).toHaveLength(1);
+  });
+});
+
+describe('the key', () => {
+  it('is offered as a subprotocol on every (re)connect, and never put in the URL', () => {
+    let key = 'one';
+    connect('ws://x/ws', () => {}, () => {}, WS, undefined, () => [`nb.${key}`]);
+    expect((FakeWS.instances[0] as unknown as { protocols: string[] }).protocols).toEqual(['nb.one']);
+    key = 'two';
+    FakeWS.instances[0].drop();
+    vi.advanceTimersByTime(1100);
+    expect((FakeWS.instances[1] as unknown as { protocols: string[] }).protocols).toEqual(['nb.two']);
+    expect(FakeWS.instances.every((w) => !w.url.includes('one') && !w.url.includes('two'))).toBe(true);
   });
 });

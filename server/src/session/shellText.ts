@@ -72,7 +72,7 @@ export class Tail {
  */
 export function shellEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...base };
-  for (const k of ['NOTA_BENE_SUPERVISED', 'NOTA_BENE_LAUNCHER_PID', 'NOTA_BENE_LOCKED', 'NOTA_BENE_AUTOPORT']) delete env[k];
+  for (const k of ['NOTA_BENE_SUPERVISED', 'NOTA_BENE_LAUNCHER_PID', 'NOTA_BENE_LOCKED', 'NOTA_BENE_AUTOPORT', 'NOTA_BENE_NONCE']) delete env[k];
   // under /nb the window is a Claude Code background task: these carry its token and a false "inside Claude Code" state.
   // CLAUDE_CONFIG_DIR stays: it is the user's own choice of where Claude Code keeps its settings
   for (const k of Object.keys(env)) if (k === 'CLAUDECODE' || k === 'CLAUDE_PID' || k.startsWith('CLAUDE_CODE_')) delete env[k];

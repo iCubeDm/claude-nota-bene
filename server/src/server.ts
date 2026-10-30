@@ -25,7 +25,7 @@ import { codeChecker } from './codeStamp.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
 import { controlToken, systemRoutes } from './system.ts';
-import { CHALLENGE_RE, accessToken, authenticated, proofFor, sameSecret, sessionCookie } from './auth.ts';
+import { CHALLENGE_RE, KEY_PROTOCOL, accessToken, authenticated, isNonce, keyCredential, newNonce, proofFor, sameSecret, sessionCookie } from './auth.ts';
 
 /** how long a newcomer waits for the owner to close before it is told `occupied` (R-M7-6) */
 export const TAKEOVER_GRACE_MS = 700;
@@ -71,6 +71,8 @@ export async function startServer(o: {
    * on (see auth.ts). There is deliberately no CLI flag or env var for this.
    */
   insecureNoAuth?: boolean;
+  /** this launch's nonce (public; auth.ts): the launcher makes it so a relaunch keeps it. Default: a fresh one */
+  nonce?: string;
   /** one tab at a time (R-M7-5); default true. Tests that need several live sockets pass false */
   oneTab?: boolean;
   /** tests shorten the reload grace (R-M7-6) and the heartbeat (R-M7-7) */
@@ -115,7 +117,8 @@ export async function startServer(o: {
     const codeChanged = codeChecker({ repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..') });
     // the access token: read once at start (a rotated file takes effect at the next start). Auth is on unless a test says no
     const token = o.insecureNoAuth ? null : accessToken();
-    const authorize = token === null ? undefined : (req: http.IncomingMessage) => authenticated(req.headers, token, ownPort);
+    const nonce = o.nonce !== undefined && isNonce(o.nonce) ? o.nonce : newNonce();
+    const authorize = token === null ? undefined : (req: http.IncomingMessage, write: boolean) => authenticated(req.headers, token, ownPort, nonce, write);
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -177,7 +180,7 @@ export async function startServer(o: {
         }
         if (token === null) return plain(200, '{"ok":true}', { 'content-type': 'application/json; charset=utf-8' });
         if (typeof given !== 'string' || !sameSecret(given, token)) return plain(401, 'unauthorized');
-        plain(200, '{"ok":true}', { 'content-type': 'application/json; charset=utf-8', 'set-cookie': sessionCookie(token, ownPort), 'cache-control': 'no-store' });
+        plain(200, JSON.stringify({ ok: true, key: keyCredential(token, ownPort, nonce) }), { 'content-type': 'application/json; charset=utf-8', 'set-cookie': sessionCookie(token, ownPort, nonce), 'cache-control': 'no-store' });
       });
     };
     // GET /hello?c=<hex>: the one thing a helper may ask before it trusts a port. Answers only the proof that this server holds the
@@ -191,7 +194,7 @@ export async function startServer(o: {
       const c = new URL(req.url ?? '/', 'http://x').searchParams.get('c') ?? '';
       if (token === null || !CHALLENGE_RE.test(c)) return plain(400, 'bad request');
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(JSON.stringify({ proof: proofFor(token, ownPort, c) }));
+      res.end(JSON.stringify({ proof: proofFor(token, ownPort, nonce, c), n: nonce }));
     };
     const server = http.createServer(httpHandler({
       hub,
@@ -243,19 +246,21 @@ export async function startServer(o: {
       info: () => {
         const { id, root, title, model } = manager.info();
         // busy and clients: for another window's Settings → Windows
-        return { root, session: id, title, model, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend?.available() ?? false };
+        return { root, session: id, title, model, keyRequired: token !== null, supervised: supervised(), codeChanged: codeChanged(), busy: manager.busy(), clients: hub.clients(), blender: blend?.available() ?? false };
       },
     }));
     const switchFailed = (e: unknown) => reportError(hub, e instanceof SwitchError ? e.where : 'switch', e);
     const wss = new WebSocketServer({
       server,
+      // the page's key travels as the `nb.<key>` subprotocol (never in the URL); echo it or the browser drops the socket
+      handleProtocols: (protocols) => [...protocols].find((p) => p.startsWith(KEY_PROTOCOL)) ?? false,
       verifyClient: ({ req }, done) => {
         const origin = req.headers.origin;
         const ok = isAllowedHost(req.headers.host, allowedHosts)
           && (origin === undefined || allowedOrigins.includes(origin));
         // an unset Origin (a script, a helper) is let in only with valid auth, and so is every browser page
         if (!ok) done(false, 403, 'forbidden');
-        else if (authorize && !authorize(req)) done(false, 401, 'unauthorized');
+        else if (authorize && !authorize(req, true)) done(false, 401, 'unauthorized');
         else done(true);
       },
     });

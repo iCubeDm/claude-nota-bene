@@ -14,6 +14,7 @@ export function defaultSocketUrl(loc: Location | URL): string {
  * `url` may be a function: read at every (re)connect, so a retry can carry what changed since (`&passive=1`).
  * `refused` (optional) tells a socket the server turned away for lack of a login from one that failed for any other reason (a
  * browser shows both as a plain close): asked when a socket closed before its first frame. True stops the retries.
+ * `protocols` carries the page's key (the `nb.<key>` subprotocol: never in the URL).
  */
 export function connect(
   url: string | (() => string),
@@ -21,6 +22,7 @@ export function connect(
   onState: (s: SocketState) => void,
   WS: typeof WebSocket = WebSocket,
   refused?: () => Promise<boolean>,
+  protocols?: () => string[],
 ): Required<Connection> {
   let ws: WebSocket | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -29,7 +31,7 @@ export function connect(
 
   const open = () => {
     timer = null;
-    const sock = new WS(typeof url === 'function' ? url() : url);
+    const sock = new WS(typeof url === 'function' ? url() : url, protocols?.() ?? []);
     ws = sock;
     let gotFrame = false;
     // not `open` on the WebSocket's open: a socket is attached only when the server's replay arrives. A newcomer in the

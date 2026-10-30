@@ -31,7 +31,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { accessToken, verifiedBearer } from '../server/src/auth.ts';
+import { accessToken, newNonce, proveListener } from '../server/src/auth.ts';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
 import {
@@ -46,6 +46,7 @@ const MAIN = path.join(REPO, fs.existsSync(path.join(REPO, 'server/src/main.js')
 const USAGE = 'Usage: nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]\n'
   + '       nota-bene --find DIR [--scan] | --last DIR | --url PORT | --front PORT\n'
   + '       nota-bene --help | --version';
+const DEV_BACKEND_PORT = 4780; // `npm run dev`'s server (scripts/dev.mjs, web/vite.config.ts)
 const RESTART = 75;
 const LISTEN_FAILED = 98; // server/src/main.ts LISTEN_FAILED
 const CLEAN_EXITS = new Set([0, 130, 143]);
@@ -404,11 +405,14 @@ const OPEN_PAGE_KEEP_MS = 30_000;
 /**
  * The page the browser is opened on: `open URL` would put the token in argv, where `ps` shows it to every user. So the
  * browser gets a file in the state dir (dir 700, file 600; only this user can read it, as the token file itself) that
- * redirects to the login URL. Removed shortly after, and older ones are swept at each write.
+ * redirects to the login URL. Removed 30 s after if this process is still running; whatever is left (a launcher that exited first) is swept at the next write once it is over 10 minutes old, so a page can outlive its launch by a while (same mode and trust as the token file).
  */
 export function writeOpenPage(base) {
   const dir = path.join(stateDir(), 'open');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(dir, 0o700); // best effort, as the state dir
+  } catch { /* not ours */ }
   for (const n of fs.readdirSync(dir)) {
     try {
       if (Date.now() - fs.statSync(path.join(dir, n)).mtimeMs > 10 * 60_000) fs.rmSync(path.join(dir, n), { force: true });
@@ -569,8 +573,12 @@ async function supervise(o, autoPort, release, state) {
   };
   let first = true;
   let retried = false;
+  // this launch's nonce (public; server/src/auth.ts): every server this launcher starts or relaunches gets the same one, so a
+  // restart keeps open tabs logged in while a value captured from an earlier launch is dead
+  const nonce = newNonce();
   for (;;) {
     const env = serverEnv(process.env, process.pid);
+    env.NOTA_BENE_NONCE = nonce;
     delete env.NOTA_BENE_AUTOPORT;
     delete env.NOTA_BENE_LOCKED;
     const c = spawn(process.execPath, [MAIN, ...serverArgs({ ...o, dir }, port, !first)], {
@@ -690,10 +698,19 @@ async function main(argv) {
         return 2;
       }
       // the URL (and the page --front opens) carries the raw token in its fragment, which the page's own script can read: only a
-      // listener that proved it holds the token (GET /hello) gets it. The dev server (a localhost URL) cannot prove anything
-      const m = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(base);
-      if (m && !(await verifiedBearer(Number(m[1]), 1500))) {
-        say(`nothing on port ${m[1]} proved it is a Nota Bene window of this state dir`);
+      // listener that proved it holds the token (GET /hello) gets it, whatever the URL form. A localhost URL is the dev page (Vite,
+      // which proxies /hello to the backend, whose proof is bound to the backend's port): the backend must prove itself directly
+      // and so must the page's port through the proxy. A program that relays /hello to the real backend still passes; that is
+      // dev only, and what a proxy is
+      const m = /^http:\/\/(127\.0\.0\.1|localhost):(\d+)$/.exec(base);
+      const dev = m[1] === 'localhost';
+      const port = Number(m[2]);
+      const proved = dev
+        ? (await proveListener({ dial: DEV_BACKEND_PORT, timeoutMs: 1500 })) !== null
+          && (await proveListener({ dial: port, bound: DEV_BACKEND_PORT, host: 'localhost', timeoutMs: 1500 })) !== null
+        : (await proveListener({ dial: port, timeoutMs: 1500 })) !== null;
+      if (!proved) {
+        say(`nothing on ${m[1]}:${port} proved it is a Nota Bene ${dev ? `dev page (backend on ${DEV_BACKEND_PORT})` : 'window'} of this state dir`);
         return 1;
       }
       if (o.url !== undefined) process.stdout.write(`${loginUrl(base)}\n`);

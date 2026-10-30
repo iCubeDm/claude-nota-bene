@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { MODES, type Mode } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
+import { apiFetch } from '@/net/auth.ts';
 import { ConfirmDialog } from '@/controls/ConfirmDialog.tsx';
 import { kb } from '@/controls/SessionPicker.tsx';
 import { getLang, chooseLang, LANGS, t as tNow, useT, type Lang } from '@/i18n/index.ts';
@@ -29,7 +30,7 @@ async function getJson<T>(url: string): Promise<T> {
   return (await r.json()) as T;
 }
 const postJson = (url: string, body: unknown) =>
-  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  apiFetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 /** One load per activation; `reload` after an action. A failure is shown in the section, never thrown. */
 function useLoad<T>(url: string, active: boolean): { data: T | null; error: string | null; reload: () => void } {

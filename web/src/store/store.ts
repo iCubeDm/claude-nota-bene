@@ -1,7 +1,7 @@
 import { configureStore, createAction, createListenerMiddleware, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, useStore, type TypedUseSelectorHook } from 'react-redux';
 import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
-import { refusedForAuth } from '../net/auth.ts';
+import { refusedForAuth, socketProtocols } from '../net/auth.ts';
 import { connect as realConnect, type Connection, type SocketState } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
@@ -116,7 +116,7 @@ export function makeStore(o: {
   connect?: (url: string | (() => string), onEvent: (ev: ServerEvent) => void, onState: (s: SocketState) => void) => Connection;
   pip?: PipApi;
 }) {
-  const connectFn = o.connect ?? ((u, e, st) => realConnect(u, e, st, WebSocket, refusedForAuth));
+  const connectFn = o.connect ?? ((u, e, st) => realConnect(u, e, st, WebSocket, refusedForAuth, socketProtocols));
   // the server recognises a reconnect of the owning tab by it: no grace, no occupied (M7-15 fix round 1)
   const tabId = newTabId();
   const baseUrl = `${o.url}${o.url.includes('?') ? '&' : '?'}tab=${tabId}`;

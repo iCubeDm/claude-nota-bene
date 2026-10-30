@@ -1,8 +1,35 @@
 // The page's side of the local access token (server/src/auth.ts). A window is opened on `/#t=<token>`: the fragment never
 // reaches a server, a proxy or a log. The page reads it, takes it out of the address bar and the history entry, and trades
-// it for an HttpOnly cookie through POST /auth. After that every request and the socket carry the cookie by themselves.
+// it for an HttpOnly cookie through POST /auth, which also returns the page's key. The cookie (sent to every port on 127.0.0.1,
+// so it opens only GET routes) goes along by itself; the key stays in localStorage (origin-scoped, port included) and is sent
+// by `apiFetch` (every non-GET request) and as the `nb.<key>` WebSocket subprotocol (never in the URL): both needed to write.
 
+export const KEY_STORAGE = 'nb.key';
+export const KEY_HEADER = 'x-nota-bene-key';
 const FRAGMENT = /^#t=([0-9a-f]{64})$/;
+
+export function getKey(): string | null {
+  try {
+    return localStorage.getItem(KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+/** `fetch` for anything that is not a plain GET/HEAD: the same request with the page's key (the one place that adds it). */
+export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}, fetchFn: typeof fetch = fetch): Promise<Response> {
+  const key = getKey();
+  if (!key) return fetchFn(input, init);
+  const headers = new Headers(init.headers);
+  headers.set(KEY_HEADER, key);
+  return fetchFn(input, { ...init, headers });
+}
+
+/** The WebSocket subprotocols that carry the key (empty without one). */
+export const socketProtocols = (): string[] => {
+  const key = getKey();
+  return key ? [`nb.${key}`] : [];
+};
 
 /** Logs in with the token of the URL fragment, if there is one. True when the server set the cookie. Never throws. */
 export async function loginFromFragment(loc: Location = location, hist: History = history, fetchFn: typeof fetch = fetch): Promise<boolean> {
@@ -12,16 +39,30 @@ export async function loginFromFragment(loc: Location = location, hist: History 
   hist.replaceState(null, '', loc.pathname + loc.search);
   try {
     const r = await fetchFn('/auth', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: m[1] }) });
-    return r.ok;
+    if (!r.ok) return false;
+    const j = (await r.json().catch(() => null)) as { key?: unknown } | null;
+    if (j && typeof j.key === 'string') {
+      try {
+        localStorage.setItem(KEY_STORAGE, j.key);
+      } catch { /* no storage: the cookie reads, the socket will say so */ }
+    }
+    return true;
   } catch {
     return false;
   }
 }
 
-/** The server answers, and says this page is not logged in (401). A server that is down or restarting is not that. */
+/**
+ * The server answers and says this page cannot write: not logged in (401), or logged in by cookie but without the key (cleared
+ * storage; the server says `keyRequired`). A server that is down or restarting is neither; an older server has no `keyRequired`.
+ */
 export async function refusedForAuth(fetchFn: typeof fetch = fetch): Promise<boolean> {
   try {
-    return (await fetchFn('/info', { cache: 'no-store' })).status === 401;
+    const r = await fetchFn('/info', { cache: 'no-store' });
+    if (r.status === 401) return true;
+    if (!r.ok) return false;
+    const j = (await r.json().catch(() => null)) as { keyRequired?: unknown } | null;
+    return j?.keyRequired === true && !getKey();
   } catch {
     return false;
   }

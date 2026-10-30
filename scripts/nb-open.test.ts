@@ -39,6 +39,7 @@ beforeAll(() => {
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 const argv = process.argv.slice(2);
+if (argv[0] === '--front' && process.env.STUB_FRONT_FAIL) process.exit(1);
 if (['--find', '--last', '--url', '--front'].includes(argv[0])) {
   const r = spawnSync(process.execPath, [process.env.STUB_REAL_BIN, ...argv], { stdio: 'inherit' });
   process.exit(r.status ?? 1);
@@ -49,6 +50,7 @@ if (process.env.STUB_FAIL) {
   process.exit(1);
 }
 process.stdout.write((process.env.STUB_OUT || 'opened http://127.0.0.1:4795') + '\\n');
+process.exit(Number(process.env.STUB_EXIT || 0));
 `);
   for (const [name, target] of [['stub-skills', path.join(tmp, 'app/plugin/skills/nb')], ['real-skills', SKILL]] as const) {
     fs.mkdirSync(path.join(tmp, name));
@@ -209,7 +211,7 @@ async function fakeWindow(port: number, root: string): Promise<void> {
   const s = http.createServer((req, res) => {
     // proves itself as a window of this state dir would (the launcher sends nothing before it does)
     const m = /^\/hello\?c=([0-9a-f]+)$/.exec(req.url ?? '');
-    if (m) res.setHeader('content-type', 'application/json').end(JSON.stringify({ proof: proofFor(tokenOf(), port, m[1]!) }));
+    if (m) res.setHeader('content-type', 'application/json').end(JSON.stringify({ proof: proofFor(tokenOf(), port, 'f0'.repeat(16), m[1]!), n: 'f0'.repeat(16) }));
     else if (req.url === '/info') res.setHeader('content-type', 'application/json').end(JSON.stringify({ root, session: null }));
     else res.writeHead(404).end();
   });
@@ -376,6 +378,24 @@ describe('an existing window', () => {
     expect(launches()).toEqual([]);
   });
 
+  it('a --front that fails is not reported as "brought to front": it says how to get a login link', async () => {
+    await fakeWindow(4792, project);
+    register(4792, project, process.pid);
+    const r = await nb('', { env: { STUB_FRONT_FAIL: '1' } });
+    expect(r.out).toBe(`NB: already open at ${plainUrl(4792)} (no browser could be opened from here: run \`nota-bene --url 4792\` in a terminal for a login link).\n`);
+    expect(r.out).not.toContain('brought to front');
+    expect(r.out).not.toContain('#t=');
+  });
+
+  it('the launcher\'s failure line is relayed without any #t= fragment', async () => {
+    const tok = 'cd'.repeat(32);
+    const r = await nb('', { env: { STUB_OUT: `opened http://127.0.0.1:4795/#t=${tok}`, STUB_EXIT: '3' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('the launcher failed (exit code 3)');
+    expect(r.out).not.toContain(tok);
+    expect(r.out).not.toContain('#t=');
+  });
+
   it('stale registry entries are skipped (dead pid, port now serving another folder) and a window is launched', async () => {
     const dead = execFileSync(process.execPath, ['-e', 'console.log(process.pid)'], { encoding: 'utf8' }).trim();
     register(4791, project, Number(dead));
@@ -420,7 +440,7 @@ describe('the environment', () => {
     register(4792, project, process.pid);
     const r = await nb('', { env: { PATH: sandbox() } });
     expect(r.code).toBe(0);
-    expect(r.out).toBe(`NB: already open at ${plainUrl(4792)} (open it in your browser).\n`);
+    expect(r.out).toBe(`NB: already open at ${plainUrl(4792)} (no browser could be opened from here: run \`nota-bene --url 4792\` in a terminal for a login link).\n`);
   });
 });
 

@@ -88,7 +88,7 @@ function seedFiles(dir) {
 const child = spawn(
   process.execPath,
   [path.join(root, 'server/src/main.ts'), project, '--port', port, '--fake', path.join(root, 'server/test/fixtures', `${fixture}.json`)],
-  { cwd: root, env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_EXPERIMENTAL_3D: fixture === 'files' ? '1' : '0' }, stdio: 'inherit' },
+  { cwd: root, env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: createHash('sha256').update(`nota-bene e2e nonce ${fixture}`).digest('hex').slice(0, 32), NOTA_BENE_EXPERIMENTAL_3D: fixture === 'files' ? '1' : '0' }, stdio: 'inherit' },
 );
 
 let done = false;

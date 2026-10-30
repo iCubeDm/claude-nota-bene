@@ -52,7 +52,8 @@ export function httpHandler(o: {
    * (every `extra` route and `/info`) needs `authorize`; undefined = no check (tests only, see startServer).
    */
   open?: Record<string, RequestListener>;
-  authorize?: (req: Parameters<RequestListener>[0]) => boolean;
+  /** `write`: any method other than GET/HEAD (the socket asks with write too) */
+  authorize?: (req: Parameters<RequestListener>[0], write: boolean) => boolean;
 }): RequestListener {
   const root = path.resolve(o.webDist);
 
@@ -101,7 +102,7 @@ export function httpHandler(o: {
       const prefix = PREFIX_ROUTES.find((p) => rawPath.startsWith(p));
       const route = o.extra?.[prefix ?? rawPath];
       // data is behind the login; the static app shell below is public (it holds no secrets). /control/ has its own token
-      if ((route || rawPath === '/info') && !control && o.authorize && !o.authorize(req)) {
+      if ((route || rawPath === '/info') && !control && o.authorize && !o.authorize(req, req.method !== 'GET' && req.method !== 'HEAD')) {
         text(res, 401, 'unauthorized');
         return;
       }

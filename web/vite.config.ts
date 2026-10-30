@@ -42,7 +42,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      ...Object.fromEntries(['/info', '/auth', '/file', '/tree', '/complete', '/attach', '/sources', '/git-status', '/marks', '/sessions', '/restart-server', '/system', '/history', '/subagent', '/task-output', '/model'].map((p) => [p, backend])),
+      ...Object.fromEntries(['/info', '/auth', '/hello', '/file', '/tree', '/complete', '/attach', '/sources', '/git-status', '/marks', '/sessions', '/restart-server', '/system', '/history', '/subagent', '/task-output', '/model'].map((p) => [p, backend])),
       '/ws': { ...backend, ws: true },
     },
   },
