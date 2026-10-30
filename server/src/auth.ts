@@ -4,7 +4,7 @@
 // first launches agree). It never travels in argv, env or a log: the server and the helpers read the file.
 //
 // Everything a client holds is derived from the token, the port AND a per-launch nonce (the launcher makes it and passes it
-// to every server it starts, so exit 75 and crash relaunches keep it; an unsupervised server makes its own). The nonce is
+// to every server it starts: exit 75 keeps it, a crash relaunch takes a new one; an unsupervised server makes its own). The nonce is
 // public, not a secret. A value captured from one launch is dead at the next, and one captured for a port is dead on any
 // other. Derived values, each with its own label:
 //   cookie  `nb_<port>`      HttpOnly, opens only `/file` and `/attach/<id>` (what <img>, <video> and <audio> load without
@@ -12,7 +12,7 @@
 //                            anything else (not /info, not the socket, not a write)
 //   key                      what the page keeps in localStorage (origin-scoped, port included); with the cookie it opens
 //                            every other route and /ws (header `x-nota-bene-key`, or the `nb.<key>` WebSocket subprotocol).
-//                            A new route needs the key unless it is added to COOKIE_ROUTES on purpose
+//                            A new route needs the key unless `cookieRoute` is changed on purpose
 //   login                    what the URL fragment `#t=` carries and POST /auth accepts (never the raw token): one launch only
 //   helper bearer            what a helper sends as Authorization: both tiers
 //   proof                    what GET /hello answers for a challenge: a helper sends nothing (not even a derived value)
@@ -23,7 +23,9 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import fs from 'node:fs';
 import type { IncomingHttpHeaders } from 'node:http';
 import path from 'node:path';
-import { stateDir } from './state.ts';
+import { SecretError, stateDir } from './state.ts';
+
+export { SecretError };
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 /** how long a browser keeps its login (a year); deleting the token file rotates it at the next server start */
@@ -44,18 +46,18 @@ function readSecret(file: string): string | null {
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return null;
-    if (code === 'ELOOP') throw new Error(`${file} is a symbolic link; refusing to read it. Delete it to make a new token`);
-    throw new Error(`cannot read ${file}: ${(e as Error).message}; ${fix}`);
+    if (code === 'ELOOP') throw new SecretError(`${file} is a symbolic link; refusing to read it. Delete it to make a new token`);
+    throw new SecretError(`cannot read ${file}: ${(e as Error).message}; ${fix}`);
   }
   try {
     const st = fs.fstatSync(fd);
-    if (!st.isFile()) throw new Error(`${file} is not a regular file; refusing to read it. Delete it to make a new token`);
+    if (!st.isFile()) throw new SecretError(`${file} is not a regular file; refusing to read it. Delete it to make a new token`);
     if (process.getuid && st.uid !== process.getuid()) {
-      throw new Error(`${file} belongs to another user (uid ${st.uid}); refusing to use it. Delete it to make a new token`);
+      throw new SecretError(`${file} belongs to another user (uid ${st.uid}); refusing to use it. Delete it to make a new token`);
     }
-    if (st.mode & 0o077) throw new Error(`${file} is readable by other users (mode ${(st.mode & 0o777).toString(8)}); ${fix}`);
+    if (st.mode & 0o077) throw new SecretError(`${file} is readable by other users (mode ${(st.mode & 0o777).toString(8)}); ${fix}`);
     const t = fs.readFileSync(fd, 'utf8').trim();
-    if (!TOKEN_RE.test(t)) throw new Error(`${file} does not hold a token (64 hex characters); ${fix}`);
+    if (!TOKEN_RE.test(t)) throw new SecretError(`${file} does not hold a token (64 hex characters); delete it to make a new token (every open window then has to be reopened)`);
     return t;
   } finally {
     fs.closeSync(fd);
@@ -80,7 +82,7 @@ export function stateSecret(name: string): string {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     const other = readSecret(file); // the other process's (throws if what is there is bad)
     if (other) return other;
-    throw new Error(`${file} vanished while it was being created; try again`);
+    throw new SecretError(`${file} vanished while it was being created; try again`);
   } finally {
     fs.rmSync(tmp, { force: true });
   }
@@ -122,8 +124,8 @@ export const KEY_PROTOCOL = 'nb.';
  * missing proof means "not ours": the caller sends nothing. Fresh challenge per call, constant-time comparison.
  */
 export async function proveListener(o: { dial: number; bound?: number; host?: string; timeoutMs: number; fetchFn?: typeof fetch }): Promise<string | null> {
+  const token = accessToken(); // a refused secret is the user's to fix: it throws, it is never "not ours"
   try {
-    const token = accessToken();
     const c = randomBytes(16).toString('hex');
     const r = await (o.fetchFn ?? fetch)(`http://${o.host ?? '127.0.0.1'}:${o.dial}/hello?c=${c}`, { signal: AbortSignal.timeout(o.timeoutMs), redirect: 'error' });
     if (!r.ok) return null;

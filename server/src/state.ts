@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+/** A secret or the state folder is unusable (wrong owner, loose mode, ...): the user has to act. Never swallowed as "not ours". */
+export class SecretError extends Error {}
+
 const tightened = new Set<string>();
 
 /** The state dir. It holds the access token, so it is private to the user: created 700, and tightened to 700 once per process. */
@@ -10,7 +13,7 @@ export function stateDir(): string {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (!tightened.has(dir)) {
     if (process.getuid && fs.statSync(dir).uid !== process.getuid()) {
-      throw new Error(`the state folder ${dir} belongs to another user; refusing to use it. Point NOTA_BENE_HOME at a folder of your own`);
+      throw new SecretError(`the state folder ${dir} belongs to another user; refusing to use it. Point NOTA_BENE_HOME at a folder of your own`);
     }
     tightened.add(dir);
     try {

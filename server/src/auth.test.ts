@@ -666,3 +666,43 @@ describe('small closings', () => {
     expect(await at('/wsx')).toBe('refused');
   });
 });
+
+describe('a refused secret stops the start before the agent exists', () => {
+  const touched = () => {
+    let n = 0;
+    const base = fakeBackend([]);
+    return { backend: new Proxy(base, { get(t, k, r) { n++; return Reflect.get(t, k, r); } }), count: () => n };
+  };
+
+  it('a loose token file: startServer rejects with the message, the backend is never touched', async () => {
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'token'), 'a'.repeat(64), { mode: 0o644 });
+    fs.chmodSync(path.join(home, 'token'), 0o644);
+    const b = touched();
+    await expect(startServer({ cwd: path.join(tmp, 'proj'), port: 0, backend: b.backend, webDist: path.join(tmp, 'dist') })).rejects.toThrow(/readable by other users/);
+    expect(b.count()).toBe(0);
+  });
+
+  it('a bad control-token too', async () => {
+    accessToken();
+    fs.writeFileSync(path.join(home, 'control-token'), 'junk', { mode: 0o600 });
+    const b = touched();
+    await expect(startServer({ cwd: path.join(tmp, 'proj'), port: 0, backend: b.backend, webDist: path.join(tmp, 'dist') })).rejects.toThrow(/control-token/);
+    expect(b.count()).toBe(0);
+  });
+
+  it('proveListener and the probes let the error through; the garbage-file message says delete, not chmod', async () => {
+    const { SecretError } = await import('./auth.ts');
+    const { probeInfo } = await import('./windows.ts');
+    const { probeWindow } = await import('./system.ts');
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'token'), 'junk', { mode: 0o600 });
+    await expect(proveListener({ dial: 1, timeoutMs: 100 })).rejects.toBeInstanceOf(SecretError);
+    await expect(verifiedBearer(1, 100)).rejects.toBeInstanceOf(SecretError);
+    await expect(probeInfo(1)).rejects.toBeInstanceOf(SecretError);
+    await expect(probeWindow(1)).rejects.toBeInstanceOf(SecretError);
+    const err = (() => { try { accessToken(); return null; } catch (e) { return e as Error; } })();
+    expect(err!.message).toMatch(/delete it/);
+    expect(err!.message).not.toMatch(/chmod/);
+  });
+});

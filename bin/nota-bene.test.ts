@@ -720,16 +720,43 @@ describe('the access token', () => {
     expect(argsOf(w.pid)).not.toContain(token);
   }, 40000);
 
-  it('the detach log is not written through a symlink and is created 600', async () => {
-    const victim = path.join(tmp, 'victim');
-    fs.writeFileSync(victim, 'keep');
-    fs.symlinkSync(victim, path.join(tmp, 'nota-bene-4793.log'));
-    const other = path.join(tmp, 'project-b');
-    fs.mkdirSync(other);
-    const d = spawnSync(process.execPath, [BIN, other, '--port', '4793', '--detach', '--fake', FAKE, '--no-open'], { env: env(), encoding: 'utf8', timeout: 25000 });
-    expect(d.status).not.toBe(0);
-    expect(fs.readFileSync(victim, 'utf8')).toBe('keep');
-  }, 40000);
+  describe('the detach log', () => {
+    const logPath = () => path.join(tmp, 'nota-bene-4793.log');
+    const detachOther = () => {
+      const other = path.join(tmp, 'project-b');
+      fs.mkdirSync(other, { recursive: true });
+      return spawnSync(process.execPath, [BIN, other, '--port', '4793', '--detach', '--fake', FAKE, '--no-open'], { env: env(), encoding: 'utf8', timeout: 25000 });
+    };
+
+    it('an old 644 log becomes 600 and is emptied', async () => {
+      fs.writeFileSync(logPath(), 'STALE-LOG-LINE\n', { mode: 0o644 });
+      fs.chmodSync(logPath(), 0o644);
+      const d = detachOther();
+      expect(d.status, d.stderr).toBe(0);
+      expect(fs.statSync(logPath()).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(logPath(), 'utf8')).not.toContain('STALE-LOG-LINE');
+    }, 40000);
+
+    it('a symlink is not followed: the window still starts, there is no log, one line says so', async () => {
+      const victim = path.join(tmp, 'victim');
+      fs.writeFileSync(victim, 'keep');
+      fs.symlinkSync(victim, logPath());
+      const d = detachOther();
+      expect(d.status, d.stderr).toBe(0);
+      expect(d.stdout).toMatch(/^opened http:\/\/127\.0\.0\.1:4793\/#t=[0-9a-f]{64}\n$/);
+      expect(d.stderr).toMatch(/no log: cannot open .*nota-bene-4793\.log/);
+      expect(fs.readFileSync(victim, 'utf8')).toBe('keep');
+    }, 40000);
+
+    it('a FIFO does not hang --detach', async () => {
+      execFileSync('mkfifo', [logPath()]);
+      const t0 = Date.now();
+      const d = detachOther();
+      expect(Date.now() - t0).toBeLessThan(20000);
+      expect(d.status, d.stderr).toBe(0);
+      expect(d.stderr).toMatch(/no log:/);
+    }, 40000);
+  });
 
   it('--url prints the login URL (the launch\'s login value, never the token); --front opens a page in the state dir (mode 600), never the URL in argv', async () => {
     launch(['--port', '4791']);
@@ -956,4 +983,61 @@ describe('the launch nonce and the two tiers, through the real launcher', () => 
       for (const s of imps) { s.closeAllConnections(); await new Promise((r) => s.close(r)); }
     }
   }, 30000);
+});
+
+describe('a refused secret is reported once, at once, and never as a crash loop', () => {
+  const seedLoose = () => { fs.writeFileSync(path.join(home, 'token'), 'a'.repeat(64), { mode: 0o644 }); fs.chmodSync(path.join(home, 'token'), 0o644); };
+
+  it('the launcher exits 1 before spawning anything, with the one message once', async () => {
+    seedLoose();
+    const r = launch(['--port', '4791']);
+    expect(await r.exited).toBe(1);
+    const err = r.err();
+    expect(err).toContain(path.join(home, 'token'));
+    expect(err).toMatch(/readable by other users/);
+    expect(err).toMatch(/chmod 600/);
+    expect(err).not.toMatch(/relaunching|crash/);
+    expect(windows()).toEqual({});
+    expect(err.trim().split('\n')).toHaveLength(1);
+  }, 20000);
+
+  it('control-token too', async () => {
+    fs.writeFileSync(path.join(home, 'control-token'), 'junk', { mode: 0o600 });
+    const r = launch(['--port', '4791']);
+    expect(await r.exited).toBe(1);
+    expect(r.err()).toMatch(/control-token.*does not hold a token/);
+  }, 20000);
+
+  it('--find, --find --scan, --url and --front report the secret error (exit 3), not "not found" or "not proved"', () => {
+    seedLoose();
+    for (const args of [['--find', project], ['--find', project, '--scan'], ['--url', '4791'], ['--front', '4791'], ['--url', 'http://localhost:5173']]) {
+      const r = bin(args);
+      expect([args.join(' '), r.status]).toEqual([args.join(' '), 3]);
+      expect(r.stderr).toMatch(/readable by other users/);
+      expect(r.stdout).toBe('');
+    }
+  });
+
+  it('a refused open-source of the token never reaches a window either (probeInfo throws)', async () => {
+    const { probeInfo } = await import('../server/src/windows.ts');
+    seedLoose();
+    const prev = process.env.NOTA_BENE_HOME;
+    process.env.NOTA_BENE_HOME = home;
+    try {
+      await expect(probeInfo(4791)).rejects.toThrow(/readable by other users/);
+    } finally {
+      if (prev === undefined) delete process.env.NOTA_BENE_HOME; else process.env.NOTA_BENE_HOME = prev;
+    }
+  });
+
+  it('an opener that exits non-zero makes --front fail', async () => {
+    launch(['--port', '4791']);
+    await waitFor(() => windows()['4791']);
+    const d = path.join(tmp, 'badopener');
+    fs.mkdirSync(d);
+    for (const n of ['open', 'xdg-open']) { fs.writeFileSync(path.join(d, n), '#!/bin/sh\nexit 1\n'); fs.chmodSync(path.join(d, n), 0o755); }
+    const f = bin(['--front', '4791'], { PATH: `${d}:${process.env.PATH}` });
+    expect(f.status).toBe(1);
+    expect(f.stderr).toMatch(/nota-bene --url 4791/);
+  }, 20000);
 });

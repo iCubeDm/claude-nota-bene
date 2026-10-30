@@ -43,6 +43,11 @@ case "$DATA" in *'${'*) DATA="" ;; esac   # an unsubstituted ${CLAUDE_PLUGIN_DAT
 PLAN=""
 [ "${1:-}" = --plan ] && PLAN=1
 bail() { echo "$1"; if [ -n "$PLAN" ]; then exit 0; fi; exit 1; }
+# the launcher's `--find` exits 3 when a secret file (the access token) is refused; its stderr says which and how to fix it
+FERR=""
+ferr_init() { [ -n "$FERR" ] || { FERR="$(mktemp "${TMPDIR:-/tmp}/nb-find.XXXXXX")"; trap 'rm -f "$FERR"' EXIT; }; }
+secret_error() { sed -e 's/#t=[0-9a-fA-F]*//g' -e '1{s/^nota-bene: //;s/^/NB: /;}' "$FERR"; rm -f "$FERR"; }
+bail_rc() { if [ -n "$PLAN" ]; then exit 0; fi; exit 1; }
 
 PKG=nota-bene-ide
 SRC="" BIN="" VER="" MIN_MAJOR=23 MIN_MINOR=6 FIRST_RUN=""
@@ -161,8 +166,12 @@ if [ "${1:-}" = --wait ]; then
     [ -f "$PREFIX/.nb-installed" ] || { echo "NB: the first install is still running after ${ISECS}s - see the background task's output."; exit 1; }
   fi
   for ((i = 0; i < SECS * 2; i++)); do
-    PORT="$(node "$BIN" --find "$WDIR" 2>/dev/null)" && [ -n "$PORT" ] && {
-      echo "NB: opened http://127.0.0.1:$PORT for $WDIR$WNOTE."; exit 0; }
+    ferr_init
+    PORT="$(node "$BIN" --find "$WDIR" 2>"$FERR")"; FRC=$?
+    # 3: a secret file is refused (loose mode, foreign owner, ...): say so now, do not wait out the timeout
+    [ "$FRC" -eq 3 ] && { secret_error; exit 1; }
+    [ "$FRC" -eq 0 ] && [ -n "$PORT" ] && {
+      echo "NB: opened http://127.0.0.1:$PORT for $WDIR$WNOTE."; rm -f "$FERR"; exit 0; }
     sleep 0.5
   done
   echo "NB: the window did not come up in ${SECS}s — see the background task's output."
@@ -209,7 +218,13 @@ bring() { # $1 = port of a window found here: bring it to front ourselves (the l
 # a window already serving this folder: the registry (verified by /info, stale entries pruned), or any port of the range whose
 # /info has this root (a lost registry write; 4780 is the dev server, never a window). The launcher asks, logged in with the
 # port's credential: /info wants one, and a bare curl would have to put the token on a command line.
-[ -z "$FIRST_RUN" ] && { PORT="$(node "$BIN" --find "$DIR" --scan 2>/dev/null)" && [ -n "$PORT" ] && bring "$PORT"; }
+if [ -z "$FIRST_RUN" ]; then
+  ferr_init
+  PORT="$(node "$BIN" --find "$DIR" --scan 2>"$FERR")"; FRC=$?
+  [ "$FRC" -eq 3 ] && { secret_error; bail_rc; }
+  [ "$FRC" -eq 0 ] && [ -n "$PORT" ] && bring "$PORT"
+fi
+[ -n "$FERR" ] && rm -f "$FERR"
 
 ARGS=(--detach) NOTE=""
 if [ "$MODE" = last ]; then
@@ -280,7 +295,7 @@ LINE='^(opened|already-open) (http://127\.0\.0\.1:([0-9]+)(/#t=[0-9a-f]+)?)$'
 if [ $RC -eq 0 ] && [[ "$OUT" =~ $LINE ]]; then
   rm -f "$ERR"
   VERB="${BASH_REMATCH[1]}" PORT="${BASH_REMATCH[3]}"
-  URL="http://127.0.0.1:$PORT"   # the launcher's line carries #t=TOKEN; the skill's output must not
+  URL="http://127.0.0.1:$PORT"   # the launcher's line carries #t=LOGIN; the skill's output must not
   [ -n "$OPENER" ] && FRONTED=1   # the launcher opened (or fronted) the login page itself
   [ "$VERB" = already-open ] && already "$URL"
   T="${TMPDIR:-/tmp}"

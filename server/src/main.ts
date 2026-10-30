@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isNonce } from './auth.ts';
+import { SecretError, isNonce } from './auth.ts';
 import { fakeFromScript } from './agent/fake.ts';
 import { sdkBackend } from './agent/claude/sdk.ts';
 import { startServer } from './server.ts';
@@ -163,6 +163,10 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(self
   // anything starts. Never set it otherwise.
   if (process.env.NOTA_BENE_TEST_CRASH) process.exit(Number(process.env.NOTA_BENE_TEST_CRASH) || 1);
   main().catch((e) => {
+    if (e instanceof SecretError) {
+      console.error(`Nota Bene: ${e.message}`); // one clear line, not a stack: the user has to fix a file
+      process.exit(1);
+    }
     console.error(e);
     process.exit(1);
   });

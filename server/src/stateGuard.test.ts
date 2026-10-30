@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBackend } from './agent/fake.ts';
 import { accessToken } from './auth.ts';
 import { clearSourceCache } from './git.ts';
@@ -125,5 +125,50 @@ describe('a root that contains the state folder', () => {
     const url = await boot(proj);
     expect(await (await get(url, `/file?path=${q('.hidden-ok')}`)).text()).toBe('visible');
     expect(((await (await get(url, '/tree?path=')).json()) as { name: string }[]).map((e) => e.name)).toEqual(['.hidden-ok']);
+  });
+});
+
+describe('the default state folders are denied whatever the current one is', () => {
+  const prevHomeEnv = process.env.HOME;
+  afterEach(() => { if (prevHomeEnv === undefined) delete process.env.HOME; else process.env.HOME = prevHomeEnv; });
+
+  it('~/.nota-bene and ~/.nota-bene-dev stay hidden from a root that contains them, with NOTA_BENE_HOME elsewhere', async () => {
+    const home = path.join(tmp, 'userhome');
+    fs.mkdirSync(path.join(home, '.nota-bene'), { recursive: true });
+    fs.mkdirSync(path.join(home, '.nota-bene-dev'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.nota-bene', 'token'), 'prod-secret');
+    fs.writeFileSync(path.join(home, '.nota-bene-dev', 'token'), 'dev-secret');
+    fs.writeFileSync(path.join(home, 'notes.txt'), 'mine');
+    process.env.HOME = home;
+    process.env.NOTA_BENE_HOME = path.join(tmp, 'somewhere-else');
+    const url = await boot(home);
+    expect(await (await get(url, '/file?path=notes.txt')).text()).toBe('mine');
+    for (const p of ['.nota-bene/token', '.nota-bene-dev/token']) {
+      const r = await get(url, `/file?path=${q(p)}`);
+      expect([p, r.status]).toEqual([p, 403]);
+      expect(await r.text()).not.toMatch(/secret/);
+    }
+    expect(((await (await get(url, '/tree?path=')).json()) as { name: string }[]).map((e) => e.name)).toEqual(['notes.txt']);
+  });
+
+  it('fails closed when the state folder cannot be resolved: nothing is served', async () => {
+    const proj = path.join(tmp, 'proj');
+    fs.mkdirSync(proj);
+    fs.writeFileSync(path.join(proj, 'a.txt'), 'x');
+    process.env.NOTA_BENE_HOME = path.join(tmp, 'state');
+    accessToken();
+    const url = await boot(proj);
+    const real = fs.realpathSync.native;
+    const state = fs.realpathSync.native(process.env.NOTA_BENE_HOME);
+    const spy = vi.spyOn(fs.realpathSync, 'native').mockImplementation(((p: fs.PathLike, o?: unknown) => {
+      if (path.resolve(String(p)) === path.resolve(process.env.NOTA_BENE_HOME!) || String(p) === state) throw Object.assign(new Error('boom'), { code: 'EIO' });
+      return (real as (p: fs.PathLike, o?: unknown) => string)(p, o);
+    }) as never);
+    try {
+      expect((await get(url, '/file?path=a.txt')).status).toBe(403);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await get(url, '/file?path=a.txt')).status).toBe(200);
   });
 });

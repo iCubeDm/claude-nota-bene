@@ -6,7 +6,7 @@
 // without unregistering, and its port reused by another app.
 import fs from 'node:fs';
 import path from 'node:path';
-import { verifiedBearer } from './auth.ts';
+import { SecretError, verifiedBearer } from './auth.ts';
 import { stateDir } from './state.ts';
 
 export type WindowEntry = {
@@ -81,7 +81,8 @@ export async function probeInfo(port: number, timeoutMs = 500): Promise<{ root: 
     const j: unknown = await r.json();
     const root = j && typeof j === 'object' ? (j as { root?: unknown }).root : undefined;
     return typeof root === 'string' ? { root } : null;
-  } catch {
+  } catch (e) {
+    if (e instanceof SecretError) throw e; // not "no window": the user has to fix the token file
     return null;
   }
 }

@@ -2,15 +2,25 @@
 // project root, the symlinks or the source (`src=`) are: a window whose root is $HOME contains `~/.nota-bene`, and a cookie that
 // may read project files must not read the token with it. One check, shared by /file, /tree, /model, /complete and the branch reads.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { stateDir } from './state.ts';
 
-function realState(): string | null {
+/**
+ * Every folder that holds secrets, as real paths: the current state folder and the two default ones (`~/.nota-bene`,
+ * `~/.nota-bene-dev`), whatever NOTA_BENE_HOME is now: a dev window must not serve the production token, nor the other way round.
+ * null when the current one cannot be resolved: the guard then fails closed.
+ */
+function realStates(): string[] | null {
+  let cur: string;
   try {
-    return fs.realpathSync.native(stateDir());
+    cur = fs.realpathSync.native(stateDir());
   } catch {
     return null;
   }
+  const out = new Set([cur]);
+  for (const name of ['.nota-bene', '.nota-bene-dev']) out.add(realish(path.join(os.homedir(), name)));
+  return [...out];
 }
 
 /** The real path of `abs`: its deepest existing ancestor resolved, the missing tail appended. */
@@ -29,29 +39,33 @@ function realish(abs: string): string {
   }
 }
 
-/** A checker with the state folder resolved once (for a loop); true for it and anything under it, through symlinks too. */
+/** A checker with the state folders resolved once (for a loop); true for them and anything under them, through symlinks too. Fails closed. */
 export function stateCheck(): (abs: string) => boolean {
-  const state = realState();
-  if (!state) return () => false;
+  const states = realStates();
+  if (!states) return () => true;
   return (abs) => {
     const real = realish(abs);
-    return real === state || real.startsWith(state + path.sep);
+    return states.some((state) => real === state || real.startsWith(state + path.sep));
   };
 }
 
-/** True when `abs` is the state folder or anything under it (through symlinks too). */
+/** True when `abs` is a state folder or anything under it (through symlinks too). Fails closed. */
 export const underState = (abs: string): boolean => stateCheck()(abs);
 
 /**
- * A predicate on paths relative to `root` ('/'-separated): true for the entries that are the state folder or inside it. Cheap
- * for long lists (one realpath of the root and of the state folder, then string prefixes); false for everything when the state
- * folder is not inside the root.
+ * A predicate on paths relative to `root` ('/'-separated): true for the entries that are a state folder or inside one. Cheap
+ * for long lists (the folders resolved once, then string prefixes); false for everything when none is inside the root. Fails
+ * closed (everything hidden) when the state folder cannot be resolved.
  */
 export function stateRelativeTo(root: string): (rel: string) => boolean {
-  const state = realState();
-  if (!state) return () => false;
-  const rel = path.relative(realish(root), state); // root need not exist (a branch's place in the working tree)
-  if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return () => false;
-  const prefix = rel.split(path.sep).join('/');
-  return (p) => p === prefix || p.startsWith(prefix + '/');
+  const states = realStates();
+  if (!states) return () => true;
+  const realRoot = realish(root); // root need not exist (a branch's place in the working tree)
+  const prefixes: string[] = [];
+  for (const state of states) {
+    const rel = path.relative(realRoot, state);
+    if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) continue;
+    prefixes.push(rel.split(path.sep).join('/'));
+  }
+  return (p) => prefixes.some((prefix) => p === prefix || p.startsWith(prefix + '/'));
 }

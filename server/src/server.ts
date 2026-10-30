@@ -83,6 +83,11 @@ export async function startServer(o: {
   installProcessHandlers();
   hubs.add(hub);
   try {
+    // the secrets first: a refused one (loose mode, foreign owner, ...) must stop the start before the agent is spawned
+    // the access token: read once at start (a rotated file takes effect at the next start). Auth is on unless a test says no
+    const token = o.insecureNoAuth ? null : accessToken();
+    // made at start, never by a request: an unauthenticated /control/* must not be able to create the file
+    const control = controlToken();
     const attachments = new AttachmentStore({ dir: path.join(stateDir(), 'attachments') });
     const archive = new HistoryArchive({ dir: path.join(stateDir(), 'history'), report: (e) => reportError(hub, 'archive', e) });
     const manager = await createSessionManager({
@@ -115,10 +120,6 @@ export async function startServer(o: {
     const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1'
       && process.ppid === Number(process.env.NOTA_BENE_LAUNCHER_PID);
     const codeChanged = codeChecker({ repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..') });
-    // the access token: read once at start (a rotated file takes effect at the next start). Auth is on unless a test says no
-    const token = o.insecureNoAuth ? null : accessToken();
-    // made at start, never by a request: an unauthenticated /control/* must not be able to create the file
-    const control = controlToken();
     const nonce = o.nonce !== undefined && isNonce(o.nonce) ? o.nonce : newNonce();
     const authorize = token === null ? undefined : (req: http.IncomingMessage, needKey: boolean) => authenticated(req.headers, token, ownPort, nonce, needKey);
     const allowedHosts: string[] = []; // filled after listen, once the port is known

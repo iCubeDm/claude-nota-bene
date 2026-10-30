@@ -409,6 +409,33 @@ describe('an existing window', () => {
   });
 });
 
+describe('a refused token file', () => {
+  const seedLoose = () => { fs.writeFileSync(path.join(nbHome, 'token'), 'a'.repeat(64), { mode: 0o644 }); fs.chmodSync(path.join(nbHome, 'token'), 0o644); };
+
+  it('--plan shows the secret error at once (one NB: line, exit 0, no NB-RUN), not a plan that fails later', async () => {
+    seedLoose();
+    fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
+    const r = await sh([stubApp, '--plan', '', SID]);
+    expect(r.code).toBe(0);
+    const lines = r.out.trimEnd().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^NB: .*token is readable by other users.*chmod 600/);
+    expect(r.out).not.toContain('NB-RUN');
+    expect(launches()).toEqual([]);
+  });
+
+  it('without --plan it exits 1 with the same line, and --wait reports it at once instead of waiting out the timeout', async () => {
+    seedLoose();
+    let r = await nb('');
+    expect([r.code, r.out]).toEqual([1, expect.stringMatching(/^NB: .*readable by other users/)]);
+    const t0 = Date.now();
+    r = await sh([stubApp, '--wait', project], { env: { NB_WAIT_SECS: '20' } });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/^NB: .*readable by other users/);
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  });
+});
+
 describe('the environment', () => {
   const OLD = (v: string) => `#!/bin/sh\necho ${v}\n`;
   it.each(['18.19.0', '23.5.1', '9.99.0'])('an old node (%s) is refused with a clear message', async (v) => {

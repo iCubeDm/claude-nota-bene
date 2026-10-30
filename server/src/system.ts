@@ -13,7 +13,7 @@ import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http
 import os from 'node:os';
 import path from 'node:path';
 import { MODES, type Mode } from '@nota-bene/shared';
-import { stateSecret, verifiedBearer } from './auth.ts';
+import { SecretError, stateSecret, verifiedBearer } from './auth.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { readPrefs, setDefaultModePref, setLangPref } from './prefs.ts';
@@ -199,7 +199,8 @@ export async function probeWindow(port: number, timeoutMs = 700): Promise<Window
     if (!r.ok) return null;
     const j = (await r.json()) as WindowInfo;
     return j && typeof j.root === 'string' ? j : null;
-  } catch {
+  } catch (e) {
+    if (e instanceof SecretError) throw e;
     return null;
   }
 }

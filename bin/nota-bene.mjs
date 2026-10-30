@@ -4,16 +4,16 @@
 // package bundles this file and the server to plain JS (scripts/build-package.mjs).
 //
 //   nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
-//   nota-bene --find DIR [--scan]   prints the port of a live window serving DIR (exit 0), or exits 1; --scan also asks
-//                          the other ports of the range (a window whose registry write was lost)
+//   nota-bene --find DIR [--scan]   prints the port of a live window serving DIR (exit 0), or exits 1 (3: a secret file is refused,
+//                          the message says which); --scan also asks the other ports of the range (a lost registry write)
 //   nota-bene --last DIR   prints DIR's saved session id if its transcript still exists (exit 0), or exits 1
-//   nota-bene --url PORT   prints the window's login URL (http://127.0.0.1:PORT/#t=TOKEN), for a second browser
+//   nota-bene --url PORT   prints the window's login URL (http://127.0.0.1:PORT/#t=LOGIN), for a second browser
 //   nota-bene --front PORT brings the window to front in the browser, logged in
 //   --detach prints exactly one line, `opened URL` or `already-open URL` (exit 0), or an error and the log tail (exit 1);
-//   the URL carries the login fragment `#t=TOKEN` (the foreground line and the log never do)
+//   the URL carries the login fragment `#t=LOGIN` (this launch's login value, never the token; the foreground line and the log never do)
 //
-// The access token (server/src/auth.ts) is never put in argv: a browser is opened on a page in the state dir (mode 600) that
-// redirects to the URL with the fragment, and the helpers send a per-port credential read from the token file.
+// The access token (server/src/auth.ts) is never put in argv or a URL: a browser is opened on a page in the state dir (mode 600)
+// that redirects to the login URL, and the helpers send a credential derived after the listener proved it holds the token.
 //
 // One window per folder: a launch takes the folder's lock, then gives way to a window already serving it.
 // A picked port avoids 4780 (dev) and 4790-4795 (smoke, tests) unless NOTA_BENE_PORT_RANGE is set.
@@ -31,7 +31,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { accessToken, loginCredential, newNonce, proveListener } from '../server/src/auth.ts';
+import { SecretError, accessToken, loginCredential, newNonce, proveListener, stateSecret } from '../server/src/auth.ts';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
 import {
@@ -47,6 +47,7 @@ const USAGE = 'Usage: nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] 
   + '       nota-bene --find DIR [--scan] | --last DIR | --url PORT | --front PORT\n'
   + '       nota-bene --help | --version';
 const DEV_BACKEND_PORT = 4780; // `npm run dev`'s server (scripts/dev.mjs, web/vite.config.ts)
+const EXIT_SECRET = 3; // a secret file is refused (loose mode, foreign owner, ...): --find & co. say so instead of "not found"
 const RESTART = 75;
 const LISTEN_FAILED = 98; // server/src/main.ts LISTEN_FAILED
 const CLEAN_EXITS = new Set([0, 130, 143]);
@@ -363,6 +364,7 @@ async function servingWindow(root) {
 // --- helpers for the /nb skill ---------------------------------------------------------------------------------
 
 async function find(dir, scan = false) {
+  accessToken(); // a refused token file is an error to report, not "no window" (nothing may be probed without it)
   const root = realDir(dir);
   const port = scan ? await servingWindow(root) : (await windowFor(root))?.port;
   if (port === undefined) return 1;
@@ -461,18 +463,49 @@ async function openBrowser(base) {
     if (url) target = writeOpenPage(url);
     else say(`nothing on ${base} proved it is this state dir's window; opening it without a login`);
   } catch (e) {
+    if (e instanceof SecretError) throw e;
     say(`cannot write the page that logs the browser in (${e.message}); opening the window without it`);
   }
   const p = spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], { stdio: 'ignore', detached: true });
-  p.on('error', () => {});
+  // true: the opener took it (exit 0, or it did not answer within the bound); false: it failed to start or exited non-zero
   return new Promise((resolve) => {
-    p.on('exit', resolve);
-    p.on('error', resolve);
-    setTimeout(resolve, 3000).unref(); // bounded; the child keeps the loop alive until it hands the page over
+    p.on('exit', (code) => resolve(code === 0));
+    p.on('error', () => resolve(false));
+    setTimeout(() => resolve(true), 3000).unref(); // bounded; the child keeps the loop alive until it hands the page over
   });
 }
 
 const entryOf = (port) => readWindows()[String(port)];
+
+/**
+ * The detached launcher's log in $TMPDIR (a shared /tmp on Linux): opened without following a symlink and without blocking on a
+ * FIFO (a FIFO would hang the open), and used only if it is a regular file of ours; then made 600 (an old 644 log becomes 600) and
+ * emptied. Anything else: no log, one line saying so (stderr; stdout stays the one URL line). Returns the fd or null.
+ */
+export function openLog(log) {
+  let fd;
+  try {
+    fd = fs.openSync(log, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK, 0o600);
+  } catch (e) {
+    say(`no log: cannot open ${log} (${e.code ?? e.message}); the window's output is not kept`);
+    return null;
+  }
+  try {
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || (process.getuid && st.uid !== process.getuid())) {
+      fs.closeSync(fd);
+      say(`no log: ${log} is not a regular file of yours; the window's output is not kept`);
+      return null;
+    }
+    fs.fchmodSync(fd, 0o600);
+    fs.ftruncateSync(fd, 0);
+    return fd;
+  } catch (e) {
+    fs.closeSync(fd);
+    say(`no log: cannot prepare ${log} (${e.code ?? e.message}); the window's output is not kept`);
+    return null;
+  }
+}
 
 /**
  * `--detach`: re-spawn this launcher in its own session with output to the log, wait for its window, print the URL.
@@ -481,18 +514,17 @@ const entryOf = (port) => readWindows()[String(port)];
  */
 async function detach(o, argv, autoPort, buildOutput) {
   const log = path.join(os.tmpdir(), `nota-bene-${o.port}.log`);
-  // mode 600 and no symlink following: $TMPDIR may be a shared /tmp
-  const fd = fs.openSync(log, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
-  if (buildOutput) fs.writeSync(fd, buildOutput);
+  const fd = openLog(log);
+  if (fd !== null && buildOutput) fs.writeSync(fd, buildOutput);
   const args = argv.filter((a) => a !== '--detach');
   if (autoPort) args.push('--port', String(o.port));
   const child = spawn(process.execPath, [SELF, ...args], {
     detached: true,
-    stdio: ['ignore', fd, fd],
+    stdio: ['ignore', fd ?? 'ignore', fd ?? 'ignore'],
     // the parent holds the folder's launch lock until the URL is printed; the child must not wait for it
     env: { ...process.env, NOTA_BENE_LOCKED: '1', ...(autoPort ? { NOTA_BENE_AUTOPORT: '1' } : {}) },
   });
-  fs.closeSync(fd);
+  if (fd !== null) fs.closeSync(fd);
   let exitCode;
   child.on('exit', (code, signal) => (exitCode = code ?? signal));
   child.unref();
@@ -522,7 +554,7 @@ async function detach(o, argv, autoPort, buildOutput) {
   say(exitCode !== undefined
     ? `the server did not come up (launcher exited: ${exitCode}). Last log lines:`
     : `the server did not come up in ${DETACH_WAIT_MS / 1000}s. Last log lines:`);
-  process.stderr.write(tail(fs.readFileSync(log, 'utf8')));
+  if (fd !== null) process.stderr.write(tail(fs.readFileSync(log, 'utf8')));
   return 1;
 }
 
@@ -631,7 +663,7 @@ async function supervise(o, autoPort, release, state) {
           say(`cannot register the window: ${e.message}`); // the window works without it; --find falls back
         }
         release(); // registered: a later launch on the folder finds this window
-        if ((first || crashed) && o.open && !stopping) void openBrowser(`http://127.0.0.1:${port}`);
+        if ((first || crashed) && o.open && !stopping) void openBrowser(`http://127.0.0.1:${port}`).catch(() => {});
         crashed = false;
         break;
       }
@@ -735,16 +767,27 @@ async function main(argv) {
       }
       // the login value dies with that window's launcher: a URL kept from earlier needs a new --url
       if (o.url !== undefined) process.stdout.write(`${url}\n`);
-      else await openBrowser(base);
+      else if (!(await openBrowser(base))) {
+        say(`the browser could not be opened; run \`nota-bene --url ${new URL(base).port}\` and open the URL it prints`);
+        return 1;
+      }
       return 0;
     }
     o.dir = realDir(o.dir ?? '.');
   } catch (e) {
     say(e.message);
-    return 1;
+    return e instanceof SecretError ? EXIT_SECRET : 1;
   }
   if (refuse(o.dir)) {
     say(`refusing to open the whole ${o.dir} as a project — cd into a project first.`);
+    return 1;
+  }
+  // the secrets, before any spawn: a refused one is reported once here, never as a crash loop of servers that die on it
+  try {
+    accessToken();
+    stateSecret('control-token');
+  } catch (e) {
+    say(e.message);
     return 1;
   }
   // build first, pick the port after: a long build must not widen the race between the bind test and the listen
