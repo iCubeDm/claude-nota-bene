@@ -339,3 +339,38 @@ it('the "earlier version" line: only for a media comment whose drawn version dif
   expect(of('b.png')).not.toContain('earlier version');
   expect(of('c.png')).not.toContain('earlier version');
 });
+
+it('a /clear draft with pending comments is not sent: the draft and the comments stay, a note says why', async () => {
+  resetToasts();
+  const { sent, box, store } = setup([cm('c1')]);
+  await userEvent.type(box, '/clear');
+  await userEvent.keyboard('{Escape}{Enter}');
+  expect(sent).toHaveLength(0);
+  expect(box.value).toBe('/clear');
+  expect(store.getState().comments.items.map((c) => c.status)).toEqual(['pending']);
+  expect(getToasts().map((x) => x.title)).toContain('Not sent: /clear would drop the pending comments. Send or remove them first.');
+  // the comments panel's own Send is the same path
+  await userEvent.click(screen.getAllByRole('button', { name: /Send/ }).at(-1)!);
+  expect(sent).toHaveLength(0);
+});
+
+it('a /clear alias of the built-in is held too; a user command of that name is not; without comments /clear sends', async () => {
+  const { sent, box, store } = setup([cm('c1')]);
+  act(() => { store.dispatch(serverEvent({ kind: 'commands', commands: [
+    { name: 'new', description: 'mine' }, { name: 'clear', description: 'c', aliases: ['reset', 'new'], builtin: true },
+  ] })); });
+  await userEvent.type(box, '/reset');
+  await userEvent.keyboard('{Escape}{Enter}');
+  expect(sent).toHaveLength(0);
+  await userEvent.clear(box);
+  await userEvent.type(box, '/new');
+  await userEvent.keyboard('{Escape}{Enter}'); // the user's own skill: an ordinary send
+  expect(sent).toHaveLength(1);
+});
+
+it('with no pending comments /clear sends', async () => {
+  const { sent, box } = setup([]);
+  await userEvent.type(box, '/clear');
+  await userEvent.keyboard('{Escape}{Enter}');
+  expect(sent).toHaveLength(1);
+});

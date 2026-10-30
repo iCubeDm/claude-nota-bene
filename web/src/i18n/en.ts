@@ -402,6 +402,7 @@ export const en: Dict = {
   switchFail: 'Could not switch: ',
   clearFail: 'Could not clear: ',
   sendRefused: 'Not sent: a session switch is in progress',
+  clearWithComments: 'Not sent: /clear would drop the pending comments. Send or remove them first.',
   sessFail: 'Could not load sessions: ',
   loading: 'loading…',
   untitled: '(untitled)',

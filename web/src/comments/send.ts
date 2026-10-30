@@ -2,6 +2,7 @@ import { generatedImages, isMediaAnchor, type AnchorSource, type Comment, type I
 import { mediaTypeOf } from '../attachments/image.ts';
 import { getLang, t, tIn } from '../i18n/index.ts';
 import { selectReplyLabel, sendMessage, type AppThunk, type RootState } from '../store/store.ts';
+import { isClearCommand } from '../composer/slashRank.ts';
 import { composeBatch } from './compose.ts';
 import { instructionOf, labelOf } from './labels.ts';
 import { draftSent, removeImage, selectBuilding, selectDraft, selectImages, selectUploading, setBuilding, setDraft, type ImageEntry } from '../composer/slice.ts';
@@ -14,8 +15,8 @@ import { toast } from '../shell/toast.ts';
 import { agentName } from '../subagent/slice.ts';
 import { buildComposites, frameGroups, type FrameGroup } from './frameGroups.ts';
 
-/** 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). 'changed': the comments or the session changed during that wait, nothing was sent. */
-export type SendResult = 'empty' | 'sent' | 'offline' | 'switching' | 'building' | 'changed';
+/** 'blocked': a /clear with pending comments, held with a note (nothing sent, nothing released). 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). 'changed': the comments or the session changed during that wait, nothing was sent. */
+export type SendResult = 'empty' | 'blocked' | 'sent' | 'offline' | 'switching' | 'building' | 'changed';
 
 /** A file source as the batch and the card name it: `path`, or `path @ ref` for another branch or worktree (M3-16). */
 export const whereOfFile = (src: Extract<AnchorSource, { kind: 'file' }>): string => (src.ref ? `${src.path} @ ${src.ref}` : src.path);
@@ -135,6 +136,8 @@ export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState)
   if (st.controls.switching) return 'switching';
   const snap = snapshotOf(st);
   if ((!snap.body && !snap.pending.length && !snap.own.length) || selectUploading(st) || selectBuilding(st)) return 'empty';
+  // /clear drops the whole conversation, the comments with it: hold it until they are sent or removed
+  if (snap.pending.length && isClearCommand(snap.body, st.controls.commands)) return (toast(t('clearWithComments'), ''), 'blocked');
   d(markSending(snap.pending.map((c) => c.id)));
   const groups = frameGroups(snap.pending);
   if (!groups.length || st.conn.state !== 'open') return d(sendNow(snap, new Map(), force));

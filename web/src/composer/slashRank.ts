@@ -28,3 +28,14 @@ export function slashToken(value: string, caret: number): string | null {
   const m = /^\/(\S*)$/.exec(value.slice(0, caret));
   return m ? m[1] : null;
 }
+
+/**
+ * The draft's first word runs the CLI's /clear: the word itself, or an alias of the built-in (a command of the user's own by that name
+ * wins, as in the CLI). Mirrors the server's `trackedCommand`; with no list yet only the literal `/clear` counts.
+ */
+export function isClearCommand(text: string, list: readonly SlashCommand[]): boolean {
+  const word = /^\/([^\s/]+)(\s|$)/.exec(text)?.[1];
+  if (!word) return false;
+  const named = list.find((c) => c.name === word) ?? list.find((c) => c.builtin && c.aliases?.includes(word));
+  return named ? !!named.builtin && named.name === 'clear' : word === 'clear';
+}
