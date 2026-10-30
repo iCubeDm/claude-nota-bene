@@ -586,18 +586,24 @@ describe('web/dist freshness', () => {
 describe('serverEnv', () => {
   it('drops npm_* and INIT_CWD and the node_modules/.bin PATH prefix npm adds, keeps the rest of PATH', () => {
     const e = serverEnv({
-      npm_config_cache: 'x', npm_lifecycle_event: 'npx', NPM_CONFIG_X: 'y', INIT_CWD: '/z', KEEP: '1', NOTA_BENE_AUTOPORT: undefined,
+      npm_execpath: '/x/npx-cli.js', npm_config_cache: 'x', npm_lifecycle_event: 'npx', NPM_CONFIG_X: 'y', INIT_CWD: '/z', KEEP: '1', NOTA_BENE_AUTOPORT: undefined,
       PATH: ['/a/b/node_modules/.bin', '/usr/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin', '/usr/bin', '/proj/node_modules/.bin', '/bin'].join(path.delimiter),
     }, 42);
-    expect(Object.keys(e).filter((k) => /^npm_/i.test(k) || k === 'INIT_CWD')).toEqual([]);
+    expect(Object.keys(e).filter((k) => /^npm_/.test(k) || k === 'INIT_CWD')).toEqual([]);
+    expect(e.NPM_CONFIG_X).toBe('y'); // upper-case ones are the user's own (NPM_TOKEN ...)
     expect(e.KEEP).toBe('1');
     expect(e.PATH).toBe(['/usr/bin', '/proj/node_modules/.bin', '/bin'].join(path.delimiter)); // only the leading npm prefix goes
     expect(e.NOTA_BENE_SUPERVISED).toBe('1');
     expect(e.NOTA_BENE_LAUNCHER_PID).toBe('42');
   });
+  it('a plain shell launch (no npm_execpath / npm_lifecycle_event) keeps NPM_TOKEN, npm_config_* and the whole PATH', () => {
+    const base = { NPM_TOKEN: 't', npm_config_registry: 'https://r.example/', INIT_CWD: '/z', PATH: ['/a/node_modules/.bin', '/usr/bin'].join(path.delimiter) };
+    const e = serverEnv(base, 7);
+    expect(e).toMatchObject({ NPM_TOKEN: 't', npm_config_registry: 'https://r.example/', INIT_CWD: '/z', PATH: base.PATH, NOTA_BENE_LAUNCHER_PID: '7' });
+  });
   it('leaves a PATH without the prefix alone and copes with none', () => {
-    expect(serverEnv({ PATH: '/usr/bin:/bin' }, 1).PATH).toBe('/usr/bin:/bin');
-    expect('PATH' in serverEnv({}, 1)).toBe(false);
+    expect(serverEnv({ npm_execpath: 'x', PATH: '/usr/bin:/bin' }, 1).PATH).toBe('/usr/bin:/bin');
+    expect('PATH' in serverEnv({ npm_execpath: 'x' }, 1)).toBe(false);
   });
 });
 

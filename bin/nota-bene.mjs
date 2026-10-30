@@ -118,7 +118,9 @@ export function serverArgs(o, port, relaunch) {
  */
 export function serverEnv(base, launcherPid) {
   const env = { ...base, NOTA_BENE_SUPERVISED: '1', NOTA_BENE_LAUNCHER_PID: String(launcherPid) };
-  for (const k of Object.keys(env)) if (/^npm_/i.test(k)) delete env[k];
+  // only when npm / npx started us: a plain shell launch keeps the user's own NPM_TOKEN, npm_config_registry, PATH
+  if (!(base.npm_execpath || base.npm_lifecycle_event)) return env;
+  for (const k of Object.keys(env)) if (/^npm_/.test(k)) delete env[k];
   delete env.INIT_CWD; // set by npm; the dir and --fake are absolute already
   const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
   if (key && env[key]) {
