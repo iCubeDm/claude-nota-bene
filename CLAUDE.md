@@ -21,6 +21,10 @@ Node >= 23.6 (the server runs `.ts` directly). From the repo root:
 - `npm test` — unit tests (vitest, ports are 0 / random).
 - `npm run e2e` — Playwright, ports 4791-4795. The `files` project uses `ffmpeg` on PATH to generate its media fixtures at startup; without it the media tests are skipped with a message (`NB_E2E_FFMPEG=0` forces that path).
 
+- `node scripts/build-package.mjs [--out DIR]` — builds the publishable npm package into `pkg/` (git-ignored; never publishes): esbuild bundles `server/src/main.ts` and `bin/nota-bene.mjs` to plain JS at the same depth (`server/src/main.js`, `bin/nota-bene.mjs`; `@nota-bene/shared` inlined, `ws` and the Agent SDK external), a FRESH `web/dist` (own outDir, emptied; the local `web/dist` keeps its old chunks), the two blend assets, LICENSE, README and a generated `package.json`. The name (`PACKAGE_NAME`, now `nota-bene-ide`; the command is `nota-bene`) and the Node floor live as constants in that script; the version is the root `package.json` `version` (the root stays `private`). Installed, there is no `web/src`: the launcher never builds, `/info.codeChanged` is false (no `.ts`), About reads the package version, and nothing is written next to the code (state is in `NOTA_BENE_HOME`). Test: `bin/package.test.ts`.
+
+Experimental 3D (the model tab for `.glb` `.gltf` `.blend`, Blender): off by default, on with env `NOTA_BENE_EXPERIMENTAL_3D=1` on the server. Off: `/model` is a 404, Blender is never looked up (`/info.blender` false), `hello.capabilities.model3d` is false, and the web treats model files as any other unsupported file (text kind, generic icon) and never fetches the three chunks. The e2e `files` fixture runs with it on; the `controls` fixture keeps it off (`e2e/model3d-off.spec.ts`).
+
 Ports: launcher windows may sit anywhere in 4777-4799 except 4780 and 4790-4795; dev 4780 (server) and 5173 (Vite); tests use only 4790-4795 (manual smoke 4790, unit/e2e 4791-4795), never another port. `/info.root` tells windows apart.
 
 State lives in `~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo:

@@ -1,6 +1,7 @@
 {
   "name": "nota-bene",
   "private": true,
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "nota-bene": "bin/nota-bene.mjs"
