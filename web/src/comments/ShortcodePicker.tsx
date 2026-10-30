@@ -71,6 +71,7 @@ export function ShortcodePicker({ target }: { target: RefObject<HTMLTextAreaElem
     const onKey = (e: KeyboardEvent) => {
       const s = live.current;
       if (!s || e.target !== ta || e.isComposing) return;
+      if (e.key === 'Tab' && e.shiftKey) return set(null); // Shift+Tab is the composer's mode cycle: close, let it through
       let handled = true;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         const d = e.key === 'ArrowDown' ? 1 : -1;

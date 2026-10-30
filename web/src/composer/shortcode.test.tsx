@@ -63,15 +63,14 @@ it('Tab picks the emoji instead of taking the prompt suggestion', async () => {
   expect(box.value).toMatch(/^\p{Extended_Pictographic}/u);
 });
 
-it('an open list takes Shift+Tab like the @ picker (no mode cycle); once closed it cycles again', async () => {
+it('an open list does not take Shift+Tab: it closes, nothing is inserted, and the mode cycles', async () => {
   const { sent, emit, box } = setup();
   emit({ kind: 'mode', mode: 'auto' } as ServerEvent);
   await userEvent.keyboard(':smi');
   await screen.findByRole('listbox');
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
-  expect(sent.filter((m) => m.type === 'mode')).toEqual([]);
-  expect(box.value).toMatch(/^\p{Extended_Pictographic}/u);
-  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(box.value).toBe(':smi');
   expect(sent.filter((m) => m.type === 'mode')).toEqual([{ type: 'mode', mode: 'default' }]);
 });
 

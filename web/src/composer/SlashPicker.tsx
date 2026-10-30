@@ -32,12 +32,15 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
   useEffect(() => {
     const ta = target.current;
     if (!ta) return;
+    let dismissed = false; // Esc: shut for this word, until the caret leaves it
     const close = () => setState(null);
     const refresh = () => {
       const q = slashToken(ta.value, ta.selectionStart);
+      if (q === null) dismissed = false;
+      if (dismissed) return;
       setState((s) => (q === null ? null : s && s.q === q ? s : { q, sel: 0 })); // the same word keeps the selection
     };
-    const onSel = () => { if (document.activeElement === ta && live.current.open) refresh(); };
+    const onSel = () => { if (document.activeElement === ta) refresh(); }; // also when closed: an arrow key can move the caret into the word
     pick.current = (c) => {
       const word = /\s/.exec(ta.value);
       const rest = word ? ta.value.slice(word.index) : ''; // the whole first word is replaced, wherever the caret was in it
@@ -50,12 +53,13 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
       if (!open || e.target !== ta || e.isComposing) return;
       const plainEnter = e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey;
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return close(); // send: let it through
+      if (e.key === 'Tab' && e.shiftKey) return close(); // the composer's mode cycle: close, let it through
       let handled = true;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         const d = e.key === 'ArrowDown' ? 1 : -1;
         setState({ ...open, sel: (open.sel + d + list.length) % list.length });
       } else if (plainEnter || e.key === 'Tab') pick.current(list[open.sel]);
-      else if (e.key === 'Escape') close();
+      else if (e.key === 'Escape') { dismissed = true; close(); }
       else handled = false;
       if (handled) { e.preventDefault(); e.stopPropagation(); }
     };
@@ -78,6 +82,8 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
   useLayoutEffect(() => {
     const ta = target.current;
     if (!shown || !ta || !menu.current) return;
+    // never wider than the field: the menu stays in the chat column (the Comments panel sits to its right)
+    menu.current.style.width = `${Math.min(416, ta.getBoundingClientRect().width)}px`;
     setPos(placeListFor(menu.current, ta));
   }, [shown, items, target]);
   useLayoutEffect(() => {
@@ -90,7 +96,7 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
       ref={menu}
       role="listbox"
       aria-label={t('slashLabel')}
-      className="fixed z-20 max-h-[min(20rem,40vh)] overflow-y-auto w-[26rem] max-w-[90vw] rounded-[10px] border border-border bg-popover p-1 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
+      className="fixed z-20 max-h-[min(20rem,40vh)] overflow-y-auto overflow-x-hidden w-[26rem] max-w-[90vw] rounded-[10px] border border-border bg-popover p-1 shadow-[0_10px_32px_rgba(0,0,0,0.5)]"
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
     >
       {items.map((c, k) => (
@@ -100,11 +106,11 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
           aria-selected={k === sel}
           onMouseDown={(e) => e.preventDefault() /* keep focus in the textarea */}
           onClick={() => { target.current?.focus(); pick.current(c); }}
-          className={`flex cursor-pointer flex-col gap-px rounded-md px-2 py-1 text-[12.5px] text-foreground ${k === sel ? 'bg-primary/15' : 'hover:bg-accent'}`}
+          className={`flex min-w-0 cursor-pointer flex-col gap-px rounded-md px-2 py-1 text-[12.5px] text-foreground ${k === sel ? 'bg-primary/15' : 'hover:bg-accent'}`}
         >
-          <div className="flex items-baseline gap-2">
-            <span className="flex-none font-mono">/{highlight(c.name, state.q.toLowerCase())}</span>
-            {c.hint && <span className="truncate font-mono text-[11.5px] text-muted-foreground">{c.hint}</span>}
+          <div className="flex min-w-0 items-baseline gap-2">
+            <span className="min-w-0 shrink truncate font-mono">/{highlight(c.name, state.q.toLowerCase())}</span>
+            {c.hint && <span className="min-w-0 shrink-[2] truncate font-mono text-[11.5px] text-muted-foreground">{c.hint}</span>}
             {c.builtin && <span className="ml-auto flex-none rounded bg-muted px-1 text-[10.5px] text-muted-foreground">{t('slashBuiltin')}</span>}
           </div>
           {c.description && <div className="truncate text-[11.5px] text-muted-foreground">{c.description}</div>}

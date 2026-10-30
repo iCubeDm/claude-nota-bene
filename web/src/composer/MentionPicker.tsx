@@ -86,6 +86,7 @@ export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElemen
       if (!s || e.target !== ta || e.isComposing) return;
       const plainEnter = e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey;
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return close(); // send / add: let it through
+      if (e.key === 'Tab' && e.shiftKey) return close(); // the composer's mode cycle: close, let it through
       if ((plainEnter || e.key === 'Tab') && !s.items.length) return close(); // nothing to pick: do not swallow the key
       let handled = true;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

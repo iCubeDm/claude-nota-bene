@@ -166,3 +166,13 @@ it('in the comment popup: Esc closes only the picker, the popup stays open', asy
   fireEvent.keyDown(box, { key: 'Escape' });
   expect(onClose).toHaveBeenCalled();
 });
+
+it('Shift+Tab closes the picker without picking, so the composer can cycle the mode', async () => {
+  const { type, box } = setup();
+  type('@a');
+  await flush();
+  await answer(0, ['a.ts']);
+  fireEvent.keyDown(box, { key: 'Tab', shiftKey: true });
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(box.value).toBe('@a');
+});
