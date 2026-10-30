@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { TreeEntry } from '@nota-bene/shared';
+import { stateCheck, stateRelativeTo, underState } from './stateGuard.ts';
 
 export const HIDDEN = new Set(['.git', 'node_modules', '.DS_Store']);
 // the tree shows build output and the media comments' `.nota-bene` folder; the file walk (the prototype's SKIP_DIRS,
@@ -20,6 +21,7 @@ export function resolveInRoot(root: string, rel: string): string | null {
   const rootAbs = path.resolve(root);
   const abs = path.resolve(rootAbs, rel);
   if (abs !== rootAbs && !abs.startsWith(rootAbs + path.sep)) return null;
+  if (underState(abs)) return null; // the state folder (the access token) is never a project file, whatever the root
   // native realpath on both sides: a case difference between the argument and the disk must not refuse valid paths.
   // Accepted gap: a symlink swapped between this check and the open (TOCTOU) — fine for a localhost tool.
   let realRoot: string;
@@ -56,8 +58,10 @@ export async function listDir(abs: string, root: string): Promise<TreeEntry[]> {
   }
   const ents = await fs.promises.readdir(abs, { withFileTypes: true });
   const out: TreeEntry[] = [];
+  const inState = stateCheck();
   for (const e of ents) {
     if (HIDDEN.has(e.name)) continue;
+    if (inState(path.join(abs, e.name))) continue; // the state folder is not listed
     let dir = e.isDirectory();
     if (e.isSymbolicLink()) {
       try {
@@ -85,6 +89,7 @@ async function linkedFileInRoot(abs: string, realRoot: string): Promise<boolean>
   try {
     const real = await fs.promises.realpath(abs);
     if (real !== realRoot && !real.startsWith(realRoot + path.sep)) return false;
+    if (underState(real)) return false; // a link into the state folder
     return (await fs.promises.stat(real)).isFile();
   } catch {
     return false;
@@ -193,7 +198,8 @@ export function withDirs(files: string[]): string[] {
 async function collect(root: string): Promise<string[]> {
   const git = await gitFiles(root);
   const files = git ? await existingFiles(root, git) : [];
-  return withDirs(files.length ? files : await walk(root));
+  const inState = stateRelativeTo(root);
+  return withDirs((files.length ? files : await walk(root)).filter((f) => !inState(f)));
 }
 
 /**

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { Source, TreeEntry } from '@nota-bene/shared';
+import { stateCheck, stateRelativeTo, underState } from './stateGuard.ts';
 import { gitEnv, HIDDEN, listDir, resolveInRoot, sortEntries, withDirs } from './files.ts';
 
 export type { Source };
@@ -143,6 +144,8 @@ async function branchSpec(root: string, src: Source, rel: string) {
   const r = branchRel(rel);
   const { top, prefix } = await repo(root);
   const full = (prefix + r).replace(/\/$/, '');
+  // a blob committed at the state folder's place (a repo at $HOME that tracks it) is as secret as the live file
+  if (top && full && underState(path.join(top, full))) throw new SourceError(403, 'outside project');
   return { top, full, ref: `refs/heads/${src.ref}` };
 }
 
@@ -171,11 +174,14 @@ export async function readTree(root: string, src: Source, rel: string): Promise<
   if (e?.type !== 'tree') throw new SourceError(404, 'not found');
   const out = await git(top, ['ls-tree', '-z', '--full-tree', ref, '--', ...(full ? [`${full}/`] : [])]);
   const list: TreeEntry[] = [];
+  const inStateFull = stateCheck();
+  const inState = (name: string) => !!top && inStateFull(path.join(top, full, name));
   for (const line of out.toString('utf8').split('\0')) {
     const m = /^\d+ (\w+) [0-9a-f]+\t(.+)$/s.exec(line);
     if (!m) continue;
     const name = m[2].slice(m[2].lastIndexOf('/') + 1);
     if (HIDDEN.has(name) || (m[1] !== 'tree' && m[1] !== 'blob')) continue; // a submodule (commit) cannot be shown
+    if (inState(name)) continue; // the state folder is not listed
     list.push({ name, dir: m[1] === 'tree' });
   }
   return sortEntries(list);
@@ -217,8 +223,9 @@ export async function branchFiles(root: string, src: Source): Promise<string[]> 
   const { top, full, ref } = await branchSpec(root, src, '');
   const out = await git(top, ['ls-tree', '-r', '-z', '--name-only', '--full-tree', ref, '--', ...(full ? [`${full}/`] : [])], 64 << 20);
   const cut = full ? full.length + 1 : 0;
+  const inState = top ? stateRelativeTo(path.join(top, full)) : () => false;
   const files = out.toString('utf8').split('\0').filter(Boolean).map((p) => p.slice(cut))
-    .filter((p) => !p.split('/').some((seg) => HIDDEN.has(seg)));
+    .filter((p) => !p.split('/').some((seg) => HIDDEN.has(seg)) && !inState(p));
   return withDirs(files.slice(0, FILES_CAP));
 }
 
