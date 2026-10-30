@@ -215,12 +215,18 @@ describe('defaults and about', () => {
       }));
     };
     expect('lang' in (await hello(s.url))).toBe(false); // none chosen yet: the client keeps its own
+    expect((await post(`${s.url}/system/prefs`, { lang: 'en', ifUnset: true }, { origin: s.origin })).status).toBe(200);
+    expect(readPrefs().lang).toBe('en'); // set-if-absent sets when absent
+    fs.rmSync(path.join(home, 'prefs.json'));
     expect((await post(`${s.url}/system/prefs`, { lang: 'de' }, { origin: s.origin })).status).toBe(400);
     expect((await post(`${s.url}/system/prefs`, {}, { origin: s.origin })).status).toBe(400);
     expect((await post(`${s.url}/system/prefs`, { defaultMode: 'plan' }, { origin: s.origin })).status).toBe(200);
     expect((await post(`${s.url}/system/prefs`, { lang: 'ru' }, { origin: s.origin })).status).toBe(200);
     expect(readPrefs()).toMatchObject({ lang: 'ru', defaultMode: 'plan' }); // neither write dropped the other
     expect((await hello(s.url)).lang).toBe('ru');
+    // the migration form never overwrites a choice that exists, and sets one that does not
+    expect((await post(`${s.url}/system/prefs`, { lang: 'en', ifUnset: true }, { origin: s.origin })).status).toBe(200);
+    expect(readPrefs().lang).toBe('ru');
     const other = await boot(mkExtra('nb-system-lang-')); // another folder's window: same state dir, same language
     expect((await hello(other.url)).lang).toBe('ru');
   });

@@ -337,13 +337,13 @@ export function systemRoutes(o: {
     '/system/prefs': (req, res) => {
       if (req.method === 'POST') {
         void readJson(req).then((b) => {
-          const { defaultMode: mode, lang } = b as { defaultMode?: unknown; lang?: unknown };
+          const { defaultMode: mode, lang, ifUnset } = b as { defaultMode?: unknown; lang?: unknown; ifUnset?: unknown };
           if (mode === undefined && lang === undefined) return text(res, 400, 'bad defaultMode');
           if (mode !== undefined && !(MODES as readonly unknown[]).includes(mode)) return text(res, 400, 'bad defaultMode');
           if (lang !== undefined && lang !== 'ru' && lang !== 'en') return text(res, 400, 'bad lang');
           if (mode !== undefined) setDefaultModePref(mode as Mode);
-          if (lang !== undefined) setLangPref(lang);
-          json(res, 200, { ...(mode !== undefined ? { defaultMode: mode } : {}), ...(lang !== undefined ? { lang } : {}) });
+          if (lang !== undefined) setLangPref(lang, ifUnset === true);
+          json(res, 200, { ...(mode !== undefined ? { defaultMode: mode } : {}), ...(lang !== undefined ? { lang: readPrefs().lang ?? lang } : {}) });
         }).catch((e: unknown) => (e instanceof SyntaxError || (e instanceof Error && e.message === 'body too large') ? text(res, 400, 'bad request') : fail(res, '/system/prefs', e)));
         return;
       }

@@ -26,10 +26,20 @@ export function setLang(l: Lang): void {
   for (const fn of listeners) fn();
 }
 
-/** Tells the server the choice (prefs.json, shared by every window: localStorage is per port). Best effort. */
-export function persistLang(l: Lang): void {
+/** A choice the server has not confirmed yet (it was down, restarting, or the POST is still in flight). */
+let unsynced: Lang | null = null;
+
+/**
+ * Tells the server the choice (prefs.json, shared by every window: localStorage is per port). Best effort, but the choice
+ * stays `unsynced` until the server answers ok, and `adoptServerLang` keeps it safe from an older `hello.lang` meanwhile.
+ * `ifUnset`: the migration of an old local choice; it must not win over, nor be protected against, the server's value.
+ */
+export function persistLang(l: Lang, ifUnset = false): void {
+  if (!ifUnset) unsynced = l;
   try {
-    void fetch('/system/prefs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang: l }) }).catch(() => {});
+    void fetch('/system/prefs', {
+      method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang: l, ...(ifUnset ? { ifUnset: true } : {}) }),
+    }).then((r) => { if (r.ok && !ifUnset && unsynced === l) unsynced = null; }, () => {});
   } catch { /* no fetch: the local cache still holds the choice */ }
 }
 
@@ -40,16 +50,23 @@ export function chooseLang(l: Lang): void {
 }
 
 /**
- * The server's `hello.lang`: the server's value wins over this origin's localStorage cache. With none on the server yet, a
- * choice this browser already made (localStorage) is moved up, so it reaches the other windows and nobody loses it.
+ * The server's `hello.lang`: the server's value wins over this origin's localStorage cache, except while our own choice is
+ * unconfirmed (then it is sent again and the hello, which may predate it, is ignored). With no value on the server yet, a
+ * choice this browser already made (localStorage) is moved up if still unset there, so nobody loses it.
  */
 export function adoptServerLang(server: string | undefined): void {
+  if (unsynced) return persistLang(unsynced);
   if (server === 'ru' || server === 'en') {
     if (server !== lang) setLang(server);
     return;
   }
   const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('lang');
-  if (stored === 'ru' || stored === 'en') persistLang(stored);
+  if (stored === 'ru' || stored === 'en') persistLang(stored, true);
+}
+
+/** test only: forget an unconfirmed choice */
+export function resetUnsyncedLang(): void {
+  unsynced = null;
 }
 
 /** Translate into an explicit language (for text that must not follow the UI language, e.g. a sent batch). */

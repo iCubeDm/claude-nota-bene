@@ -3,7 +3,7 @@ import { en } from './en.ts';
 import { initialLang, setLang, t } from './index.ts';
 import { ru } from './ru.ts';
 
-afterEach(() => setLang('ru'));
+afterEach(async () => { (await import('./index.ts')).resetUnsyncedLang(); setLang('ru'); });
 
 it('ru and en have the same keys', () => {
   const r = Object.keys(ru);
@@ -41,7 +41,7 @@ it('adoptServerLang: the server value wins over the local cache; with none, a st
     expect(posts).toEqual([]);
     localStorage.setItem('lang', 'ru');
     adoptServerLang(undefined); // the server has none yet: this browser's old choice is saved for all windows
-    expect(posts).toEqual([{ lang: 'ru' }]);
+    expect(posts).toEqual([{ lang: 'ru', ifUnset: true }]);
     posts.length = 0;
     localStorage.removeItem('lang');
     adoptServerLang(undefined); // neither: nothing to say, English stays the default
@@ -59,6 +59,54 @@ it('chooseLang sets the language here and posts it to the server', async () => {
     chooseLang('en');
     expect(getLang()).toBe('en');
     expect(posts).toEqual([{ lang: 'en' }]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('a choice the server has not confirmed survives a hello: down server, hello built before the POST, then ok clears it', async () => {
+  const { adoptServerLang, chooseLang, getLang } = await import('./index.ts');
+  const calls: { body: Record<string, unknown>; keepalive?: boolean }[] = [];
+  let ok = false;
+  vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => {
+    calls.push({ body: JSON.parse(String(init.body)), keepalive: init.keepalive });
+    if (!ok) throw new TypeError('server down');
+    return new Response('{}', { status: 200 });
+  }));
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  try {
+    setLang('en');
+    chooseLang('ru'); // server down: the POST fails
+    await tick();
+    expect(calls[0]).toEqual({ body: { lang: 'ru' }, keepalive: true });
+    adoptServerLang('en'); // the server restarts and its hello (older than the choice) says en
+    expect(getLang()).toBe('ru'); // not reverted
+    expect(calls).toHaveLength(2); // and the choice is sent again
+    ok = true;
+    adoptServerLang(undefined);
+    await tick();
+    expect(calls).toHaveLength(3);
+    adoptServerLang('en'); // confirmed now: the server's value wins again
+    expect(getLang()).toBe('en');
+    expect(calls).toHaveLength(3);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('a hello that lands while the POST is still in flight does not undo the choice (the other order)', async () => {
+  const { adoptServerLang, chooseLang, getLang } = await import('./index.ts');
+  let release!: () => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((res) => { release = () => res(new Response('{}', { status: 200 })); })));
+  try {
+    setLang('en');
+    chooseLang('ru'); // POST in flight
+    adoptServerLang('en'); // hello built before the POST was applied
+    expect(getLang()).toBe('ru');
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    adoptServerLang('ru');
+    expect(getLang()).toBe('ru');
   } finally {
     vi.unstubAllGlobals();
   }

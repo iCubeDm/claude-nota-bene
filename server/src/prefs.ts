@@ -132,6 +132,8 @@ export function setDefaultModePref(mode: Mode): void {
 }
 
 /** The UI language, one for every window of this user (not per project, not per port). */
-export function setLangPref(lang: 'ru' | 'en'): void {
-  updateRawPrefs((raw) => void (raw.lang = lang));
+export function setLangPref(lang: 'ru' | 'en', ifUnset = false): void {
+  // ifUnset (the migration of an old localStorage choice): decided inside the read-modify-write, so it can never overwrite
+  // a choice another window made a moment earlier
+  updateRawPrefs((raw) => void (ifUnset && (raw.lang === 'ru' || raw.lang === 'en') ? undefined : (raw.lang = lang)));
 }
