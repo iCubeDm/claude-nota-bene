@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import { fakeBackend } from './agent/fake.ts';
 import { readPrefs } from './prefs.ts';
 import { startServer } from './server.ts';
-import { CLEAN_MIN_AGE_MS, CONTROL_HEADER, cleanAttachments, cleanCandidates, cleanStaleArchives, controlToken, dirSize, staleArchives } from './system.ts';
+import { CLEAN_MIN_AGE_MS, CONTROL_HEADER, cleanAttachments, cleanCandidates, cleanStaleArchives, controlToken, describeVersion, dirSize, staleArchives } from './system.ts';
 import { registerWindow } from './windows.ts';
 
 let home: string;
@@ -202,6 +202,22 @@ describe('defaults and about', () => {
       if (e.kind === 'mode') res(e.mode!);
     }));
     expect(mode).toBe('plan');
+  });
+
+  it('an installed package (no .git next to it) reports its package.json version, never git describe', async () => {
+    const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-pkgver-'));
+    try {
+      fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'x', version: '1.2.3' }));
+      expect(await describeVersion(pkg)).toBe('1.2.3');
+      const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, repoDir: pkg });
+      closers.push(s.close);
+      const a = await (await fetch(`${s.url}/system/about`)).json() as { version: string };
+      expect(a.version).toBe('1.2.3');
+      fs.writeFileSync(path.join(pkg, 'package.json'), '{not json');
+      expect(await describeVersion(pkg)).toBe('unknown');
+    } finally {
+      fs.rmSync(pkg, { recursive: true, force: true });
+    }
   });
 
   it('about names the version, the state dir and the node version', async () => {

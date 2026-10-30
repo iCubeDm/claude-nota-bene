@@ -249,12 +249,29 @@ export async function listWindows(own: number, probe = probeWindow): Promise<Win
   return rows.sort((a, b) => a.port - b.port);
 }
 
+/**
+ * The version About shows. A git checkout (`.git` right in `dir`, a directory or a worktree's file) says `git describe`;
+ * an installed package has no checkout, so it says its own package.json version. Never `git describe` there: it would
+ * describe whatever repository the install happens to sit in.
+ */
+export function describeVersion(dir: string): Promise<string> {
+  if (!fs.existsSync(path.join(dir, '.git'))) {
+    try {
+      const v = (JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { version?: unknown }).version;
+      return Promise.resolve(typeof v === 'string' && v ? v : 'unknown');
+    } catch {
+      return Promise.resolve('unknown');
+    }
+  }
+  return new Promise((resolve) => {
+    execFile('git', ['describe', '--tags', '--always', '--dirty'], { cwd: dir, timeout: 3000 }, (e, out) => resolve(e ? 'unknown' : out.trim()));
+  });
+}
+
 // once per process: the checkout does not change under a running server in a way About must follow, and a page
 // looping requests at /system/about must not spawn a git per request
 let version: Promise<string> | null = null;
-const gitDescribe = (dir: string): Promise<string> => (version ??= new Promise((resolve) => {
-  execFile('git', ['describe', '--tags', '--always', '--dirty'], { cwd: dir, timeout: 3000 }, (e, out) => resolve(e ? 'unknown' : out.trim()));
-}));
+const gitDescribe = (dir: string): Promise<string> => (version ??= describeVersion(dir));
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });

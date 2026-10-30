@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // nota-bene — open a Nota Bene window on a folder and supervise its server.
-// Plain Node ESM, no dependencies; imports the server's .ts helpers directly (Node >= 23.6 strips the types).
+// Plain Node ESM, no dependencies; imports the server's .ts helpers directly (Node >= 23.6 strips the types). The published
+// package bundles this file and the server to plain JS (scripts/build-package.mjs).
 //
 //   nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
 //   nota-bene --find DIR   prints the port of a live window serving DIR (exit 0), or exits 1
@@ -31,7 +32,9 @@ import {
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const SELF = fileURLToPath(import.meta.url);
-const MAIN = path.join(REPO, 'server/src/main.ts');
+// the source checkout runs the server's .ts directly; the published package ships it compiled (Node does not strip types
+// under node_modules) at the same relative place
+const MAIN = path.join(REPO, fs.existsSync(path.join(REPO, 'server/src/main.js')) ? 'server/src/main.js' : 'server/src/main.ts');
 const USAGE = 'Usage: nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]\n'
   + '       nota-bene --find DIR | --last DIR';
 const RESTART = 75;
@@ -161,6 +164,8 @@ function newestMtime(p) {
 
 /** web/dist/index.html is missing, or the stamp of the last successful build is missing or older than a source. */
 export function needsBuild(repo) {
+  // an installed package carries its web/dist and no sources: there is nothing to rebuild from, and nothing may be written
+  if (!fs.existsSync(path.join(repo, 'web/src'))) return false;
   let built;
   try {
     fs.statSync(path.join(repo, 'web/dist/index.html'));
