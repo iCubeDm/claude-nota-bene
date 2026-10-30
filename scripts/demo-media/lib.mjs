@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from "node:crypto";
 // Shared helpers: the demo server, a fake cursor, pacing, and the video -> GIF conversion.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,6 +11,10 @@ import { makeAssets } from './assets.mjs';
 export const REPO = fileURLToPath(new URL('../..', import.meta.url));
 export const PORT = 4790;
 export const URL_BASE = `http://127.0.0.1:${PORT}`;
+// the login a window opened by the launcher would get: the fragment carries it, POST /auth accepts it
+const TOKEN = randomBytes(32).toString("hex");
+const NONCE = randomBytes(16).toString("hex");
+export const LOGIN_URL = `${URL_BASE}/#t=${createHmac("sha256", TOKEN).update(`nota-bene:login:${PORT}:${NONCE}`).digest("hex")}`;
 /** A neutral path with no user name in it: it is what the window shows as the project. Removed again at the end of a run. */
 export const PROJECT = '/Users/Shared/demo-project';
 
@@ -37,9 +42,11 @@ export async function startServer(work, script, name) {
     console.log(`port ${PORT} busy, waiting…`);
     await sleep(5000);
   }
+  fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(home, "token"), TOKEN, { mode: 0o600 });
   const child = spawn(process.execPath, [path.join(REPO, 'server/src/main.ts'), PROJECT, '--port', String(PORT), '--fake', script], {
     cwd: REPO,
-    env: { ...process.env, NOTA_BENE_HOME: home, CLAUDE_JOURNAL_VAULT: vault, NOTA_BENE_EXPERIMENTAL_3D: '0' },
+    env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: NONCE, CLAUDE_JOURNAL_VAULT: vault, NOTA_BENE_EXPERIMENTAL_3D: '0' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   for (let i = 0; i < 100; i++) {

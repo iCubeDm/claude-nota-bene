@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { CURSOR_INIT, PROJECT, REPO, URL_BASE, clickAt, glide, glideTo, prepare, sleep, startServer, framesToGif, typeSlow } from './lib.mjs';
+import { CURSOR_INIT, PROJECT, REPO, URL_BASE, LOGIN_URL, clickAt, glide, glideTo, prepare, sleep, startServer, framesToGif, typeSlow } from './lib.mjs';
 import { TEXT } from './project.mjs';
 import { flowHtml, landingHtml } from './assets.mjs';
 
@@ -45,7 +45,7 @@ async function openPage(browser, { record = false } = {}) {
   await ctx.addInitScript(() => { try { localStorage.setItem('lang', 'en'); } catch {} });
   const page = await ctx.newPage();
   const t0 = Date.now();
-  await page.goto(URL_BASE);
+  await page.goto(LOGIN_URL);
   await page.addStyleTag({ content: HIDE });
   await composer(page).waitFor();
   return { ctx, page, t0, since: () => (Date.now() - t0) / 1000 };
