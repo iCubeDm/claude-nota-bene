@@ -79,7 +79,7 @@ export function MentionPicker({ target, shell }: { target: RefObject<HTMLTextAre
     const insert = (p: string, start: number) => {
       const end = ta.selectionStart;
       const ref = shell?.() ? shellWord(p) : /\s/.test(p) ? `@"${p}"` : `@${p}`;
-      const tail = p.endsWith('/') ? '' : ' '; // a folder keeps the picker going for its files
+      const tail = p.endsWith('/') && !shell?.() ? '' : ' '; // a folder keeps the picker going for its files (not in a shell command: the word is done)
       close();
       // an input event follows, which re-queries for a folder and closes for a file
       setValueAndCaret(ta, ta.value.slice(0, start) + ref + tail + ta.value.slice(end), start + ref.length + tail.length);

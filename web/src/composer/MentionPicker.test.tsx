@@ -200,3 +200,13 @@ it('against a server without shell mode ! is plain text and the pick stays an @ 
   fireEvent.keyDown(box, { key: 'Enter' });
   expect(box.value).toBe('! cat @docs/alpha.md ');
 });
+
+it('in a ! command a folder is a finished word: the picker does not keep going for its files', async () => {
+  const { type, store, box } = setup();
+  act(() => void store.dispatch(serverEvent({ kind: 'hello', protocol: PROTOCOL })));
+  type('! ls @do');
+  await flush();
+  await answer(0, ['docs/']);
+  fireEvent.keyDown(box, { key: 'Enter' });
+  expect(box.value).toBe('! ls docs/ ');
+});
