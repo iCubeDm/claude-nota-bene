@@ -4,7 +4,7 @@ import { selectTurnSeq, useAppDispatch, useAppSelector } from '@/store/store.ts'
 import type { FileKind } from '../kinds.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { takeStartAt, type StartAt } from '../startAt.ts';
-import { dropFileLoad, setFileLoad, setFileVersion } from '../slice.ts';
+import { dropFileLoad, dropJump, setFileLoad, setFileVersion } from '../slice.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const PROBE = 8192;
@@ -146,13 +146,12 @@ export function useFileLoad({ path, src, ref, url, kind, media, hasVersion, acti
   }, [media, active, path, rev, url, src]);
 
   // the load state comments read (orphan or unknown); published after the commit, so the text is in the DOM by then
-  const unmounting = useRef(false);
-  useEffect(() => { unmounting.current = false; return () => void (unmounting.current = true); }, []); // declared first: its cleanup runs first
+  // closing the view drops a jump still waiting for it; a kind flip under a live view (text -> model) is not a close
+  useEffect(() => () => void dispatch(dropJump({ path, ref })), [path, ref, dispatch]);
   useEffect(() => {
     if (media) return;
     dispatch(setFileLoad({ path, ref, s: 'loading' }));
-    // tab closed: its comments go back to "unknown". The kind changing under a live view keeps its pending jump
-    return () => void dispatch(dropFileLoad({ path, ref, keepJump: !unmounting.current }));
+    return () => void dispatch(dropFileLoad({ path, ref })); // tab closed: its comments go back to "unknown"
   }, [media, path, ref, dispatch]);
   useEffect(() => {
     if (media || !data) return;

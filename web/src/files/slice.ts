@@ -32,11 +32,12 @@ export const filesSlice = createSlice({
       const k = keyOf(a.payload);
       s.load[k] = { s: a.payload.s, v: (s.load[k]?.v ?? 0) + 1 };
     },
-    /** `keepJump`: the view is not going away (its kind changed, e.g. text -> model), so a pending jump stays for the new view */
-    dropFileLoad: (s, a: PayloadAction<string | (FileRef & { keepJump?: boolean })>) => {
-      const k = keyOf(a.payload);
-      delete s.load[k];
-      if (s.jump && !(typeof a.payload === 'object' && a.payload.keepJump) && fileKey(s.jump.path, s.jump.ref) === k) s.jump = null;
+    dropFileLoad: (s, a: PayloadAction<string | FileRef>) => {
+      delete s.load[keyOf(a.payload)];
+    },
+    /** The view of this file closed: a jump still waiting for it is dropped (it must not meet the next open of the file). */
+    dropJump: (s, a: PayloadAction<FileRef>) => {
+      if (s.jump && fileKey(s.jump.path, s.jump.ref) === keyOf(a.payload)) s.jump = null;
     },
     /** `version` undefined: unknown again (the tab closed, or the file has no ETag). */
     setFileVersion: (s, a: PayloadAction<FileRef & { version?: string }>) => {
@@ -63,7 +64,7 @@ export const filesSlice = createSlice({
     }),
 });
 
-export const { setFileLoad, dropFileLoad, setFileVersion, clearJump } = filesSlice.actions;
+export const { setFileLoad, dropFileLoad, setFileVersion, clearJump, dropJump } = filesSlice.actions;
 
 /**
  * Opens (or activates) the file tab and asks its view to scroll to the comment's fragment once loaded. A comment with

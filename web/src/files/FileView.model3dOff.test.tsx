@@ -46,3 +46,18 @@ it('a restored model tab whose text load won before the hello: the flip to model
   await new Promise((r) => setTimeout(r, 50));
   expect(store.getState().files.jump).toMatchObject({ id: 'c1' }); // not consumed as a text jump
 });
+
+it('closing a tab drops the jump still waiting for it: a model that never became ready, and a text file', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([0, 1]), { status: 200, headers: { 'content-length': '2' } })));
+  for (const [on, path] of [[true, 'm/a.glb'], [false, 'notes.txt']] as const) {
+    setModel3d(on);
+    const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+    const { unmount } = render(<Provider store={store}><TooltipProvider><FileView path={path} active /></TooltipProvider></Provider>);
+    await new Promise((r) => setTimeout(r, 30));
+    act(() => void store.dispatch(filesSlice.actions.requestJump({ path, src: 'here', id: 'c1' })));
+    if (on) expect(store.getState().files.jump).toMatchObject({ id: 'c1' }); // a model's jump waits for its viewer (mocked away here)
+    unmount(); // the tab closes
+    expect([path, store.getState().files.jump]).toEqual([path, null]); // nothing carries to the next open of the file
+    cleanup();
+  }
+});
