@@ -3,7 +3,8 @@ import { useT } from '@/i18n/index.ts';
 import { selectBusy, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { ARG_KEYS, type FeedItem } from '@/store/feed.ts';
 import { collapsedLength, rawIndexOf } from '@/anchors/text.ts';
-import { openAgent } from '@/tabs/slice.ts';
+import { openAgent, openFile } from '@/tabs/slice.ts';
+import { tmpImagePathsIn, useTmpDirs } from '@/files/tmpImages.ts';
 import { isAgentTool, selectSubagent } from '@/subagent/slice.ts';
 import { CardMenu } from '@/tasks/CardMenu.tsx';
 import { selectCallEnd, selectLiveCalls } from '@/tasks/slice.ts';
@@ -148,6 +149,35 @@ function AgentCard({ item, open, panelId, comments, onToggle }: { item: Tool; op
   );
 }
 
+const TMP_ARGS = ['file_path', 'path', 'notebook_path', 'command'];
+const TMP_LINKS_MAX = 3;
+
+/** The temp images a call names (a Read's file_path, a screenshot command's output): buttons beside the line, which is itself one button. */
+function TmpImages({ input }: { input: Record<string, unknown> }) {
+  const t = useT();
+  const dispatch = useAppDispatch();
+  const dirs = useTmpDirs();
+  const paths = useMemo(() => {
+    const out: string[] = [];
+    for (const k of TMP_ARGS) {
+      const v = input[k];
+      if (typeof v === 'string') for (const p of tmpImagePathsIn(v, dirs)) if (!out.includes(p)) out.push(p);
+    }
+    return out.slice(0, TMP_LINKS_MAX);
+  }, [input, dirs]);
+  if (!paths.length) return null;
+  return (
+    <div data-anchor-skip className="-mt-1.5 mb-1.5 flex flex-wrap gap-x-3 font-mono text-[11.5px]">
+      {paths.map((p) => (
+        <button key={p} type="button" data-tmp-image={p} title={`${t('tmpImageOpen')}: ${p}`} onClick={() => dispatch(openFile({ path: p }))}
+          className="ref max-w-full cursor-pointer truncate text-nb-accent hover:underline">
+          ⤢ {p.split('/').pop()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** One action: its line, and below it, while open (state in `feedUi`), the panel. A closed line names its comments. */
 export function ToolLine({ item }: { item: Tool }) {
   const t = useT();
@@ -183,6 +213,7 @@ export function ToolLine({ item }: { item: Tool }) {
         {item.arg ? ` · ${item.arg}` : ''}
         {!open && comments > 0 && <span className="text-nb-accent"> · {t('nComments', comments)}</span>}
       </button>
+      <TmpImages input={item.input} />
       {open && <Panel item={item} id={panelId} end={end} />}
     </div>
   );
