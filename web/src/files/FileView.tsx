@@ -56,7 +56,8 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const comments = useAppSelector(selectComments);
   const pane = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (jump?.path !== path || jump.src !== src || !active || !data) return;
+    // a model's jump is the model view's (ModelMarkup): a text load that won before the hello flipped the kind must not eat it
+    if (kind === 'model' || jump?.path !== path || jump.src !== src || !active || !data) return;
     const fresh = loadedRev.current?.path === path && loadedRev.current.rev === rev;
     if (!fresh) return; // a stale view reloads on activation: wait for that load
     dispatch(clearJump());
@@ -67,7 +68,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
     if (!range) return; // orphaned: the tab is open, nothing to point at
     scrollRangeIntoView(range, el);
     flashRange(el, range);
-  }, [jump, active, data, rev, path, src, comments, dispatch, loadedRev]);
+  }, [kind, jump, active, data, rev, path, src, comments, dispatch, loadedRev]);
 
   // "jump to source" on a media tab: the tab is open and active; a video also seeks to the comment's time and pauses
   // (not while marking: the drawing belongs to the frame on screen)

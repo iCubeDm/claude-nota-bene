@@ -126,6 +126,12 @@ export function useFileLoad({ path, src, ref, url, kind, media, hasVersion, acti
   }, [active, media, tabId]);
 
   const loadedRev = useRef<{ path: string; rev: number } | null>(null);
+  // the kind turned to media (a model once the hello says 3D is on) after a text load had won: that text is not this view's
+  useEffect(() => {
+    if (!media) return;
+    loadedRev.current = null;
+    setData(null);
+  }, [media]);
   useEffect(() => {
     if (media || !active) return;
     if (loadedRev.current?.path === path && loadedRev.current.rev === rev) return;
@@ -140,10 +146,13 @@ export function useFileLoad({ path, src, ref, url, kind, media, hasVersion, acti
   }, [media, active, path, rev, url, src]);
 
   // the load state comments read (orphan or unknown); published after the commit, so the text is in the DOM by then
+  const unmounting = useRef(false);
+  useEffect(() => { unmounting.current = false; return () => void (unmounting.current = true); }, []); // declared first: its cleanup runs first
   useEffect(() => {
     if (media) return;
     dispatch(setFileLoad({ path, ref, s: 'loading' }));
-    return () => void dispatch(dropFileLoad({ path, ref })); // tab closed: its comments go back to "unknown"
+    // tab closed: its comments go back to "unknown". The kind changing under a live view keeps its pending jump
+    return () => void dispatch(dropFileLoad({ path, ref, keepJump: !unmounting.current }));
   }, [media, path, ref, dispatch]);
   useEffect(() => {
     if (media || !data) return;

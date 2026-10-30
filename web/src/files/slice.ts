@@ -32,10 +32,11 @@ export const filesSlice = createSlice({
       const k = keyOf(a.payload);
       s.load[k] = { s: a.payload.s, v: (s.load[k]?.v ?? 0) + 1 };
     },
-    dropFileLoad: (s, a: PayloadAction<string | FileRef>) => {
+    /** `keepJump`: the view is not going away (its kind changed, e.g. text -> model), so a pending jump stays for the new view */
+    dropFileLoad: (s, a: PayloadAction<string | (FileRef & { keepJump?: boolean })>) => {
       const k = keyOf(a.payload);
       delete s.load[k];
-      if (s.jump && fileKey(s.jump.path, s.jump.ref) === k) s.jump = null;
+      if (s.jump && !(typeof a.payload === 'object' && a.payload.keepJump) && fileKey(s.jump.path, s.jump.ref) === k) s.jump = null;
     },
     /** `version` undefined: unknown again (the tab closed, or the file has no ETag). */
     setFileVersion: (s, a: PayloadAction<FileRef & { version?: string }>) => {
