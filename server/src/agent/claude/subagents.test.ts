@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { agentIdFromResult, findSubagentMeta, isRunning, RECENT_MS, resetSubagentCache } from './subagents.ts';
+import { agentIdFromResult, findSubagentMeta, isRunning, noMetaAdd, noMetaHas, NO_META_TTL_MS, RECENT_MS, resetSubagentCache } from './subagents.ts';
 
 const dirs: string[] = [];
 afterAll(() => { for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
@@ -100,5 +100,25 @@ describe('the lookup is cached', () => {
     fs.writeFileSync(path.join(root, '-some-project', SID, 'subagents', 'agent-c3.meta.json'), JSON.stringify({ toolUseId: 'toolu_late' }));
     expect(findSubagentMeta(root, SID, 'toolu_late', 1500)).toBeNull(); // 500 ms later: still the remembered miss
     expect(findSubagentMeta(root, SID, 'toolu_late', 3000)?.agentId).toBe('c3');
+  });
+});
+
+describe('the no-meta miss', () => {
+  it('is remembered for a few seconds, then tried again; a different key is not affected', () => {
+    resetSubagentCache();
+    noMetaAdd('s\0t\0', 1000);
+    expect(noMetaHas('s\0t\0', 1000 + NO_META_TTL_MS - 1)).toBe(true);
+    expect(noMetaHas('s\0u\0', 1000)).toBe(false);
+    expect(noMetaHas('s\0t\0', 1000 + NO_META_TTL_MS)).toBe(false);
+    expect(noMetaHas('s\0t\0', 1000)).toBe(false); // dropped once expired
+  });
+  it('expired entries are dropped when a new one is added, and reset clears all', () => {
+    resetSubagentCache();
+    noMetaAdd('a', 0);
+    noMetaAdd('b', NO_META_TTL_MS + 1);
+    expect(noMetaHas('a', 1)).toBe(false);
+    expect(noMetaHas('b', NO_META_TTL_MS + 2)).toBe(true);
+    resetSubagentCache();
+    expect(noMetaHas('b', NO_META_TTL_MS + 2)).toBe(false);
   });
 });

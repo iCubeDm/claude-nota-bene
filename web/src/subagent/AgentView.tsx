@@ -16,7 +16,7 @@ export const POLL_MS = 1500;
  * reducer as the chat. Polling, not streaming (step 1): it is read when the tab opens or is shown, then every POLL_MS
  * while the subagent runs and the tab is the visible one; a finished or hidden tab is not polled. Selections in it are
  * commentable like the chat's (`data-chat-pane` + `data-agent`); the comments go to the main session. A subagent that is
- * not in the current conversation, or a failed read, is said in a line, never an empty pane.
+ * not in the current conversation, or a failed read, is said in a line, never an empty pane; both are tried again with a backoff while the tab is visible.
  */
 export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
   const t = useT();
@@ -42,11 +42,17 @@ export function AgentView({ tab, active }: { tab: AgentTab; active: boolean }) {
     if (!active && have) return;
     const ctl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let fails = 0; // a read that failed is tried again, 3 s, 6 s, … up to 30 s: one blip must not freeze a running agent's pane
+    let fails = 0; // a read that failed (or said "not in this session") is tried again, 3 s, 6 s, … up to 30 s: one blip must not freeze a running agent's pane
     const tick = async () => {
       const r = await dispatch(fetchSubagent(tool, ctl.signal));
       if (ctl.signal.aborted) return;
-      if (active && pollable && (r === 'running' || r === 'error')) timer = setTimeout(() => void tick(), r === 'error' ? Math.min(30_000, (fails = fails ? fails * 2 : POLL_MS * 2)) : ((fails = 0), POLL_MS));
+      // `gone` is retried too, finished call or not: the answer was seen to be a transient miss for a subagent that WAS in the
+      // session, and a real gone only costs one cheap request per 30 s while its tab is the visible one. `ok` replaces it.
+      const again = r === 'gone' || (pollable && (r === 'running' || r === 'error'));
+      if (!active || !again) return;
+      if (r === 'running') fails = 0;
+      else fails = fails ? fails * 2 : POLL_MS * 2;
+      timer = setTimeout(() => void tick(), r === 'running' ? POLL_MS : Math.min(30_000, fails));
     };
     void tick();
     return () => {

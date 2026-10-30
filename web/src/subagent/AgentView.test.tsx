@@ -191,6 +191,67 @@ describe('the subagent tab', () => {
     expect(await screen.findAllByText('This subagent is not in the current session.')).not.toHaveLength(0);
   });
 
+  it('a 404 that turns into a 200 shows the conversation with no user action', async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    answer = () => (++n < 3 ? new Response('no', { status: 404 }) : json(view({ running: true })));
+    setup();
+    await flush(0);
+    expect(screen.getByText('This subagent is not in the current session.')).toBeInTheDocument();
+    await flush(3000);
+    expect(calls).toHaveLength(2);
+    expect(screen.getByText('This subagent is not in the current session.')).toBeInTheDocument(); // no flicker to a spinner
+    await flush(6000);
+    expect(calls).toHaveLength(3);
+    expect(screen.queryByText('This subagent is not in the current session.')).toBeNull();
+    expect(screen.getByText('hello brave world')).toBeInTheDocument();
+    await flush(POLL_MS); // and it is polled like any running one from here
+    expect(calls).toHaveLength(4);
+  });
+
+  it('a 409 is retried the same way, even for a call that already has its result', async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    answer = () => (++n < 3 ? new Response('no', { status: 409 }) : json(view())); // the result arriving re-runs the first read
+    const { store } = setup();
+    act(() => {
+      store.dispatch(serverEvent(ev({ t: 'tool-call', id: TOOL, name: 'Agent', input: { description: 'd' }, sub: false })));
+      store.dispatch(serverEvent(ev({ t: 'tool-update', id: TOOL, text: 'done', isError: false })));
+    });
+    await flush(0);
+    await flush(3000);
+    expect(screen.getByText('hello brave world')).toBeInTheDocument();
+    await flush(POLL_MS * 5);
+    expect(calls).toHaveLength(3); // finished: no more polling
+  });
+
+  it('a real gone keeps saying so with a growing backoff (3, 6, 12, 24, 30, 30 s), no error line', async () => {
+    vi.useFakeTimers();
+    answer = () => new Response('no', { status: 404 });
+    setup();
+    await flush(0);
+    const at: number[] = [];
+    let seen = calls.length;
+    for (let s = 1; s <= 110; s++) {
+      await flush(1000);
+      if (calls.length > seen) { at.push(s); seen = calls.length; }
+    }
+    expect(at).toEqual([3, 9, 21, 45, 75, 105]);
+    expect(screen.getByText('This subagent is not in the current session.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a hidden tab that says gone is not retried, and reads again when shown', async () => {
+    vi.useFakeTimers();
+    answer = () => new Response('no', { status: 404 });
+    const { rerender } = setup({ active: false });
+    await flush(60_000);
+    expect(calls).toHaveLength(1);
+    rerender(true);
+    await flush(0);
+    expect(calls).toHaveLength(2);
+  });
+
   it('shows a failed read as a line, never a silent empty pane', async () => {
     answer = () => new Response('boom', { status: 500 });
     setup();

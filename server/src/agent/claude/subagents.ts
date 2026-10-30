@@ -93,10 +93,31 @@ export function findSubagentMeta(projectsDir: string, sessionId: string, toolUse
   return null;
 }
 
+/**
+ * A miss of the main-transcript fallback (no meta, and the Agent call does not name an agent we can list): remembered for
+ * NO_META_TTL_MS so a poll does not parse the whole main transcript on every request, then tried again. It must expire: the
+ * agent's files can appear after the first miss (listed late, meta written late), and a miss that stood until the call's
+ * result arrived left a running subagent's tab saying "not in the current session".
+ */
+export const NO_META_TTL_MS = 4000;
+const noMeta = new Map<string, number>();
+export const noMetaHas = (key: string, now = Date.now()): boolean => {
+  const at = noMeta.get(key);
+  if (at === undefined) return false;
+  if (now - at < NO_META_TTL_MS) return true;
+  noMeta.delete(key);
+  return false;
+};
+export function noMetaAdd(key: string, now = Date.now()): void {
+  for (const [k, at] of noMeta) if (now - at >= NO_META_TTL_MS) noMeta.delete(k); // the map stays small
+  noMeta.set(key, now);
+}
+
 /** Forgets what was found and what was missed (tests). */
 export function resetSubagentCache(): void {
   where.clear();
   missed.clear();
+  noMeta.clear();
 }
 
 /** The fallback: the Agent tool's result text names the agent (`agentId: a1b2…`). */
