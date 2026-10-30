@@ -24,8 +24,13 @@ export function setModel3d(on: boolean): void {
   for (const fn of model3dListeners) fn();
 }
 export const isModel3d = (): boolean => model3d;
+// module-level: a stable function identity, so useSyncExternalStore does not resubscribe on every render
+const subscribeModel3d = (fn: () => void): (() => void) => {
+  model3dListeners.add(fn);
+  return () => void model3dListeners.delete(fn);
+};
 export function useModel3d(): boolean {
-  return useSyncExternalStore((fn) => { model3dListeners.add(fn); return () => model3dListeners.delete(fn); }, isModel3d);
+  return useSyncExternalStore(subscribeModel3d, isModel3d);
 }
 /** A model file (.glb .gltf .blend) AND the viewer is on. */
 export const isModelFile = (path: string): boolean => model3d && MODEL.test(path);
