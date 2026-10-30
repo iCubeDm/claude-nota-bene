@@ -1,7 +1,7 @@
 // Values copied from prototype/public/index.html STR.ru. Tooltip texts (stopTip, keysTip) are PLAIN TEXT:
 // the prototype's <kbd> tags are dropped and <br> became "\n"; consumers render them as text (whitespace-pre-line).
 export const ru = {
-  langTip: 'Язык интерфейса: English',
+  langTip: 'Язык интерфейса',
   toLatest: 'В конец разговора',
   emptyChat: 'Напиши агенту, чтобы начать',
   // the conversation before its compactions (M7-13, R-M7-4)

@@ -4,7 +4,7 @@ import type { ru } from './ru.ts';
 type Dict = { [K in keyof typeof ru]: (typeof ru)[K] };
 
 export const en: Dict = {
-  langTip: 'Interface language: русский',
+  langTip: 'Interface language',
   toLatest: 'Jump to the latest',
   emptyChat: 'Write to the agent to get started',
   earlierShow: 'Show before compaction',

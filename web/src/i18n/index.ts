@@ -6,6 +6,9 @@ export type Lang = 'ru' | 'en';
 
 const DICTS: Record<Lang, Record<string, unknown>> = { ru, en };
 
+/** The languages on offer, each named in itself; adding one here adds it to the header menu and to Settings. */
+export const LANGS: { id: Lang; name: string }[] = [{ id: 'en', name: 'English' }, { id: 'ru', name: 'Русский' }];
+
 /** A stored choice wins; otherwise English, whatever the browser language says. */
 export function initialLang(stored: string | null): Lang {
   return stored === 'ru' || stored === 'en' ? stored : 'en';
@@ -43,7 +46,7 @@ export function persistLang(l: Lang, ifUnset = false): void {
   } catch { /* no fetch: the local cache still holds the choice */ }
 }
 
-/** The user picked a language (header toggle, Settings): apply it here and save it for every window. */
+/** The user picked a language (header menu, Settings): apply it here and save it for every window. */
 export function chooseLang(l: Lang): void {
   setLang(l);
   persistLang(l);

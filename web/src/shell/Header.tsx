@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { getLang, chooseLang, useT } from '@/i18n/index.ts';
+import { getLang, chooseLang, LANGS, useT } from '@/i18n/index.ts';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.tsx';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { openSettings } from '@/tabs/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
@@ -12,7 +13,7 @@ import { selectRestarting, selectSwitching } from '@/controls/slice.ts';
 export function Header() {
   const t = useT();
   const d = useAppDispatch();
-  const other = getLang() === 'ru' ? 'en' : 'ru';
+  const lang = getLang();
   const conn = useAppSelector(selectConn);
   const session = useAppSelector(selectSession);
   const switching = useAppSelector(selectSwitching);
@@ -44,15 +45,26 @@ export function Header() {
       >
         <Svg size={15}>{ICONS.settings}</Svg>
       </button>
-      <button
-        type="button"
-        id="langBtn"
-        title={t('langTip')}
-        onClick={() => chooseLang(other)}
-        className="cursor-pointer rounded-md border border-border-soft px-2 py-0.5 text-[11px] font-medium hover:text-foreground"
-      >
-        {other.toUpperCase()}
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            id="langBtn"
+            aria-label={t('langTip')}
+            title={t('langTip')}
+            className="grid size-7 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Svg size={15}>{ICONS.globe}</Svg>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {LANGS.map((l) => (
+            <DropdownMenuItem key={l.id} data-lang={l.id} onSelect={() => chooseLang(l.id)} className={l.id === lang ? 'font-semibold text-foreground' : undefined}>
+              {l.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </header>
   );
 }

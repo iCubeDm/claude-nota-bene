@@ -22,14 +22,15 @@ function setup() {
   };
 }
 
-it('the toggle shows the other language and re-renders the header on click', () => {
+it('the globe opens the language list; a pick re-renders the header', () => {
   setLang('ru');
   setup();
-  const btn = screen.getByRole('button', { name: 'EN' });
-  expect(btn).toHaveAttribute('title', 'Язык интерфейса: English');
+  const btn = screen.getByRole('button', { name: 'Язык интерфейса' });
   expect(screen.getByText('подключение…')).toBeInTheDocument();
-  fireEvent.click(btn);
-  expect(screen.getByRole('button', { name: 'RU' })).toBeInTheDocument();
+  fireEvent.keyDown(btn, { key: 'Enter' });
+  expect(screen.getByRole('menuitem', { name: 'Русский' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'English' }));
+  expect(screen.getByRole('button', { name: 'Interface language' })).toBeInTheDocument();
   expect(screen.getByText('connecting…')).toBeInTheDocument();
   setLang('ru');
 });
