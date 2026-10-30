@@ -25,6 +25,17 @@ describe('EventHub: lossy frames and a running ! command', () => {
     expect(slow.frames).toHaveLength(2); // replay + the one that was not lossy
   });
 
+  it('says when a lossy frame was skipped, and only then', () => {
+    const hub = new EventHub();
+    let behind = 5 * 1024 * 1024;
+    hub.attach({ ...sock(), buffered: () => behind });
+    const out = { kind: 'shell-out', id: 'r', text: 'x', truncated: false } as const;
+    expect(hub.emit(out, { store: false, lossy: true })).toBe(true);
+    behind = 0;
+    expect(hub.emit(out, { store: false, lossy: true })).toBe(false);
+    expect(hub.emit(out, { store: false })).toBe(false);
+  });
+
   it('a compaction keeps the start of a run that has not ended, and lets an ended run go', () => {
     const hub = new EventHub();
     hub.emit({ kind: 'shell-start', id: 'live', cmd: 'sleep 9' });

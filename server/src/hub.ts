@@ -22,18 +22,24 @@ export class EventHub {
   private archived = new WeakSet<ServerEvent>();
   private socks = new Set<Sock>();
 
-  emit(ev: EmitInput, o: { store?: boolean; lossy?: boolean } = {}): void {
+  /** Returns whether a `lossy` frame was skipped for some socket (it was far behind): the sender sends the state again later. */
+  emit(ev: EmitInput, o: { store?: boolean; lossy?: boolean } = {}): boolean {
+    let skipped = false;
     const stamped = this.stamp(ev);
     if (o.store ?? true) this.history.push(stamped);
     const frame = JSON.stringify(stamped);
     for (const s of [...this.socks]) {
-      if (o.lossy && (s.buffered?.() ?? 0) > LOSSY_BACKLOG) continue;
+      if (o.lossy && (s.buffered?.() ?? 0) > LOSSY_BACKLOG) {
+        skipped = true;
+        continue;
+      }
       try {
         s.send(frame);
       } catch {
         this.socks.delete(s);
       }
     }
+    return skipped;
   }
 
   /**

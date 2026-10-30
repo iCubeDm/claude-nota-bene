@@ -39,7 +39,8 @@ type Run = {
 };
 
 type Options = {
-  emit: (ev: EmitInput, o?: { store?: boolean; lossy?: boolean }) => void;
+  /** true: a lossy frame was skipped for some socket, so the same state is sent again at the next tick */
+  emit: (ev: EmitInput, o?: { store?: boolean; lossy?: boolean }) => boolean | void;
   /** the project folder now (it moves with a switch) */
   root: () => string;
   report: (where: string, e: unknown) => void;
@@ -201,10 +202,15 @@ export class ShellRunner {
     r.all.push(text);
     // one frame per tick, whatever came in: the tail so far, replacing what the page shows
     if (r.quiet || r.flush) return;
+    this.schedule(r);
+  }
+
+  private schedule(r: Run): void {
     r.flush = setTimeout(() => {
       r.flush = undefined;
       if (r.quiet || r.done) return;
-      this.o.emit({ kind: 'shell-out', id: r.id, text: r.all.text, truncated: r.all.cut }, { store: false, lossy: true });
+      const skipped = this.o.emit({ kind: 'shell-out', id: r.id, text: r.all.text, truncated: r.all.cut }, { store: false, lossy: true });
+      if (skipped) this.schedule(r); // a socket was behind and missed it: a quiet run would stay stale there, so again until it took it
     }, SHELL_FLUSH_MS);
   }
 

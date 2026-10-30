@@ -319,6 +319,24 @@ describe('a command that prints without end', () => {
   });
 });
 
+describe('a frame a socket missed', () => {
+  it('is sent again while the last one was skipped, so a quiet run does not stay stale', async () => {
+    let skipNext = 2;
+    const r = new ShellRunner({
+      emit: (ev) => { events.push(ev); return ev.kind === 'shell-out' && skipNext-- > 0; },
+      root: () => dir, report: () => {},
+    });
+    runners.push(r);
+    r.run('r1', 'echo once; sleep 30');
+    await until(() => outs().length >= 3, 3000); // two skipped, then taken: three frames of one burst of output
+    expect(new Set(outs().map((o) => o.text))).toEqual(new Set(['once\n']));
+    await sleep(350);
+    expect(outs().length).toBe(3); // taken: it stops
+    r.stop('r1');
+    await until(() => !!ended());
+  });
+});
+
 describe('small things of the run', () => {
   it('a command that looks like an option is a command', async () => {
     const end = await runToEnd(make(), '--version');
