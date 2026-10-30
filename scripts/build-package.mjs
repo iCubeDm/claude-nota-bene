@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds the publishable npm package into pkg/ (git-ignored): a compiled server and launcher, a FRESH web build, the
-// blend assets, LICENSE, README and a generated package.json. It never publishes anything.
+// blend assets, LICENSE, THIRD-PARTY-NOTICES, README and a generated package.json. It never publishes anything.
 //
 //   node scripts/build-package.mjs [--out DIR] [--skip-web]
 //
@@ -45,7 +45,7 @@ export function packageJson() {
     license: 'Apache-2.0',
     type: 'module',
     bin: { [BIN]: 'bin/nota-bene.mjs' },
-    files: ['bin/nota-bene.mjs', 'server/src/main.js', 'server/src/blend', 'web/dist', 'README.md', 'LICENSE'],
+    files: ['bin/nota-bene.mjs', 'server/src/main.js', 'server/src/blend', 'web/dist', 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md'],
     engines: { node: NODE_RANGE },
     dependencies: runtimeDependencies(),
     keywords: ['claude', 'claude-code', 'ide', 'agent'],
@@ -84,6 +84,7 @@ export async function buildPackage({ out = path.join(ROOT, 'pkg'), skipWeb = fal
   for (const f of ['export.py', 'sandbox.sb']) fs.copyFileSync(path.join(ROOT, 'server/src/blend', f), path.join(out, 'server/src/blend', f));
   fs.copyFileSync(path.join(ROOT, 'LICENSE'), path.join(out, 'LICENSE'));
   fs.copyFileSync(path.join(ROOT, 'README.md'), path.join(out, 'README.md'));
+  fs.copyFileSync(path.join(ROOT, 'THIRD-PARTY-NOTICES.md'), path.join(out, 'THIRD-PARTY-NOTICES.md'));
 
   if (skipWeb) fs.mkdirSync(path.join(out, 'web/dist'), { recursive: true }); // tests: they put their own index.html in
   else {

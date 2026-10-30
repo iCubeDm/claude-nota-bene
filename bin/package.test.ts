@@ -63,7 +63,7 @@ it('the generated package.json: unscoped name, one bin, exact runtime deps only,
 
 it('ships compiled JS with the shared protocol inlined, the blend assets and no TypeScript', () => {
   const files = tree(pkg).map((f) => path.relative(pkg, f));
-  expect(files).toEqual(expect.arrayContaining(['bin/nota-bene.mjs', 'server/src/main.js', 'server/src/blend/export.py', 'server/src/blend/sandbox.sb', 'web/dist/index.html', 'LICENSE', 'README.md', 'package.json']));
+  expect(files).toEqual(expect.arrayContaining(['bin/nota-bene.mjs', 'server/src/main.js', 'server/src/blend/export.py', 'server/src/blend/sandbox.sb', 'web/dist/index.html', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'README.md', 'package.json']));
   expect(files.filter((f) => /\.tsx?$/.test(f))).toEqual([]);
   for (const f of ['bin/nota-bene.mjs', 'server/src/main.js']) expect(fs.readFileSync(path.join(pkg, f), 'utf8')).not.toContain('@nota-bene/shared');
   expect(fs.readFileSync(path.join(pkg, 'bin/nota-bene.mjs'), 'utf8').startsWith('#!/usr/bin/env node')).toBe(true);
