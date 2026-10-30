@@ -16,7 +16,7 @@ const QUEUE_MAX = 10;
 type Run = {
   id: string; cmd: string; child?: ChildProcess;
   out: Tail; err: Tail; all: Tail; ansiOut: AnsiStripper; ansiErr: AnsiStripper;
-  stop?: ShellStop;
+  stop?: ShellStop | 'switch';
   /** a switch or a close stopped it: it says nothing more to the feed and leaves nothing for the agent */
   quiet: boolean;
   exit?: { code: number | null; signal: NodeJS.Signals | null };
@@ -172,7 +172,7 @@ export class ShellRunner {
     if (!r.quiet) this.o.emit({ kind: 'shell-out', id: r.id, text }, { store: false });
   }
 
-  private terminate(r: Run, why: ShellStop): void {
+  private terminate(r: Run, why: ShellStop | 'switch'): void {
     if (r.done || r.stop) return;
     r.stop = why;
     signalGroup(r, 'SIGTERM');
@@ -194,7 +194,7 @@ export class ShellRunner {
     const code = r.exit?.code ?? null;
     this.o.emit({
       kind: 'shell-end', id: r.id, cmd: r.cmd, output: r.all.text, truncated: r.all.cut, code,
-      ...(r.stop ? { stop: r.stop } : {}), ...(r.error ? { error: r.error } : {}),
+      ...(r.stop && r.stop !== 'switch' ? { stop: r.stop } : {}), ...(r.error ? { error: r.error } : {}),
     });
     const note = r.stop === 'user' ? '[stopped by the user]' : r.stop === 'timeout' ? '[stopped: it ran longer than 10 minutes]' : r.error ? `[could not run: ${r.error}]` : undefined;
     this.queue.push(bashBlock({ cmd: r.cmd, stdout: r.out.text, stdoutCut: r.out.cut, stderr: r.err.text, stderrCut: r.err.cut, ...(note ? { note } : {}) }));

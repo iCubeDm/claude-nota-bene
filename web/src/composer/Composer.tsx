@@ -10,6 +10,7 @@ import { nextMode, pickMode, selectCapabilities, selectMode, selectSuggestion, s
 import { ShortcodePicker } from '@/comments/ShortcodePicker.tsx';
 import { MentionPicker } from './MentionPicker.tsx';
 import { SlashPicker } from './SlashPicker.tsx';
+import { selectShellMode } from './shellMode.ts';
 import { Meters } from '@/stats/Meters.tsx';
 import { CtxNudge } from '@/stats/CtxNudge.tsx';
 import { Attachments } from '@/attachments/Attachments.tsx';
@@ -37,6 +38,7 @@ export function Composer() {
   // mid-switch the server refuses sends: Send is off (Enter too) and the draft simply waits for the new session
   const switching = useAppSelector(selectSwitching);
   const suggestion = useAppSelector(selectSuggestion);
+  const shellMode = useAppSelector(selectShellMode); // a draft that starts with `!` is a shell command: Enter runs it
   const showSug = !!suggestion && !text && !busy && !switching;
   const [failed, setFailed] = useState(false);
   const [note, setNote] = useState('');
@@ -175,8 +177,14 @@ export function Composer() {
           }}
           onKeyDown={onKeyDown}
           onPaste={intake.onPaste}
-          className={`max-h-[40vh] min-h-10 w-full resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)] ${showSug ? 'pr-16 placeholder:text-foreground placeholder:opacity-45' : 'placeholder:truncate'}`}
+          data-shell={shellMode || undefined}
+          className={`max-h-[40vh] min-h-10 w-full resize-none rounded-[10px] border border-border-soft bg-[oklch(0.15_0.02_260/0.7)] px-3 py-[9px] text-foreground transition-[border-color,box-shadow] outline-none focus:border-[oklch(0.75_0.18_280/0.6)] focus:shadow-[0_0_0_3px_oklch(0.75_0.18_280/0.12)] data-[shell]:border-nb-accent/60 data-[shell]:pr-32 data-[shell]:font-mono data-[shell]:focus:border-nb-accent data-[shell]:focus:shadow-[0_0_0_3px_oklch(0.70_0.20_60/0.15)] ${showSug ? 'pr-16 placeholder:text-foreground placeholder:opacity-45' : 'placeholder:truncate'}`}
         />
+        {shellMode && (
+          <span aria-hidden data-testid="shell-cue" className="pointer-events-none absolute right-2.5 bottom-2.5 rounded bg-muted px-1.5 py-px font-mono text-[10.5px] text-nb-accent">
+            {t('shellCue')}
+          </span>
+        )}
         {showSug && (
           <span aria-hidden className="pointer-events-none absolute right-2.5 bottom-2.5 rounded bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
             Tab ⇥
@@ -188,7 +196,7 @@ export function Composer() {
         <ShortcodePicker target={ref} />
         <span className="inline-flex" title={switching ? t('switching') : building ? t('buildingImage') : uploading ? t('uploadWait') : undefined}>
           <Button type="button" className="h-10" disabled={uploading || switching} onClick={() => submit(false)}>
-            {nPending ? t('sendN', nPending) : t('send')}
+            {shellMode ? t('shellRun') : nPending ? t('sendN', nPending) : t('send')}
           </Button>
         </span>
         <Tooltip>

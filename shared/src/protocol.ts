@@ -212,11 +212,11 @@ export type ServerEvent =
   /**
    * the run `id` ended. `output`: its merged output, the last SHELL_OUTPUT_CAP characters (`truncated`: more came before).
    * `code`: the exit code (null: killed by a signal, or never started); `stop`: why the server stopped it (the user's
-   * `shell-stop`, the timeout, a session switch); `error`: it could not start. `cmd` again: the start may have been archived by then.
+   * `shell-stop`, the timeout; a switch or a close stops quietly and ends nothing); `error`: it could not start. `cmd` again: the start may have been archived by then.
    */
   | { kind: 'shell-end'; id: string; cmd: string; output: string; truncated: boolean; code: number | null; stop?: ShellStop; error?: string; ts: number };
 
-export type ShellStop = 'user' | 'timeout' | 'switch';
+export type ShellStop = 'user' | 'timeout';
 
 type Obj = Record<string, unknown>;
 

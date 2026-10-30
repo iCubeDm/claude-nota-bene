@@ -3,6 +3,7 @@ import { mediaTypeOf } from '../attachments/image.ts';
 import { getLang, t, tIn } from '../i18n/index.ts';
 import { selectReplyLabel, sendMessage, type AppThunk, type RootState } from '../store/store.ts';
 import { isClearCommand } from '../composer/slashRank.ts';
+import { runShellDraft, selectShellMode } from '../composer/shellMode.ts';
 import { composeBatch } from './compose.ts';
 import { instructionOf, labelOf } from './labels.ts';
 import { draftSent, removeImage, selectBuilding, selectDraft, selectImages, selectUploading, setBuilding, setDraft, type ImageEntry } from '../composer/slice.ts';
@@ -15,7 +16,7 @@ import { toast } from '../shell/toast.ts';
 import { agentName } from '../subagent/slice.ts';
 import { buildComposites, frameGroups, type FrameGroup } from './frameGroups.ts';
 
-/** 'blocked': a /clear with pending comments, held with a note (nothing sent, nothing released). 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). 'changed': the comments or the session changed during that wait, nothing was sent. */
+/** 'blocked': a /clear with pending comments, or a `! cmd` that cannot run now, held with a note (nothing sent, nothing released). 'building': a combined image is being made and uploaded; the send finishes by itself (the button is disabled meanwhile). 'changed': the comments or the session changed during that wait, nothing was sent. */
 export type SendResult = 'empty' | 'blocked' | 'sent' | 'offline' | 'switching' | 'building' | 'changed';
 
 /** A file source as the batch and the card name it: `path`, or `path @ ref` for another branch or worktree (M3-16). */
@@ -134,6 +135,8 @@ const tell = (r: SendResult): void => {
 export const sendBatch = (force: boolean): AppThunk<SendResult> => (d, getState) => {
   const st = getState();
   if (st.controls.switching) return 'switching';
+  // `! cmd` is not a message: the server runs it (comments and images pending: refused, the draft kept)
+  if (selectShellMode(st)) return d(runShellDraft());
   const snap = snapshotOf(st);
   if ((!snap.body && !snap.pending.length && !snap.own.length) || selectUploading(st) || selectBuilding(st)) return 'empty';
   // /clear drops the whole conversation, the comments with it: hold it until they are sent or removed

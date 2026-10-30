@@ -10,6 +10,7 @@ import { CompactingLine, DoneLine, IdleCompactLine, MarkerLine, NoticeLine } fro
 import { EarlierButton } from './EarlierButton.tsx';
 import { PlanCard } from './PlanCard.tsx';
 import { PermissionCard } from './PermissionCard.tsx';
+import { ShellBlock } from './ShellBlock.tsx';
 import { ToolGroup } from './ToolGroup.tsx';
 import { ToolLine } from './ToolLine.tsx';
 import { UserMessage } from './UserMessage.tsx';
@@ -171,6 +172,8 @@ export function Feed({ feed, agent, running }: { feed?: FeedState; agent?: strin
             return <DoneLine key={it.key} item={it} />;
           case 'permission':
             return it.toolName === 'ExitPlanMode' && typeof it.input.plan === 'string' ? <PlanCard key={it.id} item={it} /> : <PermissionCard key={it.id} item={it} />;
+          case 'shell':
+            return <ShellBlock key={`shell:${it.id}`} item={it} />;
           case 'marker':
             return <MarkerLine key={it.key} item={it} />;
           case 'notice':
