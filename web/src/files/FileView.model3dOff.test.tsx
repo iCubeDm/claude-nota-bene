@@ -1,4 +1,5 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
@@ -57,7 +58,22 @@ it('closing a tab drops the jump still waiting for it: a model that never became
     act(() => void store.dispatch(filesSlice.actions.requestJump({ path, src: 'here', id: 'c1' })));
     if (on) expect(store.getState().files.jump).toMatchObject({ id: 'c1' }); // a model's jump waits for its viewer (mocked away here)
     unmount(); // the tab closes
+    await Promise.resolve(); // the drop waits one microtask (StrictMode's probe unmount is not a close)
     expect([path, store.getState().files.jump]).toEqual([path, null]); // nothing carries to the next open of the file
     cleanup();
   }
+});
+
+it('under StrictMode (dev) the simulated unmount does not drop a jump requested before the view mounted', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([0, 1]), { status: 200, headers: { 'content-length': '2' } })));
+  setModel3d(true);
+  const store = makeStore({ url: 'ws://x', connect: () => ({ send: () => true, close() {} }) });
+  // a jump to a file that is not open yet: the same click opens the tab and requests it
+  act(() => void store.dispatch(filesSlice.actions.requestJump({ path: 'm/a.glb', src: 'here', id: 'c1' })));
+  const { unmount } = render(<StrictMode><Provider store={store}><TooltipProvider><FileView path="m/a.glb" active /></TooltipProvider></Provider></StrictMode>);
+  await new Promise((r) => setTimeout(r, 50));
+  expect(store.getState().files.jump).toMatchObject({ id: 'c1' }); // the mount -> cleanup -> mount probe is not a close
+  unmount(); // a real close still drops it
+  await Promise.resolve();
+  expect(store.getState().files.jump).toBeNull();
 });

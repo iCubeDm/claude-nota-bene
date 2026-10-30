@@ -147,7 +147,19 @@ export function useFileLoad({ path, src, ref, url, kind, media, hasVersion, acti
 
   // the load state comments read (orphan or unknown); published after the commit, so the text is in the DOM by then
   // closing the view drops a jump still waiting for it; a kind flip under a live view (text -> model) is not a close
-  useEffect(() => () => void dispatch(dropJump({ path, ref })), [path, ref, dispatch]);
+  // StrictMode (dev) runs mount -> cleanup -> mount on a fresh view: that cleanup is no close, and must not drop a jump the same
+  // click requested. The drop therefore waits one microtask and happens only if this key was not mounted again by then.
+  const mountedKey = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${path}\0${ref ?? ''}`;
+    mountedKey.current = key;
+    return () => {
+      if (mountedKey.current === key) mountedKey.current = null;
+      queueMicrotask(() => {
+        if (mountedKey.current !== key) dispatch(dropJump({ path, ref }));
+      });
+    };
+  }, [path, ref, dispatch]);
   useEffect(() => {
     if (media) return;
     dispatch(setFileLoad({ path, ref, s: 'loading' }));
