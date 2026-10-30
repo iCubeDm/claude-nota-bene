@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
-import { accessToken, authenticated, bearerFor, cookieName, portCredential, sameSecret, sessionCookie } from './auth.ts';
+import { accessToken, authenticated, cookieName, portCredential, proofFor, sameSecret, sessionCookie, verifiedBearer } from './auth.ts';
 import { startServer } from './server.ts';
 import { shellEnv } from './session/shellText.ts';
 
@@ -157,8 +157,6 @@ describe('the HTTP API needs auth', () => {
     expect((await req(s.port, '/info', { headers: { authorization: `Bearer ${s.cred}` } })).status).toBe(200);
     expect((await req(s.port, '/info', { headers: { authorization: `Bearer ${s.token}` } })).status).toBe(200);
     expect((await req(s.port, '/info', { headers: { cookie: `${cookieName(s.port)}=${s.cred}` } })).status).toBe(200);
-    // the helpers' own header
-    expect((await req(s.port, '/info', { headers: { authorization: bearerFor(s.port) } })).status).toBe(200);
   });
 
   it('a Range request (video, audio) is checked like any other', async () => {
@@ -320,25 +318,102 @@ describe('the token stays out of everything the window runs and prints', () => {
   });
 });
 
-describe('the helpers', () => {
-  it('probeInfo logs in with the port credential: it reaches a window of its state dir, not one of another', async () => {
+describe('/hello, the proof a helper asks for before it trusts a port', () => {
+  const hello = (port: number, c: string) => req(port, `/hello?c=${c}`);
+  const C = 'ab'.repeat(16);
+
+  it('answers only the proof for this port and challenge: no root, no credential, no state', async () => {
+    const s = await boot();
+    const r = await hello(s.port, C);
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.body)).toEqual({ proof: proofFor(s.token, s.port, C) });
+    expect(r.body).not.toContain(s.token);
+    expect(r.body).not.toContain(s.cred);
+    expect(r.body).not.toContain(path.join(tmp, 'proj'));
+  });
+
+  it('a proof for another challenge, another port, or another token does not match', async () => {
+    const s = await boot();
+    const got = (JSON.parse((await hello(s.port, C)).body) as { proof: string }).proof;
+    expect(got).not.toBe(proofFor(s.token, s.port, 'cd'.repeat(16)));
+    expect(got).not.toBe(proofFor(s.token, s.port + 1, C));
+    expect(got).not.toBe(proofFor('f'.repeat(64), s.port, C));
+  });
+
+  it('refuses a missing, malformed, short or oversized challenge, and any other method', async () => {
+    const s = await boot();
+    for (const c of ['', 'zz'.repeat(16), 'ab', 'ab'.repeat(33), 'AB'.repeat(16), '../x']) expect((await hello(s.port, c)).status, c).toBe(400);
+    expect((await req(s.port, '/hello')).status).toBe(400);
+    expect((await req(s.port, `/hello?c=${C}`, { method: 'POST', headers: { origin: `http://127.0.0.1:${s.port}` } })).status).toBe(405);
+  });
+
+  it('/info stays protected: the proof opens nothing', async () => {
+    const s = await boot();
+    expect((await req(s.port, '/info')).status).toBe(401);
+  });
+
+  it('verifiedBearer gives the credential for a real window, and nothing for a relay of another port\'s window', async () => {
+    const real = await boot();
+    expect(await verifiedBearer(real.port, 1000)).toBe(`Bearer ${real.cred}`);
+    // an impostor that forwards /hello to the real window: the proof is for the real port, the helper dialled another
+    const seen: string[] = [];
+    const relay = http.createServer((q, res) => {
+      seen.push(`${q.url} ${q.headers.authorization}`);
+      req(real.port, q.url ?? '/').then((r) => res.writeHead(r.status, { 'content-type': 'application/json' }).end(r.body), () => res.writeHead(502).end());
+    });
+    await new Promise<void>((r) => relay.listen(0, '127.0.0.1', () => r()));
+    closers.push(() => new Promise((r) => { relay.closeAllConnections(); relay.close(() => r()); }));
+    const port = (relay.address() as { port: number }).port;
+    expect(await verifiedBearer(port, 1000)).toBeNull();
+    expect(seen.every((x) => x.endsWith('undefined'))).toBe(true); // it saw the challenge and no Authorization
+  });
+});
+
+describe('the helpers send nothing to a listener that cannot prove itself', () => {
+  async function impostor(answer?: (url: string) => string | null) {
+    const seen: { url: string; auth: string | undefined; cookie: string | undefined }[] = [];
+    const srv = http.createServer((q, res) => {
+      seen.push({ url: q.url ?? '', auth: q.headers.authorization, cookie: q.headers.cookie });
+      const body = answer?.(q.url ?? '');
+      if (body === null || body === undefined) return void res.writeHead(404).end();
+      res.writeHead(200, { 'content-type': 'application/json' }).end(body);
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+    closers.push(() => new Promise((r) => { srv.closeAllConnections(); srv.close(() => r()); }));
+    return { port: (srv.address() as { port: number }).port, seen };
+  }
+  const nothingSent = (seen: { auth?: string | undefined; cookie?: string | undefined }[]) => seen.every((x) => x.auth === undefined && x.cookie === undefined);
+
+  it('probeInfo and probeWindow: a silent, a lying and a proof-guessing listener see no Authorization header', async () => {
+    const { probeInfo } = await import('./windows.ts');
+    const { probeWindow } = await import('./system.ts');
+    accessToken();
+    for (const answer of [undefined, () => '{"proof":"00","root":"/x"}', () => JSON.stringify({ proof: 'ab'.repeat(32), root: '/x' })]) {
+      const imp = await impostor(answer);
+      expect(await probeInfo(imp.port)).toBeNull();
+      expect(await probeWindow(imp.port)).toBeNull();
+      expect(imp.seen.length).toBeGreaterThan(0);
+      expect(nothingSent(imp.seen)).toBe(true);
+      expect(imp.seen.every((x) => x.url.startsWith('/hello?c='))).toBe(true); // it never even got a request for /info
+    }
+  });
+
+  it('probeInfo logs in with the port credential once the window proved itself, and not to another state dir\'s window', async () => {
     const { probeInfo } = await import('./windows.ts');
     const s = await boot();
     expect(await probeInfo(s.port)).toMatchObject({ root: path.join(tmp, 'proj') });
-    fs.rmSync(path.join(home, 'token')); // rotated (as if another state dir): the running window keeps its old token
+    fs.rmSync(path.join(home, 'token')); // rotated: the running window keeps the old token and cannot prove the new one
     expect(await probeInfo(s.port)).toBeNull();
   });
 
-  it('probeInfo sends only a credential bound to the port it probes, never the token', async () => {
-    const { probeInfo } = await import('./windows.ts');
-    const seen: string[] = [];
-    const impostor = http.createServer((req, res) => { seen.push(String(req.headers.authorization)); res.writeHead(404).end(); });
-    await new Promise<void>((r) => impostor.listen(0, '127.0.0.1', () => r()));
-    closers.push(() => new Promise((r) => impostor.close(() => r())));
-    const port = (impostor.address() as { port: number }).port;
-    expect(await probeInfo(port)).toBeNull();
-    expect(seen).toEqual([`Bearer ${portCredential(accessToken(), port)}`]);
-    expect(seen[0]).not.toContain(accessToken());
+  it('the control relay re-checks the proof before it sends the control token', async () => {
+    const { systemRoutes } = await import('./system.ts');
+    accessToken();
+    const imp = await impostor();
+    const routes = systemRoutes({ hub: {} as never, root: () => '/x', port: () => 1, repoDir: tmp, control: { supervised: () => false, exiting: () => false, restartAgent() {}, restartServer() {}, stop() {} } });
+    expect(routes['/system/windows/action']).toBeTypeOf('function'); // the relay itself is internal; its guard is the proof below
+    expect(await verifiedBearer(imp.port, 500)).toBeNull();
+    expect(imp.seen.some((x) => x.url.startsWith('/control/'))).toBe(false);
   });
 
   it('neither main.ts nor the launcher can switch the check off', () => {

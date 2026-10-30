@@ -13,7 +13,7 @@ import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http
 import os from 'node:os';
 import path from 'node:path';
 import { MODES, type Mode } from '@nota-bene/shared';
-import { bearerFor, stateSecret } from './auth.ts';
+import { stateSecret, verifiedBearer } from './auth.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { readPrefs, setDefaultModePref, setLangPref } from './prefs.ts';
@@ -192,8 +192,10 @@ export type WindowRow = {
 
 export async function probeWindow(port: number, timeoutMs = 700): Promise<WindowInfo | null> {
   try {
-    // never follow a redirect: the answer must be that port's own
-    const r = await fetch(`http://127.0.0.1:${port}/info`, { headers: { authorization: bearerFor(port) }, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+    // the credential goes only to a listener that proved it holds the token; never follow a redirect: the answer must be that port's own
+    const bearer = await verifiedBearer(port, timeoutMs);
+    if (!bearer) return null;
+    const r = await fetch(`http://127.0.0.1:${port}/info`, { headers: { authorization: bearer }, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
     if (!r.ok) return null;
     const j = (await r.json()) as WindowInfo;
     return j && typeof j.root === 'string' ? j : null;
@@ -286,6 +288,8 @@ export function systemRoutes(o: {
 }): Record<string, RequestListener> {
   const probe = o.probe ?? probeWindow;
   const relay = o.relay ?? (async (port, action, token) => {
+    // the control token goes only to a listener that proved it holds the access token (the probe before may be stale)
+    if (!(await verifiedBearer(port, 1000))) return 502;
     // redirect: 'error': a 307/308 would carry the token on to wherever it points
     const r = await fetch(`http://127.0.0.1:${port}/control/${action}`, { method: 'POST', headers: { [CONTROL_HEADER]: token }, signal: AbortSignal.timeout(3000), redirect: 'error' });
     return r.status;

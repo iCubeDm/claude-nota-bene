@@ -24,8 +24,9 @@
 # is, anything else (spaces, quotes, $, parentheses, non-ASCII) is single-quoted, so bash and zsh read each back exactly and
 # Claude Code accepts the text (it refuses backslash-escaped spaces and $'\320...' escapes).
 # --wait polls --find every 0.5 s for up to 40 s (NB_WAIT_SECS, test only) and prints "NB: opened URL for DIR<note>."
-# The URL the skill shows carries the login fragment (#t=TOKEN, from the launcher's --url): it logs a second browser in. The
-# token is never in a command line: the browser is opened by the launcher (--front), on a page in the state dir.
+# The URL this script prints for the skill is the plain one, with no token: the skill's output enters the Claude Code transcript
+# and goes to the API. A browser logs in through the launcher, which opens a page in the state dir that redirects with the token
+# (a new window: the launcher itself; an open one: --front). A second browser can use `nota-bene --url PORT` in a terminal.
 # Without --plan the window is started with --detach (terminal use).
 # The launcher is bin/nota-bene.mjs (--find / --last / --detach). It keeps one window per folder (its launch lock),
 # so two /nb at once end with one window; this script finds, words and relays. Runs on bash 3.2 (macOS).
@@ -161,8 +162,7 @@ if [ "${1:-}" = --wait ]; then
   fi
   for ((i = 0; i < SECS * 2; i++)); do
     PORT="$(node "$BIN" --find "$WDIR" 2>/dev/null)" && [ -n "$PORT" ] && {
-      URL="$(node "$BIN" --url "$PORT" 2>/dev/null)"; [ -n "$URL" ] || URL="http://127.0.0.1:$PORT"
-      echo "NB: opened $URL for $WDIR$WNOTE."; exit 0; }
+      echo "NB: opened http://127.0.0.1:$PORT for $WDIR$WNOTE."; exit 0; }
     sleep 0.5
   done
   echo "NB: the window did not come up in ${SECS}s — see the background task's output."
@@ -199,8 +199,7 @@ already() { # $1 = URL of a window already serving this folder
 }
 bring() { # $1 = port of a window found here: bring it to front ourselves (the launcher opens its login page)
   [ -n "$OPENER" ] && node "$BIN" --front "$1" >/dev/null 2>&1
-  local url; url="$(node "$BIN" --url "$1" 2>/dev/null)"
-  already "${url:-http://127.0.0.1:$1}"
+  already "http://127.0.0.1:$1"
 }
 
 # a window already serving this folder: the registry (verified by /info, stale entries pruned), or any port of the range whose
@@ -276,7 +275,8 @@ OUT="$(node "$BIN" "$DIR" "${ARGS[@]}" 2>"$ERR" </dev/null)"; RC=$?
 LINE='^(opened|already-open) (http://127\.0\.0\.1:([0-9]+)(/#t=[0-9a-f]+)?)$'
 if [ $RC -eq 0 ] && [[ "$OUT" =~ $LINE ]]; then
   rm -f "$ERR"
-  VERB="${BASH_REMATCH[1]}" URL="${BASH_REMATCH[2]}" PORT="${BASH_REMATCH[3]}"
+  VERB="${BASH_REMATCH[1]}" PORT="${BASH_REMATCH[3]}"
+  URL="http://127.0.0.1:$PORT"   # the launcher's line carries #t=TOKEN; the skill's output must not
   [ "$VERB" = already-open ] && already "$URL"
   T="${TMPDIR:-/tmp}"
   echo "NB: opened $URL for $DIR$NOTE. Log: ${T%/}/nota-bene-$PORT.log"

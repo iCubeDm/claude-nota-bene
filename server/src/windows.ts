@@ -6,7 +6,7 @@
 // without unregistering, and its port reused by another app.
 import fs from 'node:fs';
 import path from 'node:path';
-import { bearerFor } from './auth.ts';
+import { verifiedBearer } from './auth.ts';
 import { stateDir } from './state.ts';
 
 export type WindowEntry = {
@@ -71,10 +71,12 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-/** GET http://127.0.0.1:PORT/info → { root } or null (no answer, not ours, not JSON, not logged in). Sends the port's credential only. */
+/** GET http://127.0.0.1:PORT/info → { root } or null (no answer, not ours, not JSON, not logged in). The credential goes only to a listener that proved it holds the token (GET /hello). */
 export async function probeInfo(port: number, timeoutMs = 500): Promise<{ root: string } | null> {
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/info`, { headers: { authorization: bearerFor(port) }, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+    const bearer = await verifiedBearer(port, timeoutMs);
+    if (!bearer) return null;
+    const r = await fetch(`http://127.0.0.1:${port}/info`, { headers: { authorization: bearer }, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
     if (!r.ok) return null;
     const j: unknown = await r.json();
     const root = j && typeof j === 'object' ? (j as { root?: unknown }).root : undefined;

@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 import { fakeBackend } from './agent/fake.ts';
 import { readPrefs } from './prefs.ts';
 import { startServer } from './server.ts';
+import { accessToken } from './auth.ts';
 import { CLEAN_MIN_AGE_MS, CONTROL_HEADER, cleanAttachments, cleanCandidates, cleanStaleArchives, controlToken, describeVersion, dirSize, staleArchives } from './system.ts';
 import { registerWindow } from './windows.ts';
 
@@ -34,9 +35,9 @@ afterEach(async () => {
   for (const d of [home, dist, proj, ...extraDirs.splice(0)]) fs.rmSync(d, { recursive: true, force: true });
 });
 
-async function boot(cwd = proj) {
+async function boot(cwd = proj, auth = false) {
   const exits: number[] = [];
-  const s = await startServer({ insecureNoAuth: true, cwd, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, exit: (c) => void exits.push(c) });
+  const s = await startServer({ ...(auth ? {} : { insecureNoAuth: true }), cwd, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, exit: (c) => void exits.push(c) });
   closers.push(s.close);
   const port = Number(new URL(s.url).port);
   return { ...s, port, exits, origin: s.url };
@@ -46,8 +47,10 @@ const rowOf = (port: number) => {
   const w = JSON.parse(fs.readFileSync(path.join(home, 'windows', `${port}.json`), 'utf8')) as { root: string; pid: number; startedAt: number };
   return { port, root: w.root, pid: w.pid, startedAt: w.startedAt };
 };
+// the raw token is accepted as a Bearer; servers booted with auth on (the windows tests: the cross-window probe needs it) want it
 const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
-  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken()}`, ...headers }, body: JSON.stringify(body) });
+const af = (url: string) => fetch(url, { headers: { authorization: `Bearer ${accessToken()}` } });
 async function until(cond: () => boolean, ms = 4000): Promise<void> {
   const end = Date.now() + ms;
   while (!cond()) {
@@ -258,21 +261,21 @@ describe('defaults and about', () => {
 
 describe('windows', () => {
   it('lists registered windows with their state; /info carries busy and clients', async () => {
-    const a = await boot();
-    const b = await boot(mkExtra('nb-system-b-'));
-    const bRoot = ((await (await fetch(`${b.url}/info`)).json()) as { root: string; busy: boolean; clients: number });
+    const a = await boot(proj, true);
+    const b = await boot(mkExtra('nb-system-b-'), true);
+    const bRoot = ((await (await af(`${b.url}/info`)).json()) as { root: string; busy: boolean; clients: number });
     expect(bRoot).toMatchObject({ busy: false, clients: 0 });
-    registerWindow(a.port, ((await (await fetch(`${a.url}/info`)).json()) as { root: string }).root, process.pid);
+    registerWindow(a.port, ((await (await af(`${a.url}/info`)).json()) as { root: string }).root, process.pid);
     registerWindow(b.port, bRoot.root, process.pid);
     registerWindow(1, '/gone', 999_999_999); // a dead pid
-    const rows = await (await fetch(`${a.url}/system/windows`)).json() as { port: number; state: string; current: boolean }[];
+    const rows = await (await af(`${a.url}/system/windows`)).json() as { port: number; state: string; current: boolean }[];
     expect(rows.map((r) => [r.port, r.state, r.current])).toEqual([[1, 'stale', false], ...[[a.port, 'live', true], [b.port, 'live', false]].sort((x, y) => (x[0] as number) - (y[0] as number))]);
   });
 
   it('A stops B through B\'s /control with the token; A refuses to act on itself; a page never reaches /control', async () => {
-    const a = await boot();
-    const b = await boot(mkExtra('nb-system-b-'));
-    for (const s of [a, b]) registerWindow(s.port, ((await (await fetch(`${s.url}/info`)).json()) as { root: string }).root, process.pid);
+    const a = await boot(proj, true);
+    const b = await boot(mkExtra('nb-system-b-'), true);
+    for (const s of [a, b]) registerWindow(s.port, ((await (await af(`${s.url}/info`)).json()) as { root: string }).root, process.pid);
     // a page (with an Origin, even its own) is refused at /control, with or without the token
     expect((await post(`${b.url}/control/stop`, {}, { origin: b.origin })).status).toBe(403);
     expect((await post(`${b.url}/control/stop`, {}, { origin: b.origin, [CONTROL_HEADER]: controlToken() })).status).toBe(403);
@@ -305,8 +308,8 @@ describe('windows', () => {
   });
 
   it('a registered port that answers with another root gets no token', async () => {
-    const a = await boot();
-    const b = await boot(mkExtra('nb-system-b-'));
+    const a = await boot(proj, true);
+    const b = await boot(mkExtra('nb-system-b-'), true);
     registerWindow(b.port, '/some/other/root', process.pid); // the port was reused by another window/app
     const r = await post(`${a.url}/system/windows/action`, { ...rowOf(b.port), action: 'stop' }, { origin: a.origin });
     expect(r.status).toBe(409);

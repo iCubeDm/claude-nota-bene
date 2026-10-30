@@ -25,7 +25,7 @@ import { codeChecker } from './codeStamp.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
 import { controlToken, systemRoutes } from './system.ts';
-import { accessToken, authenticated, sameSecret, sessionCookie } from './auth.ts';
+import { CHALLENGE_RE, accessToken, authenticated, proofFor, sameSecret, sessionCookie } from './auth.ts';
 
 /** how long a newcomer waits for the owner to close before it is told `occupied` (R-M7-6) */
 export const TAKEOVER_GRACE_MS = 700;
@@ -180,9 +180,22 @@ export async function startServer(o: {
         plain(200, '{"ok":true}', { 'content-type': 'application/json; charset=utf-8', 'set-cookie': sessionCookie(token, ownPort), 'cache-control': 'no-store' });
       });
     };
+    // GET /hello?c=<hex>: the one thing a helper may ask before it trusts a port. Answers only the proof that this server holds the
+    // token for the port it is bound to and the given challenge: no root, no state, nothing to replay (the port is in the proof)
+    const helloRoute: http.RequestListener = (req, res) => {
+      const plain = (status: number, body: string) => {
+        res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(body);
+      };
+      if (req.method !== 'GET') return plain(405, 'method not allowed');
+      const c = new URL(req.url ?? '/', 'http://x').searchParams.get('c') ?? '';
+      if (token === null || !CHALLENGE_RE.test(c)) return plain(400, 'bad request');
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ proof: proofFor(token, ownPort, c) }));
+    };
     const server = http.createServer(httpHandler({
       hub,
-      open: { '/auth': authRoute },
+      open: { '/auth': authRoute, '/hello': helloRoute },
       ...(authorize ? { authorize } : {}),
       allowedHosts,
       allowedOrigins,

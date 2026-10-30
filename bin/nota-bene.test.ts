@@ -127,6 +127,18 @@ async function firstFree(from: number, to: number): Promise<number> {
   throw new Error(`no free port in ${from}-${to}`);
 }
 
+/** A request handler for a fake window: proves itself on /hello as a window of this state dir would, then answers /info with `root`. */
+async function fakeWindowHandler(root: string, seen: string[] = []) {
+  const { proofFor } = await import('../server/src/auth.ts');
+  return (req: http.IncomingMessage, res: http.ServerResponse) => {
+    seen.push(`${req.url} ${req.headers.authorization}`);
+    const m = /^\/hello\?c=([0-9a-f]+)$/.exec(req.url ?? '');
+    const port = (req.socket.address() as net.AddressInfo | null)?.port ?? req.socket.localPort!;
+    if (m) return void res.setHeader('content-type', 'application/json').end(JSON.stringify({ proof: proofFor(tokenOf(), port, m[1]!) }));
+    res.setHeader('content-type', 'application/json').end(JSON.stringify({ root }));
+  };
+}
+
 /** The access token of the test's state dir (the real server creates it at start). */
 const tokenOf = () => fs.readFileSync(path.join(home, 'token'), 'utf8').trim();
 const authHeaders = () => ({ authorization: `Bearer ${tokenOf()}` });
@@ -412,7 +424,8 @@ describe('nota-bene launcher', () => {
     // a window missing from the registry (a failed registry write) is found by /info
     const other = path.join(tmp, 'project-b');
     fs.mkdirSync(other);
-    const s2 = http.createServer((_, res) => res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: other })));
+    fs.writeFileSync(path.join(home, 'token'), 'e'.repeat(64), { mode: 0o600 }); // the fake window needs a token to prove with
+    const s2 = http.createServer(await fakeWindowHandler(other));
     await new Promise<void>((r) => s2.listen(4792, '127.0.0.1', () => r()));
     try {
       const d3 = launch(['--detach'], {}, FAKE, other);
@@ -731,12 +744,10 @@ describe('the access token', () => {
     }
   }, 30000);
 
-  it('--find --scan also finds a window the registry does not know (it asks the ports of the range, logged in)', async () => {
+  it('--find --scan also finds a window the registry does not know; the credential goes only after the proof', async () => {
+    fs.writeFileSync(path.join(home, 'token'), 'd'.repeat(64), { mode: 0o600 });
     const seen: string[] = [];
-    const s = http.createServer((req, res) => {
-      seen.push(String(req.headers.authorization));
-      res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: project }));
-    });
+    const s = http.createServer(await fakeWindowHandler(project, seen));
     await new Promise<void>((r) => s.listen(4794, '127.0.0.1', () => r()));
     try {
       expect(bin(['--find', project]).status).toBe(1); // the registry alone does not
@@ -746,7 +757,31 @@ describe('the access token', () => {
       });
       expect([f.code, f.out.trim()]).toEqual([0, '4794']);
       const { portCredential } = await import('../server/src/auth.ts');
-      expect(seen).toContain(`Bearer ${portCredential(tokenOf(), 4794)}`);
+      expect(seen[0]).toMatch(/^\/hello\?c=[0-9a-f]{32} undefined$/); // the challenge first, with no Authorization
+      expect(seen.at(-1)).toBe(`/info Bearer ${portCredential(tokenOf(), 4794)}`);
+    } finally {
+      s.closeAllConnections();
+      await new Promise((r) => s.close(r));
+    }
+  }, 20000);
+
+  it('an impostor on a range port sees no Authorization header from --find --scan, --url or --front', async () => {
+    fs.writeFileSync(path.join(home, 'token'), 'd'.repeat(64), { mode: 0o600 });
+    const seen: string[] = [];
+    const s = http.createServer((req, res) => { seen.push(`${req.url} ${req.headers.authorization} ${req.headers.cookie}`); res.setHeader('content-type', 'application/json').end(JSON.stringify({ root: project, proof: 'ab'.repeat(32) })); });
+    await new Promise<void>((r) => s.listen(4794, '127.0.0.1', () => r()));
+    const op = stubOpener();
+    try {
+      const run = (args: string[]) => new Promise<{ code: number; out: string }>((resolve) => {
+        execFile(process.execPath, [BIN, ...args], { env: env({ PATH: op.path }) }, (e, out) => resolve({ code: e ? ((e as { code?: number }).code ?? -1) : 0, out }));
+      });
+      expect((await run(['--find', project, '--scan'])).code).toBe(1);
+      const u = await run(['--url', '4794']);
+      expect([u.code, u.out]).toEqual([1, '']); // the token is not printed for a port that did not prove itself
+      expect((await run(['--front', '4794'])).code).toBe(1);
+      expect(logLines(op.log)).toEqual([]); // no page was opened for it
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((x) => x.startsWith('/hello?c=') && x.endsWith(' undefined undefined'))).toBe(true);
     } finally {
       s.closeAllConnections();
       await new Promise((r) => s.close(r));

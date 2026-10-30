@@ -31,7 +31,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { accessToken } from '../server/src/auth.ts';
+import { accessToken, verifiedBearer } from '../server/src/auth.ts';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
 import {
@@ -688,6 +688,13 @@ async function main(argv) {
       if (!base) {
         say(`not a window port or a loopback URL: ${o.url ?? o.front}`);
         return 2;
+      }
+      // the URL (and the page --front opens) carries the raw token in its fragment, which the page's own script can read: only a
+      // listener that proved it holds the token (GET /hello) gets it. The dev server (a localhost URL) cannot prove anything
+      const m = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(base);
+      if (m && !(await verifiedBearer(Number(m[1]), 1500))) {
+        say(`nothing on port ${m[1]} proved it is a Nota Bene window of this state dir`);
+        return 1;
       }
       if (o.url !== undefined) process.stdout.write(`${loginUrl(base)}\n`);
       else await openBrowser(base, true);

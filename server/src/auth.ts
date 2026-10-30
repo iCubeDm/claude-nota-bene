@@ -3,9 +3,11 @@
 // One secret per state dir (`<stateDir>/token`, 32 random bytes as hex, mode 600, created with an exclusive link so two
 // first launches agree). It never travels in argv, env or a log: the server and the helpers read the file. A browser logs
 // in once with the token (the URL fragment `#t=`, POSTed to /auth) and keeps an HttpOnly cookie. The cookie and the
-// helpers' Authorization header carry a per-port credential (an HMAC of the port keyed by the token), not the token:
-// cookies are not port-scoped and a helper probes ports whose owner it has not verified, so what leaks there opens only
-// that port. The token is readable by any process of the same OS user (the agent too): the aim is to shut out other users
+// helpers' Authorization header carry a per-port credential (an HMAC of the port keyed by the token), not the token. The
+// credential is stable: it works for any window that ever binds that port, so it must NEVER go to a port whose listener has
+// not proved itself. A helper first asks the public GET /hello?c=<random> and checks the proof (an HMAC of the port and c
+// keyed by the token, which only a holder of the token file can make); only then does it send the Bearer (verifiedBearer).
+// The token is readable by any process of the same OS user (the agent too): the aim is to shut out other users
 // and software that cannot read the file, not the user's own tools.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
@@ -63,8 +65,31 @@ export function portCredential(token: string, port: number): string {
   return createHmac('sha256', token).update(`nota-bene:port:${port}`).digest('hex');
 }
 
-/** `Authorization` header value a helper sends to a window on `port` (reads the token file). */
-export const bearerFor = (port: number): string => `Bearer ${portCredential(accessToken(), port)}`;
+/** What GET /hello answers for challenge `c` on `port`: it proves knowledge of the token, bound to the port and the challenge. */
+export const proofFor = (token: string, port: number, c: string): string =>
+  createHmac('sha256', token).update(`nota-bene:proof:${port}:${c}`).digest('hex');
+
+/** A challenge a helper may send: random hex, bounded (the server refuses anything else). */
+export const CHALLENGE_RE = /^[0-9a-f]{16,64}$/;
+
+/**
+ * `Authorization` value for a window on `port`, or null when the listener there did not prove it holds our token (nothing
+ * else is sent to it, and the caller treats the port as not ours). Fresh challenge per call, constant-time comparison.
+ */
+export async function verifiedBearer(port: number, timeoutMs: number, fetchFn: typeof fetch = fetch): Promise<string | null> {
+  try {
+    const token = accessToken();
+    const c = randomBytes(16).toString('hex');
+    const r = await fetchFn(`http://127.0.0.1:${port}/hello?c=${c}`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+    if (!r.ok) return null;
+    const j: unknown = await r.json();
+    const proof = j && typeof j === 'object' ? (j as { proof?: unknown }).proof : undefined;
+    if (typeof proof !== 'string' || !sameSecret(proof, proofFor(token, port, c))) return null;
+    return `Bearer ${portCredential(token, port)}`;
+  } catch {
+    return null;
+  }
+}
 
 const digest = (s: string): Buffer => createHash('sha256').update(s).digest();
 /** Constant-time string equality (both sides hashed first, so length does not leak either). */
