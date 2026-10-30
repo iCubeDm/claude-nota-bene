@@ -17,6 +17,13 @@
   ],
   "subagents": [
     {
+      "toolUseId": "toolu_e2e_resumed", "type": "general-purpose", "description": "Resumed reviewer",
+      "messages": [
+        { "role": "user", "text": "Review again" },
+        { "role": "assistant", "text": "The resumed agent answers from its own transcript." }
+      ]
+    },
+    {
       "toolUseId": "toolu_e2e_done", "type": "general-purpose", "description": "Review batch fixes",
       "messages": [
         { "role": "user", "text": "Review the diff" },
@@ -38,6 +45,17 @@
       { "id": "toolu_e2e_done", "name": "Agent", "input": { "subagent_type": "general-purpose", "description": "Review batch fixes", "prompt": "Review the diff" }, "output": "agentId: e2edone01 (finished)" },
       { "id": "toolu_e2e_run", "name": "Agent", "input": { "subagent_type": "Explore", "description": "Look around the repo", "prompt": "Explore" }, "output": "Async agent launched successfully. agentId: e2erun02" }
     ] },
+    {
+      "match": "[resume]", "text": "agent resumed",
+      "frames": [
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-resumed", "description": "Resumed reviewer", "task_type": "local_agent", "tool_use_id": "toolu_e2e_resumed" },
+        { "type": "system", "subtype": "task_notification", "task_id": "e2e-resumed", "status": "completed" },
+        { "type": "system", "subtype": "task_started", "task_id": "e2e-resumed", "description": "Resumed reviewer", "task_type": "local_agent", "tool_use_id": "toolu_e2e_sendmsg" }
+      ],
+      "tools": [
+        { "id": "toolu_e2e_resumed", "name": "Agent", "input": { "subagent_type": "general-purpose", "description": "Resumed reviewer", "prompt": "Review again" }, "output": "Async agent launched successfully. agentId: e2eres03" }
+      ]
+    },
     { "match": "[plan]", "text": "Here is the plan.", "ask": { "toolName": "ExitPlanMode", "input": { "plan": "## The plan\n\nStep one: rename bravo.\n\nStep two: run the tests.\n" }, "onAllow": "default" } },
     { "match": "[initmode]", "text": "the CLI changed the mode", "initMode": "acceptEdits" },
     { "match": "[warn]", "text": "context is filling", "context": { "used": 130000, "max": 200000, "pct": 65 } },

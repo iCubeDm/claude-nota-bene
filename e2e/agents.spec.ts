@@ -89,3 +89,24 @@ test('comment on a subagent reply, send: the message names the subagent and quot
   const comments = t.sent.filter((f) => f.type === 'comments').at(-1);
   expect(JSON.stringify(comments)).toContain('"agent":"toolu_e2e_done"');
 });
+
+test('a resumed agent (a second task start with the SendMessage call) opens the same tab from the drawer and from its card @controls', async ({ page }) => {
+  await page.goto('/');
+  await expect(composer(page)).toBeVisible();
+  const text = `[resume] ${uniq('resume')}`;
+  await composer(page).fill(text);
+  await composer(page).press('Enter');
+  await expect(donesAfter(page, text).first()).toBeVisible();
+  await expect(card(page, 'Resumed reviewer')).toBeVisible();
+  await page.keyboard.press('Alt+t');
+  const row = page.locator('[data-task="e2e-resumed"]');
+  await expect(row).toHaveAttribute('data-status', 'running'); // the resume restarted it
+  await row.locator('[data-task-open]').click();
+  const p = pane(page, 'toolu_e2e_resumed'); // the original Agent call, not the SendMessage one
+  await expect(p).toContainText('The resumed agent answers from its own transcript.');
+  await expect(page.locator('[data-pane^="agent:"]')).toHaveCount(1);
+  await page.locator('[role="tab"]').first().click();
+  await card(page, 'Resumed reviewer').getByRole('button', { name: 'open' }).click();
+  await expect(page.locator('[role="tab"]').filter({ hasText: 'Resumed reviewer' })).toHaveCount(1); // the same tab
+  await expect(p).toContainText('The resumed agent answers from its own transcript.');
+});

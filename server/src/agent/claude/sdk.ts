@@ -4,7 +4,7 @@ import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
-import { agentIdFromResult, findSubagentMeta, isRunning, noMetaAdd, noMetaHas, toolCallIn } from './subagents.ts';
+import { agentOfCall, findSubagentMeta, isRunning, noMetaAdd, noMetaHas } from './subagents.ts';
 import { defaultProjectsDir } from '../../sessions.ts';
 import { UsageUnavailableError, mapContextUsage, mapUsage } from '../../stats.ts';
 
@@ -207,13 +207,9 @@ export function sdkBackend(): AgentBackend {
         // file is still found
         const key = `${sessionId}\0${toolUseId}\0${call?.hasResult ?? ''}`;
         if (noMetaHas(key)) return null;
-        const found = toolCallIn(await getSessionMessages(sessionId, { dir: cwd }), toolUseId);
-        const id = found?.result ? agentIdFromResult(found.result) : null;
-        if (!found || !id || !ids.includes(id)) return (noMetaAdd(key), null);
-        agentId = id;
-        type = String(found.input.subagent_type ?? '');
-        description = String(found.input.description ?? '');
-        running = false; // found through its result: an older CLI's agent, which reads as finished
+        const hit = agentOfCall(await getSessionMessages(sessionId, { dir: cwd }), toolUseId, ids, defaultProjectsDir(), sessionId, call?.live ?? false);
+        if (!hit) return (noMetaAdd(key), null);
+        ({ agentId, type, description, running } = hit);
       }
       return { events: transcriptToEvents(await getSubagentMessages(sessionId, agentId, { dir: cwd }), attachments, onError, { subagent: true }), running, type, description };
     },

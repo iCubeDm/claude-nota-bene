@@ -268,6 +268,31 @@ test('only the newest FINISHED_CAP finished tasks stay, running ones never go; r
   expect(reduceTasks({}, { kind: 'replay', events: evs as never, ts: 0 } as never)).toEqual(s);
   expect(orderedTasks(s).map(([id]) => id).slice(0, 3)).toEqual(['run', `t${FINISHED_CAP + 4}`, `t${FINISHED_CAP + 3}`]);
 });
+test('a task resumed with SendMessage (another start of the same id) keeps its original call, and runs again from zero', () => {
+  let s = reduceTasks({}, T(1, { id: 'k', phase: 'started', desc: 'review', type: 'local_agent', call: 'toolu_A', parent: 'p', bg: true }));
+  s = reduceTasks(s, T(2, { id: 'k', phase: 'progress', tokens: 50, tool: 'Read', summary: 's' }));
+  s = reduceTasks(s, T(3, { id: 'k', phase: 'done' }));
+  expect(s.k).toMatchObject({ status: 'done', end: 3, tokens: 50 });
+  s = reduceTasks(s, T(10, { id: 'k', phase: 'started', desc: 'review', type: 'local_agent', call: 'toolu_SendMessage' }));
+  expect(s.k).toMatchObject({ call: 'toolu_A', kind: 'agent', parent: 'p', bg: true, status: 'running', start: 10, tokens: 0, tool: '', summary: '' });
+  expect(s.k).not.toHaveProperty('end');
+  s = reduceTasks(s, T(11, { id: 'k', phase: 'started', desc: 'review', type: 'local_agent', call: 'toolu_SendMessage2' }));
+  expect(s.k?.call).toBe('toolu_A'); // a second resume too
+  expect(reduceTasks(s, T(12, { id: 'k', phase: 'done' })).k).toMatchObject({ call: 'toolu_A', status: 'done', end: 12 });
+});
+test('a restart of a known task that had no call takes the new one; an unknown id is a plain start; replay equals the fold', () => {
+  const evs = [
+    T(1, { id: 'a', phase: 'started', desc: 'a' }),
+    T(2, { id: 'a', phase: 'started', desc: 'a', type: 'local_agent', call: 'toolu_X' }),
+    T(3, { id: 'b', phase: 'started', desc: 'b', type: 'local_agent', call: 'toolu_Y' }),
+    T(4, { id: 'b', phase: 'done' }),
+    T(5, { id: 'b', phase: 'started', desc: 'b', type: 'local_agent', call: 'toolu_Z' }),
+  ];
+  const s = evs.reduce(reduceTasks, {} as ReturnType<typeof reduceTasks>);
+  expect(s.a).toMatchObject({ call: 'toolu_X', kind: 'agent' });
+  expect(s.b).toMatchObject({ call: 'toolu_Y', status: 'running' });
+  expect(reduceTasks({}, { kind: 'replay', events: evs as never, ts: 0 } as never)).toEqual(s);
+});
 test('taskKind', () => {
   expect([taskKind('local_agent'), taskKind('remote_agent'), taskKind('local_bash'), taskKind('monitor_mcp'), taskKind('local_workflow'), taskKind('', 'toolu_A'), taskKind('')])
     .toEqual(['agent', 'agent', 'shell', 'shell', 'other', 'agent', 'other']);

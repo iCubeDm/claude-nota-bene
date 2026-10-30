@@ -31,14 +31,14 @@ const MISS_TTL_MS = 1500;
 const where = new Map<string, { dir: string; agentId: string }>();
 const missed = new Map<string, number>();
 
-function readMeta(dir: string, agentId: string, toolUseId: string): SubagentMeta | null {
+function readMeta(dir: string, agentId: string, toolUseId?: string): SubagentMeta | null {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(dir, `agent-${agentId}.meta.json`), 'utf8')) as Record<string, unknown>;
-    if (v.toolUseId !== toolUseId) return null;
+    if (toolUseId !== undefined && v.toolUseId !== toolUseId) return null;
     let modified = 0;
     try { modified = fs.statSync(path.join(dir, `agent-${agentId}.jsonl`)).mtimeMs; } catch { /* no transcript yet */ }
     return {
-      agentId, toolUseId, modified,
+      agentId, toolUseId: typeof v.toolUseId === 'string' ? v.toolUseId : '', modified,
       type: typeof v.agentType === 'string' ? v.agentType : '',
       description: typeof v.description === 'string' ? v.description : '',
       unfinished: v.finished !== true && v.stoppedByUser !== true,
@@ -93,6 +93,39 @@ export function findSubagentMeta(projectsDir: string, sessionId: string, toolUse
   return null;
 }
 
+/** The meta of a subagent by its own id (any call), looked up in every project like findSubagentMeta; null when absent. */
+export function findSubagentMetaByAgent(projectsDir: string, sessionId: string, agentId: string): SubagentMeta | null {
+  if (!SAFE_SESSION_ID.test(sessionId) || !AGENT_ID.test(agentId)) return null;
+  let projects: string[];
+  try { projects = fs.readdirSync(projectsDir); } catch { return null; }
+  for (const p of projects) {
+    const m = readMeta(path.join(projectsDir, p, sessionId, 'subagents'), agentId);
+    if (m) return m;
+  }
+  return null;
+}
+
+/**
+ * No meta names the call. The main transcript may still say which subagent it is: an Agent call by `agentId:` in its result
+ * (an older CLI), a SendMessage call (a resume: the SDK's second task_started carries that call's id, and a tab saved with
+ * it must still open) by `input.to`, which counts only when it is a plain id that `ids` lists (`to` may be a name: a miss).
+ */
+export function agentOfCall(
+  msgs: { type: string; message: unknown }[], toolUseId: string, ids: string[], projectsDir: string, sessionId: string, live: boolean, now = Date.now(),
+): { agentId: string; type: string; description: string; running: boolean } | null {
+  const found = toolCallIn(msgs, toolUseId);
+  if (!found) return null;
+  if (found.name === 'SendMessage') {
+    const to = found.input.to;
+    if (typeof to !== 'string' || !AGENT_ID.test(to) || !ids.includes(to)) return null;
+    const meta = findSubagentMetaByAgent(projectsDir, sessionId, to);
+    return { agentId: to, type: meta?.type ?? '', description: meta?.description ?? '', running: meta ? isRunning(meta, live, now) : false };
+  }
+  const id = found.result ? agentIdFromResult(found.result) : null;
+  if (!id || !ids.includes(id)) return null;
+  return { agentId: id, type: String(found.input.subagent_type ?? ''), description: String(found.input.description ?? ''), running: false };
+}
+
 /**
  * A miss of the main-transcript fallback (no meta, and the Agent call does not name an agent we can list): remembered for
  * NO_META_TTL_MS so a poll does not parse the whole main transcript on every request, then tried again. It must expire: the
@@ -129,13 +162,13 @@ export function agentIdFromResult(text: string): string | null {
 type Block = { type?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; content?: unknown };
 
 /** A tool call of the main transcript: its input, and its result text when it has one (images and other blocks left out). */
-export function toolCallIn(msgs: { type: string; message: unknown }[], toolUseId: string): { input: Record<string, unknown>; result?: string } | null {
-  let call: { input: Record<string, unknown>; result?: string } | null = null;
+export function toolCallIn(msgs: { type: string; message: unknown }[], toolUseId: string): { name?: string; input: Record<string, unknown>; result?: string } | null {
+  let call: { name?: string; input: Record<string, unknown>; result?: string } | null = null;
   for (const m of msgs) {
     const content = (m.message as { content?: unknown } | undefined)?.content;
     if (!Array.isArray(content)) continue;
     for (const b of content as Block[]) {
-      if (m.type === 'assistant' && b.type === 'tool_use' && b.id === toolUseId) call = { input: b.input ?? {} };
+      if (m.type === 'assistant' && b.type === 'tool_use' && b.id === toolUseId) call = { ...(b.name ? { name: b.name } : {}), input: b.input ?? {} };
       else if (m.type === 'user' && b.type === 'tool_result' && b.tool_use_id === toolUseId && call) {
         call.result = typeof b.content === 'string' ? b.content
           : Array.isArray(b.content) ? (b.content as Block[]).map((x) => (x as { text?: string }).text ?? '').join('\n') : '';

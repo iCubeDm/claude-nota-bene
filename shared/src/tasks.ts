@@ -56,11 +56,16 @@ export function reduceTasks(s: TasksState, ev: ServerEvent): TasksState {
     // the mapper drops ambient and transcript-less tasks and fills the description fallbacks
     case 'started': {
       const type = e.type ?? '';
+      // another start of a known id is a RESUME (SendMessage to a finished agent): its tool_use_id is the SendMessage call,
+      // but the subagent's files are known by the original call, so the original `call` (and parent / bg) stays
+      const call = cur?.call ?? e.call;
+      const parent = cur?.parent ?? e.parent;
+      const bg = e.bg ?? cur?.bg;
       return {
         ...s,
         [e.id]: {
-          desc: e.desc ?? 'task', type, kind: taskKind(type, e.call), ...(e.call ? { call: e.call } : {}), ...(e.parent ? { parent: e.parent } : {}),
-          ...(e.bg !== undefined ? { bg: e.bg } : {}), ...(e.ambient ? { ambient: true } : {}),
+          desc: e.desc ?? 'task', type, kind: taskKind(type, call), ...(call ? { call } : {}), ...(parent ? { parent } : {}),
+          ...(bg !== undefined ? { bg } : {}), ...(e.ambient ? { ambient: true } : {}),
           start: ev.ts, status: 'running', tokens: 0, tool: '', summary: '',
         },
       };

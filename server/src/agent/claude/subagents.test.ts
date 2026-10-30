@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { agentIdFromResult, findSubagentMeta, isRunning, noMetaAdd, noMetaHas, NO_META_TTL_MS, RECENT_MS, resetSubagentCache } from './subagents.ts';
+import { agentOfCall, findSubagentMetaByAgent, agentIdFromResult, findSubagentMeta, isRunning, noMetaAdd, noMetaHas, NO_META_TTL_MS, RECENT_MS, resetSubagentCache } from './subagents.ts';
 
 const dirs: string[] = [];
 afterAll(() => { for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
@@ -70,8 +70,8 @@ describe('toolCallIn', () => {
     { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_A', content: [{ type: 'text', text: 'agentId: abc123' }] }] } },
   ];
   it('gives the input and the result text; no result yet is undefined; unknown is null', () => {
-    expect(toolCallIn(msgs, 'toolu_A')).toEqual({ input: { description: 'd', subagent_type: 'Explore' }, result: 'agentId: abc123' });
-    expect(toolCallIn(msgs.slice(0, 1), 'toolu_A')).toEqual({ input: { description: 'd', subagent_type: 'Explore' } });
+    expect(toolCallIn(msgs, 'toolu_A')).toEqual({ name: 'Agent', input: { description: 'd', subagent_type: 'Explore' }, result: 'agentId: abc123' });
+    expect(toolCallIn(msgs.slice(0, 1), 'toolu_A')).toEqual({ name: 'Agent', input: { description: 'd', subagent_type: 'Explore' } });
     expect(toolCallIn(msgs, 'toolu_Z')).toBeNull();
   });
 });
@@ -120,5 +120,32 @@ describe('the no-meta miss', () => {
     expect(noMetaHas('b', NO_META_TTL_MS + 2)).toBe(true);
     resetSubagentCache();
     expect(noMetaHas('b', NO_META_TTL_MS + 2)).toBe(false);
+  });
+});
+
+describe('agentOfCall: a call no meta names', () => {
+  const call = (id: string, name: string, input: object, result?: string) => [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } },
+    ...(result ? [{ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: result }] } }] : []),
+  ];
+  const root = () => projects({ a1: { agentType: 'general-purpose', description: 'Re-review', toolUseId: 'toolu_A', finished: true } });
+
+  it('a SendMessage whose `to` is a listed agent id reads that agent through its own meta', () => {
+    const r = root();
+    const msgs = call('toolu_S', 'SendMessage', { to: 'a1', message: 'again' });
+    expect(agentOfCall(msgs, 'toolu_S', ['a1'], r, SID, false)).toEqual({ agentId: 'a1', type: 'general-purpose', description: 'Re-review', running: false });
+    expect(findSubagentMetaByAgent(r, SID, 'a1')).toMatchObject({ toolUseId: 'toolu_A' });
+  });
+  it('`to` as a name, an unlisted id, a path-like or missing value is a miss', () => {
+    const r = root();
+    for (const to of ['reviewer', 'zz9', '../a1', undefined, 5]) {
+      expect([to, agentOfCall(call('toolu_S', 'SendMessage', { to }), 'toolu_S', ['a1'], r, SID, false)]).toEqual([to, null]);
+    }
+  });
+  it('an Agent call is still found by `agentId:` in its result; a call not in the transcript is a miss', () => {
+    const r = root();
+    expect(agentOfCall(call('toolu_X', 'Agent', { description: 'd', subagent_type: 'Explore' }, 'agentId: a1'), 'toolu_X', ['a1'], r, SID, false))
+      .toEqual({ agentId: 'a1', type: 'Explore', description: 'd', running: false });
+    expect(agentOfCall([], 'toolu_X', ['a1'], r, SID, false)).toBeNull();
   });
 });
