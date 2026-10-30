@@ -52,9 +52,27 @@ export function packageJson() {
   };
 }
 
-export async function buildPackage({ out = path.join(ROOT, 'pkg'), skipWeb = false } = {}) {
-  fs.rmSync(out, { recursive: true, force: true }); // build output only: pkg/ is git-ignored and always rebuilt from scratch
+/**
+ * Makes `out` an empty directory. A missing or empty one is fine; a non-empty one must be a previous build of this package
+ * (its package.json names PACKAGE_NAME) and goes to the Trash, never rmSync; anything else is refused, so a wrong --out
+ * can never wipe a checkout or a home directory.
+ */
+export function prepareOut(out) {
+  if (fs.existsSync(out)) {
+    if (!fs.statSync(out).isDirectory()) throw new Error(`${out} exists and is not a directory`);
+    if (fs.readdirSync(out).length > 0) {
+      let name;
+      try { name = JSON.parse(fs.readFileSync(path.join(out, 'package.json'), 'utf8')).name; } catch { /* not a build */ }
+      if (name !== PACKAGE_NAME) throw new Error(`refusing to build into ${out}: it is not empty and is not a previous ${PACKAGE_NAME} build`);
+      const r = spawnSync('trash', [out], { stdio: 'pipe' });
+      if (r.status !== 0 || fs.existsSync(out)) throw new Error(`could not move the previous build ${out} to the Trash (${r.error?.message ?? `trash exit code ${r.status}`})`);
+    }
+  }
   fs.mkdirSync(out, { recursive: true });
+}
+
+export async function buildPackage({ out = path.join(ROOT, 'pkg'), skipWeb = false } = {}) {
+  prepareOut(out);
 
   const external = Object.keys(runtimeDependencies());
   const common = { bundle: true, platform: 'node', format: 'esm', target: 'node22', external, logLevel: 'warning', legalComments: 'none' };
@@ -82,7 +100,11 @@ export async function buildPackage({ out = path.join(ROOT, 'pkg'), skipWeb = fal
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--out');
-  const out = i >= 0 ? path.resolve(argv[i + 1] ?? '') : undefined;
+  if (i >= 0 && (argv[i + 1] === undefined || argv[i + 1] === '' || argv[i + 1].startsWith('--'))) {
+    console.error('--out needs a directory');
+    process.exit(2);
+  }
+  const out = i >= 0 ? path.resolve(argv[i + 1]) : undefined;
   buildPackage({ ...(out ? { out } : {}), skipWeb: argv.includes('--skip-web') }).then(
     (dir) => console.log(`package built in ${dir}`),
     (e) => { console.error(e instanceof Error ? e.message : e); process.exit(1); },
