@@ -1,73 +1,90 @@
-<p align="center"><img src="web/public/icon-512.png" width="128" alt="Nota Bene"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/web/public/icon-512.png" width="128" alt="Nota Bene"></p>
 
 # Nota Bene
 
-A browser IDE for [Claude Code](https://claude.com/claude-code), built on the Claude Agent SDK. Same agent, same settings, skills and plugins, with a review-first interface: select any fragment of a reply or a file, leave a margin note, send all notes to the agent as one batch. Mermaid/SVG, images, video and audio render in the chat; a file tree and viewer cover the project.
+A browser IDE over [Claude Code](https://claude.com/claude-code), built on the Claude Agent SDK. It is the same agent with your settings, skills and plugins, in a window made for reviewing: select any fragment of a reply or of a file, leave a note in the margin, and send all the notes to the agent as one batch. The window also has a file tree, viewers for code, images, video and audio, and a session picker.
 
-## Requirements
+![Selecting text in a reply, adding a comment and sending it](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/annotate-text.gif)
 
-- Node >= 23.6 (the server runs `.ts` directly)
-- Claude Code, logged in
+## Install
 
-```sh
-npm install
-```
+You need Node.js 22 or newer, and Claude Code installed and logged in. The first run downloads about 330 MB, most of it the Agent SDK's binaries.
 
-## Install the `/nb` skill
-
-As a Claude Code plugin (the first `/nb` installs the `nota-bene-ide` npm package, about 330 MB, into the plugin's data dir):
+As a Claude Code plugin (recommended). In Claude Code:
 
 ```
 /plugin marketplace add iCubeDm/nota-bene-ide
 /plugin install nota-bene@nota-bene
 ```
 
-The plugin's skill is `/nota-bene:nb`; a bare `/nb` works too when no other skill has that name. Or, from a checkout:
+Then, in any project folder:
 
-```sh
-ln -sfn "$PWD/plugin/skills/nb" ~/.claude/skills/nb
+```
+/nb
 ```
 
-This replaces an existing `~/.claude/skills/nb` link.
+The first `/nb` installs the `nota-bene-ide` npm package into the plugin's data folder and opens the window in your browser. The plugin's skill is `/nota-bene:nb`; the bare `/nb` works as long as no other skill has that name.
 
-## Usage
-
-In any project, inside Claude Code:
-
-- `/nb` - open the window for this folder, resuming its last session (or start one)
-- `/nb new` - start a fresh session
-- `/nb fork` - carry this conversation over as a separate branch
-
-The window runs as a background task of that Claude Code session: it shows in the task list (its output is the window's log), stop it there, and it stops when the session ends.
-
-In the composer, a draft that starts with `!` is a shell command, as in the Claude Code terminal: `! git status` and Enter runs it in the project folder and shows the output as a block in the chat (Stop ends it; 10 minutes at most; one at a time; it works while the agent is busy). The agent is told of it with your next message. There is no terminal behind it, so an interactive command (an editor, a pager, `git rebase -i`, a password prompt) gets an empty stdin and ends by itself, usually with an error; run those in a real terminal. To send a message that begins with `!`, put a space before it; a draft of several lines is always a message.
-
-Without the skill:
+Or from a terminal, with no plugin:
 
 ```sh
-node bin/nota-bene.mjs [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]
-node bin/nota-bene.mjs --find DIR   # port of the live window serving DIR, or exit 1
-node bin/nota-bene.mjs --last DIR   # DIR's last session id if its transcript exists, or exit 1
-npm start [-- <dir> --port N]     # builds web/dist, serves on 4777, unsupervised
+cd your-project
+npx nota-bene-ide
+
+# or install the command once
+npm i -g nota-bene-ide
+nota-bene
 ```
 
-In a terminal, `node bin/nota-bene.mjs <dir>` runs in the foreground (Ctrl-C stops it); `--detach` starts the window on its own and returns after printing its URL.
+## Supported
 
-One window per folder; live windows use ports 4777-4799, except 4780 and 4790-4795. The launcher rebuilds a stale `web/dist`, opens the browser (unless `--no-open`), and relaunches the server on restart and crashes.
+| | Status |
+|---|---|
+| Agent | Claude Code |
+| macOS | tested |
+| Linux | not tested |
+| Windows | not supported (the `/nb` skill is a bash script) |
 
-## Dev mode
+## Quick start
 
-```sh
-npm run dev      # server :4780 + Vite :5173, state in ~/.nota-bene-dev
-```
+1. Run `/nb` (or `nota-bene`) in a project folder. The window opens already logged in.
+2. Ask the agent something. When the reply arrives, select a sentence in it and press **Comment**. Type the note and press Cmd/Ctrl+Enter to add it.
+3. Open a file from the **Files** panel, select a line of code, and comment on that too. Comments from every reply and file collect in the **Comments** panel.
+4. Press **Send (2)**. The agent receives one message that lists each fragment with your note on it.
 
-## Tests
+The same works on code:
 
-```sh
-npm test         # unit (vitest)
-npm run e2e      # Playwright, ports 4791-4795 (tests only ever use 4790-4795)
-```
+![Commenting on a line of code](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/annotate-code.gif)
 
-## State
+on images, where you draw on the picture and the marked picture goes to the agent:
 
-`~/.nota-bene/` (override with `NOTA_BENE_HOME`), never in the repo: `sessions.json`, `prefs.json`, `comments/`, `attachments/`, `windows/`, `locks/`.
+![Marking up an image](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/annotate-image.gif)
+
+and on single frames of a video:
+
+![Marking up a video frame](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/annotate-video.gif)
+
+## Features
+
+- Chat with the Claude Code agent. A message sent while the agent works is injected into the running turn; Cmd/Ctrl+Enter interrupts the agent and sends.
+- Margin comments on any reply, on your own messages and on any open file, sent as one batch. Eleven one-click labels (Looks good, Clarify this, Verify this, and others).
+- Markup on images and video frames with a rectangle, ellipse, pen or arrow, and a comment on the marked frame.
+- File tree and viewers: Markdown, highlighted code, images, video and audio with seeking. Mermaid and SVG diagrams render in the chat.
+- Read-only views of other git worktrees and branches next to your own checkout.
+- `@` mentions a file, `/` opens the agent's commands and skills, `!` runs a shell command in the project folder.
+- Subagent conversations in their own tabs, and a drawer for background tasks.
+- Sessions from any folder, branches of a conversation, the history from before each compaction.
+- Agent permission modes, model and effort, context and plan-limit meters.
+- Interface in English and Russian.
+
+![The window: chat, file tree and comments panel](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/overview.png)
+
+![The slash menu](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/slash-menu.png)
+
+## Guide
+
+Starting options, every feature with an example, the security model, where state is kept and troubleshooting: [the guide](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/guide.md). How it is built: [architecture](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/architecture.md).
+
+## Licence
+
+Apache-2.0. See [LICENSE](https://github.com/iCubeDm/nota-bene-ide/blob/main/LICENSE) and [THIRD-PARTY-NOTICES.md](https://github.com/iCubeDm/nota-bene-ide/blob/main/THIRD-PARTY-NOTICES.md).
