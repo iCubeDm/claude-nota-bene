@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM, no types
-import { acquireLaunchLock, buildLock, candidatePorts, ensureBuild, needsBuild, portFree } from './nota-bene.mjs';
+import { acquireLaunchLock, buildLock, candidatePorts, ensureBuild, needsBuild, portFree, serverEnv } from './nota-bene.mjs';
 
 const BIN = fileURLToPath(new URL('./nota-bene.mjs', import.meta.url));
 const FAKE = fileURLToPath(new URL('../server/test/fixtures/hello.json', import.meta.url));
@@ -579,6 +579,47 @@ describe('web/dist freshness', () => {
       expect(fs.existsSync(lock)).toBe(false);
     } finally {
       fs.rmSync(lock, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('serverEnv', () => {
+  it('drops npm_* and INIT_CWD and the node_modules/.bin PATH prefix npm adds, keeps the rest of PATH', () => {
+    const e = serverEnv({
+      npm_config_cache: 'x', npm_lifecycle_event: 'npx', NPM_CONFIG_X: 'y', INIT_CWD: '/z', KEEP: '1', NOTA_BENE_AUTOPORT: undefined,
+      PATH: ['/a/b/node_modules/.bin', '/usr/lib/node_modules/npm/node_modules/@npmcli/run-script/lib/node-gyp-bin', '/usr/bin', '/proj/node_modules/.bin', '/bin'].join(path.delimiter),
+    }, 42);
+    expect(Object.keys(e).filter((k) => /^npm_/i.test(k) || k === 'INIT_CWD')).toEqual([]);
+    expect(e.KEEP).toBe('1');
+    expect(e.PATH).toBe(['/usr/bin', '/proj/node_modules/.bin', '/bin'].join(path.delimiter)); // only the leading npm prefix goes
+    expect(e.NOTA_BENE_SUPERVISED).toBe('1');
+    expect(e.NOTA_BENE_LAUNCHER_PID).toBe('42');
+  });
+  it('leaves a PATH without the prefix alone and copes with none', () => {
+    expect(serverEnv({ PATH: '/usr/bin:/bin' }, 1).PATH).toBe('/usr/bin:/bin');
+    expect('PATH' in serverEnv({}, 1)).toBe(false);
+  });
+});
+
+describe('--help, --version and a stray dash', () => {
+  it('--help / -h print the usage and exit 0; --version / -v print the package version and exit 0', () => {
+    const version = (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+    for (const a of ['--help', '-h']) {
+      const r = bin([a]);
+      expect([a, r.status]).toEqual([a, 0]);
+      expect(r.stdout).toContain('Usage: nota-bene');
+    }
+    for (const a of ['--version', '-v']) {
+      const r = bin([a]);
+      expect([a, r.status, r.stdout.trim()]).toEqual([a, 0, version]);
+    }
+  });
+  it('an unknown leading-dash argument is a usage error (exit 2), not an ENOENT on a folder of that name', () => {
+    for (const a of ['-x', '-p']) {
+      const r = bin([a]);
+      expect([a, r.status]).toEqual([a, 2]);
+      expect(r.stderr).toContain(`Unknown option: ${a}`);
+      expect(r.stderr).toContain('Usage: nota-bene');
     }
   });
 });

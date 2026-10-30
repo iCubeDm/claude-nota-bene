@@ -36,7 +36,8 @@ const SELF = fileURLToPath(import.meta.url);
 // under node_modules) at the same relative place
 const MAIN = path.join(REPO, fs.existsSync(path.join(REPO, 'server/src/main.js')) ? 'server/src/main.js' : 'server/src/main.ts');
 const USAGE = 'Usage: nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]\n'
-  + '       nota-bene --find DIR | --last DIR';
+  + '       nota-bene --find DIR | --last DIR\n'
+  + '       nota-bene --help | --version';
 const RESTART = 75;
 const LISTEN_FAILED = 98; // server/src/main.ts LISTEN_FAILED
 const CLEAN_EXITS = new Set([0, 130, 143]);
@@ -49,13 +50,22 @@ const LOCK_STALE_MS = 60_000;
 const LOCK_WAIT_MS = 30_000;
 const RESTART_WAIT_MS = 10_000; // how long a launch waits for a restarting window of its folder to come back
 
+/** This package's version (the checkout's root package.json says the same). */
+export function packageVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 const say = (msg) => process.stderr.write(`nota-bene: ${msg}\n`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const realDir = (d) => fs.realpathSync.native(path.resolve(d));
 
 export function parseArgs(argv) {
   const o = { dir: undefined, port: undefined, resume: undefined, fork: false, new: false, continue: false,
-    detach: false, open: true, fake: undefined, allowOrigins: [], find: undefined, last: undefined };
+    detach: false, open: true, help: false, version: false, fake: undefined, allowOrigins: [], find: undefined, last: undefined };
   const value = (i) => {
     if (argv[i] === undefined) throw new Error(`${USAGE}\nMissing value for ${argv[i - 1]}`);
     return argv[i];
@@ -76,7 +86,9 @@ export function parseArgs(argv) {
     else if (a === '--allow-origin') o.allowOrigins.push(value(++i));
     else if (a === '--find') o.find = value(++i);
     else if (a === '--last') o.last = value(++i);
-    else if (a.startsWith('--')) throw new Error(`${USAGE}\nUnknown option: ${a}`);
+    else if (a === '--help' || a === '-h') o.help = true;
+    else if (a === '--version' || a === '-v') o.version = true;
+    else if (a.startsWith('-') && a.length > 1) throw new Error(`${USAGE}\nUnknown option: ${a}`); // not a folder named like a flag
     else if (o.dir === undefined) o.dir = a;
     else throw new Error(`${USAGE}\nUnexpected argument: ${a}`);
   }
@@ -98,6 +110,24 @@ export function serverArgs(o, port, relaunch) {
   if (o.fake) a.push('--fake', o.fake);
   for (const origin of o.allowOrigins) a.push('--allow-origin', origin);
   return a;
+}
+
+/**
+ * The server child's environment. Started through npx / npm run, we inherit npm's `npm_*` variables and a PATH that npm
+ * prefixed with the package's node_modules/.bin (and node-gyp-bin); the server and the agent it runs must not see either.
+ */
+export function serverEnv(base, launcherPid) {
+  const env = { ...base, NOTA_BENE_SUPERVISED: '1', NOTA_BENE_LAUNCHER_PID: String(launcherPid) };
+  for (const k of Object.keys(env)) if (/^npm_/i.test(k)) delete env[k];
+  delete env.INIT_CWD; // set by npm; the dir and --fake are absolute already
+  const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
+  if (key && env[key]) {
+    const parts = env[key].split(path.delimiter);
+    let i = 0;
+    while (i < parts.length && /(^|[\\/])(node_modules[\\/]\.bin|node-gyp-bin)$/.test(parts[i])) i++; // npm prepends them
+    env[key] = parts.slice(i).join(path.delimiter);
+  }
+  return env;
 }
 
 // --- ports -----------------------------------------------------------------------------------------------------
@@ -474,8 +504,7 @@ async function supervise(o, autoPort, release, state) {
   let first = true;
   let retried = false;
   for (;;) {
-    const env = { ...process.env, NOTA_BENE_SUPERVISED: '1', NOTA_BENE_LAUNCHER_PID: String(process.pid) };
-    delete env.INIT_CWD; // set by npm; the dir and --fake are absolute already
+    const env = serverEnv(process.env, process.pid);
     delete env.NOTA_BENE_AUTOPORT;
     delete env.NOTA_BENE_LOCKED;
     const c = spawn(process.execPath, [MAIN, ...serverArgs({ ...o, dir }, port, !first)], {
@@ -576,6 +605,14 @@ async function main(argv) {
   } catch (e) {
     process.stderr.write(`${e.message}\n`);
     return 2;
+  }
+  if (o.help) {
+    process.stdout.write(`${USAGE}\n`);
+    return 0;
+  }
+  if (o.version) {
+    process.stdout.write(`${packageVersion()}\n`);
+    return 0;
   }
   try {
     if (o.find !== undefined) return await find(o.find);
