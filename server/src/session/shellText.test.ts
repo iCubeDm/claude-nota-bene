@@ -140,9 +140,9 @@ describe('bashBlock and the tags in output', () => {
 describe('leadOf', () => {
   it('joins the blocks; past the cap the oldest go, the newest always stays', () => {
     expect(leadOf(['a', 'b'])).toBe('a\n\nb');
-    expect(leadOf(['aaaa', 'bbbb', 'cccc'], 8)).toBe('[2 earlier shell runs left out: too long]\n\ncccc');
+    expect(leadOf(['aaaa', 'bbbb', 'cccc'], 8)).toBe('cccc\n\n[2 earlier shell runs left out: too long]');
     expect(leadOf(['x'.repeat(50)], 10)).toBe('x'.repeat(50));
-    expect(leadOf(['aaaa', 'bbbb', 'cccc'], 12)).toBe('[1 earlier shell run left out: too long]\n\nbbbb\n\ncccc');
+    expect(leadOf(['aaaa', 'bbbb', 'cccc'], 12)).toBe('bbbb\n\ncccc\n\n[1 earlier shell run left out: too long]');
   });
 });
 
@@ -159,5 +159,19 @@ describe('splitBashBlocks is exact and linear', () => {
     splitBashBlocks(`<bash-input>${'<bash-input>'.repeat(5000)}${' \n'.repeat(26000)}`);
     splitBashBlocks(`<bash-input>x</bash-input>\n<bash-stdout>${'</bash-stdout>'.repeat(4000)}${' '.repeat(52000)}`);
     expect(Date.now() - t0).toBeLessThan(200);
+  });
+});
+
+describe('a lead with runs left out reads back', () => {
+  const mk = (c: string) => bashBlock({ cmd: c, stdout: `${c}-out\n`, stdoutCut: false, stderr: '', stderrCut: false });
+  it('the blocks, then the note, then the message: the note is ours, not the user’s', () => {
+    const blocks = [mk('a'), mk('b'), mk('c')];
+    const lead = leadOf(blocks, mk('c').length + mk('b').length + 2); // room for two
+    expect(lead).toMatch(/\[1 earlier shell run left out: too long\]$/);
+    expect(splitBashBlocks(`${lead}\n\nthe question`)).toEqual({ runs: [{ cmd: 'b', output: 'b-out' }, { cmd: 'c', output: 'c-out' }], rest: 'the question' });
+    expect(splitBashBlocks(lead)).toEqual({ runs: [{ cmd: 'b', output: 'b-out' }, { cmd: 'c', output: 'c-out' }], rest: '' });
+  });
+  it('a user line that merely looks like the note is kept when no blocks lead', () => {
+    expect(splitBashBlocks('[1 earlier shell run left out: too long]\n\nhi').rest).toBe('[1 earlier shell run left out: too long]\n\nhi');
   });
 });

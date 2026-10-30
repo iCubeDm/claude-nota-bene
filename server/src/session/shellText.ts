@@ -121,13 +121,15 @@ export function leadOf(blocks: string[], cap = LEAD_CAP): string {
   let from = blocks.length - 1;
   let total = blocks[from]?.length ?? 0;
   while (from > 0 && total + blocks[from - 1]!.length + 2 <= cap) total += blocks[--from]!.length + 2;
-  const mark = from > 0 ? `[${from} earlier shell run${from === 1 ? '' : 's'} left out: too long]\n\n` : '';
-  return mark + blocks.slice(from).join('\n\n');
+  // the note comes after the blocks: a reader of the transcript takes the blocks from the very start of the message
+  const mark = from > 0 ? `\n\n[${from} earlier shell run${from === 1 ? '' : 's'} left out: too long]` : '';
+  return blocks.slice(from).join('\n\n') + mark;
 }
 
 /** A text the CLI would run as a slash command: a bash block in front of it would stop that. */
 export const isSlashCommand = (text: string): boolean => /^\/[^\s/]+(\s|$)/.test(text);
 
+const LEFT_OUT = /^\[\d+ earlier shell runs? left out: too long\](\n\n|$)/;
 const SEP_OUT = '</bash-input>\n<bash-stdout>';
 const SEP_ERR = '</bash-stdout><bash-stderr>';
 const END = '</bash-stderr>';
@@ -162,5 +164,6 @@ export function splitBashBlocks(text: string): { runs: { cmd: string; output: st
     if (text.startsWith('\n\n', at)) at += 2;
     else break;
   }
+  if (runs.length) at += LEFT_OUT.exec(text.slice(at, at + 80))?.[0].length ?? 0; // our note about runs left out: not the user's words
   return { runs, rest: runs.length ? text.slice(at) : text };
 }
