@@ -171,3 +171,16 @@ it('moving the caret by keys into the first word opens the menu; Esc keeps it sh
   act(() => { document.dispatchEvent(new Event('selectionchange')); });
   expect(screen.getByRole('listbox')).toBeInTheDocument();
 });
+
+it('an Esc in one message does not follow into the next: type /pi, Esc, Cmd+Enter, then / opens the menu again', () => {
+  const { type, box, store } = setup();
+  type('/pi');
+  fireEvent.keyDown(box, { key: 'Escape' });
+  expect(screen.queryByRole('listbox')).toBeNull();
+  fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+  expect(store.getState().composer.draft).toBe(''); // sent: the draft is gone, with no event the picker hears
+  type('/');
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  type('/pi'); // the same word typed again in the new message is a new menu
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+});

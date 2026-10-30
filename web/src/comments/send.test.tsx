@@ -280,6 +280,18 @@ it('send-refused restores the draft, the images and the comment ids, and toasts'
   expect(getToasts().map((x) => x.title)).toContain('Not sent: a session switch is in progress');
 });
 
+it('a busy refusal (a /compact or /clear typed during a turn) says to wait, not that a switch is in progress', async () => {
+  resetToasts();
+  const { sent, store, box } = setup([]);
+  await userEvent.type(box, '/clear');
+  await userEvent.keyboard('{Escape}{Enter}');
+  act(() => void store.dispatch(serverEvent({ kind: 'send-refused', id: lastSend(sent).id, reason: 'busy' })));
+  expect(box.value).toBe('/clear');
+  const titles = getToasts().map((x) => x.title);
+  expect(titles).toContain('Not sent: wait for the agent to finish. /compact and /clear cannot be queued.');
+  expect(titles).not.toContain('Not sent: a session switch is in progress');
+});
+
 it('send-refused keeps a newer draft, and says what it was', async () => {
   resetToasts();
   const { sent, store, box } = setup([]);

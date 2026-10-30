@@ -16,7 +16,9 @@ type Slice = { composer: { draft: string; images: unknown[]; unconfirmed: SentDr
  * (`serverEvent` is read only when an action arrives: store.ts and this file import each other.)
  */
 export const refusedMiddleware: Middleware = (api) => (next) => (action) => {
-  const refused = serverEvent.match(action) && action.payload.kind === 'send-refused' ? action.payload.id : undefined;
+  const ev = serverEvent.match(action) && action.payload.kind === 'send-refused' ? action.payload : undefined;
+  const refused = ev?.id;
+  const why = t(ev?.reason === 'busy' ? 'sendRefusedBusy' : 'sendRefused');
   const last = refused ? (api.getState() as Slice).composer.unconfirmed : null;
   const result = next(action);
   if (!refused || !last || last.id !== refused) return result;
@@ -25,9 +27,9 @@ export const refusedMiddleware: Middleware = (api) => (next) => (action) => {
   if (!now.draft.trim() && !now.images.length) {
     api.dispatch(setDraft(last.text));
     for (const im of last.images) api.dispatch(addImage(im));
-    toast(t('sendRefused'), '');
+    toast(why, '');
   } else {
-    toast(t('sendRefused'), last.text.length > 200 ? `${last.text.slice(0, 199)}…` : last.text);
+    toast(why, last.text.length > 200 ? `${last.text.slice(0, 199)}…` : last.text);
   }
   return result;
 };

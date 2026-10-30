@@ -32,12 +32,13 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
   useEffect(() => {
     const ta = target.current;
     if (!ta) return;
-    let dismissed = false; // Esc: shut for this word, until the caret leaves it
+    let dismissed: string | null = null; // Esc: shut for this word (while the first word is exactly it), until it changes or the caret leaves
     const close = () => setState(null);
     const refresh = () => {
       const q = slashToken(ta.value, ta.selectionStart);
-      if (q === null) dismissed = false;
-      if (dismissed) return;
+      const word = q === null ? null : /^\/\S*/.exec(ta.value)![0]; // the whole first word, wherever the caret is in it
+      if (word !== dismissed) dismissed = null; // another word, a cleared or sent draft: nothing to carry over
+      if (dismissed !== null) return;
       setState((s) => (q === null ? null : s && s.q === q ? s : { q, sel: 0 })); // the same word keeps the selection
     };
     const onSel = () => { if (document.activeElement === ta) refresh(); }; // also when closed: an arrow key can move the caret into the word
@@ -59,7 +60,7 @@ export function SlashPicker({ target }: { target: RefObject<HTMLTextAreaElement 
         const d = e.key === 'ArrowDown' ? 1 : -1;
         setState({ ...open, sel: (open.sel + d + list.length) % list.length });
       } else if (plainEnter || e.key === 'Tab') pick.current(list[open.sel]);
-      else if (e.key === 'Escape') { dismissed = true; close(); }
+      else if (e.key === 'Escape') { dismissed = /^\/\S*/.exec(ta.value)?.[0] ?? null; close(); }
       else handled = false;
       if (handled) { e.preventDefault(); e.stopPropagation(); }
     };
