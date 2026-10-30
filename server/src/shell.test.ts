@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 import type { ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
+import { accessToken } from './auth.ts';
 import { startServer } from './server.ts';
 
 // `! cmd` over the WebSocket: the one way in (protocol 11)
@@ -39,7 +40,7 @@ async function boot(o: { turns?: FakeTurn[]; oneTab?: boolean; shell?: { timeout
     historyDelayMs: o.historyDelayMs ?? 0,
     sessions: [{ id: SB, cwd: other, summary: 'B', lastModified: 2, fileSize: 20, history: [{ role: 'user', text: 'before' }] }],
   });
-  const s = await startServer({ cwd: proj, port: 0, backend, webDist: path.join(tmp, 'dist'), oneTab: o.oneTab ?? false, takeoverGraceMs: 40, ...(o.shell ? { shell: o.shell } : {}) });
+  const s = await startServer({ insecureNoAuth: true, cwd: proj, port: 0, backend, webDist: path.join(tmp, 'dist'), oneTab: o.oneTab ?? false, takeoverGraceMs: 40, ...(o.shell ? { shell: o.shell } : {}) });
   closers.push(s.close);
   return { ...s, backend };
 }
@@ -410,7 +411,7 @@ describe('signals that end the server', () => {
     child.stdout!.on('data', (d) => { out += String(d); });
     const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
     await until(() => /Nota Bene: http:\/\/127\.0\.0\.1:\d+/.test(out));
-    const c = await connect(/Nota Bene: (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1]!);
+    const c = await connect(/Nota Bene: (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1]!, { authorization: `Bearer ${accessToken()}` }); // the real main.ts: auth on
     const pidFile = path.join(tmp, 'pid-straggler');
     c.send({ type: 'shell-run', id: 'r1', cmd: `(trap '' TERM; touch ${tmp}/ready; while :; do sleep 0.05; done) & while [ ! -f ${tmp}/ready ]; do sleep 0.02; done; echo $! > ${pidFile}` });
     await until(() => !!endOf(c)); // the shell is gone, the block closed; the straggler ignores TERM and its KILL is 3 s away
@@ -431,7 +432,7 @@ describe('signals that end the server', () => {
       const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
       await until(() => /Nota Bene: http:\/\/127\.0\.0\.1:\d+/.test(out));
       const url = /Nota Bene: (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1]!;
-      const c = await connect(url);
+      const c = await connect(url, { authorization: `Bearer ${accessToken()}` }); // the real main.ts: auth on
       const pidFile = path.join(tmp, `pid-${sig}`);
       c.send({ type: 'shell-run', id: 'r1', cmd: `sleep 60 & echo $! > ${pidFile}; wait` });
       await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');

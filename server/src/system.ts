@@ -7,12 +7,13 @@
 // could read the file, which is the same trust the state dir already has. A relay goes only to a registered window
 // whose pid is alive and whose /info answers with the registered root (a reused port gets nothing, not the token).
 import { execFile } from 'node:child_process';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { MODES, type Mode } from '@nota-bene/shared';
+import { bearerFor, stateSecret } from './auth.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { readPrefs, setDefaultModePref, setLangPref } from './prefs.ts';
@@ -25,40 +26,10 @@ export const CONTROL_ACTIONS = ['restart-agent', 'restart-server', 'stop'] as co
 export type ControlAction = (typeof CONTROL_ACTIONS)[number];
 /** An attachment younger than this is kept by "clean": an open draft may hold it (the server cannot see drafts). */
 export const CLEAN_MIN_AGE_MS = 24 * 3600_000;
-const TOKEN_RE = /^[0-9a-f]{64}$/;
 const ID_RE = /[0-9a-f]{64}/g;
 
 /** The per-user control token, created once (mode 600). */
-export function controlToken(): string {
-  const file = path.join(stateDir(), 'control-token');
-  const read = () => {
-    try {
-      const t = fs.readFileSync(file, 'utf8').trim();
-      return TOKEN_RE.test(t) ? t : null;
-    } catch {
-      return null;
-    }
-  };
-  const have = read();
-  if (have) return have;
-  const t = randomBytes(32).toString('hex');
-  // written whole to a tmp file, then linked in: the name appears only with its content (no reader sees it empty),
-  // and the link fails if another server got there first
-  const tmp = `${file}.tmp${process.pid}-${randomBytes(4).toString('hex')}`;
-  fs.writeFileSync(tmp, t, { mode: 0o600 });
-  try {
-    fs.linkSync(tmp, file);
-    return t;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    const again = read();
-    if (again) return again; // the other server's
-    fs.renameSync(tmp, file); // a garbage file: replaced atomically
-    return t;
-  } finally {
-    fs.rmSync(tmp, { force: true });
-  }
-}
+export const controlToken = (): string => stateSecret('control-token');
 
 export function tokenOk(header: string | string[] | undefined, token: string): boolean {
   if (typeof header !== 'string') return false;
@@ -222,7 +193,7 @@ export type WindowRow = {
 export async function probeWindow(port: number, timeoutMs = 700): Promise<WindowInfo | null> {
   try {
     // never follow a redirect: the answer must be that port's own
-    const r = await fetch(`http://127.0.0.1:${port}/info`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+    const r = await fetch(`http://127.0.0.1:${port}/info`, { headers: { authorization: bearerFor(port) }, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
     if (!r.ok) return null;
     const j = (await r.json()) as WindowInfo;
     return j && typeof j.root === 'string' ? j : null;

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export function stateDir(): string {
   const dir = process.env.NOTA_BENE_HOME ?? path.join(os.homedir(), '.nota-bene');
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); // holds the access token: private to the user
   return dir;
 }
 

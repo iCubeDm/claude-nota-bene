@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 async function boot(allowedOrigins?: string[]) {
-  const s = await startServer({
+  const s = await startServer({ insecureNoAuth: true,
     cwd: '/proj', port: 0, backend: fakeBackend([]), webDist: dist,
     ...(allowedOrigins ? { allowedOrigins } : {}),
   });

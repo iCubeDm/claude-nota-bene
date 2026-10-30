@@ -36,7 +36,7 @@ afterEach(async () => {
 
 async function boot(cwd = proj) {
   const exits: number[] = [];
-  const s = await startServer({ cwd, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, exit: (c) => void exits.push(c) });
+  const s = await startServer({ insecureNoAuth: true, cwd, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, exit: (c) => void exits.push(c) });
   closers.push(s.close);
   const port = Number(new URL(s.url).port);
   return { ...s, port, exits, origin: s.url };
@@ -236,7 +236,7 @@ describe('defaults and about', () => {
     try {
       fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'x', version: '1.2.3' }));
       expect(await describeVersion(pkg)).toBe('1.2.3');
-      const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, repoDir: pkg });
+      const s = await startServer({ insecureNoAuth: true, cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, repoDir: pkg });
       closers.push(s.close);
       const a = await (await fetch(`${s.url}/system/about`)).json() as { version: string };
       expect(a.version).toBe('1.2.3');

@@ -25,6 +25,7 @@ import { codeChecker } from './codeStamp.ts';
 import { stateDir } from './state.ts';
 import { registerWindow } from './windows.ts';
 import { controlToken, systemRoutes } from './system.ts';
+import { accessToken, authenticated, sameSecret, sessionCookie } from './auth.ts';
 
 /** how long a newcomer waits for the owner to close before it is told `occupied` (R-M7-6) */
 export const TAKEOVER_GRACE_MS = 700;
@@ -65,6 +66,11 @@ export async function startServer(o: {
   idleOffInSettings?: () => boolean;
   /** the `! cmd` runner's timing and environment (tests shorten the timeout and the kill delay) */
   shell?: { timeoutMs?: number; killMs?: number; env?: () => NodeJS.ProcessEnv };
+  /**
+   * TEST ONLY: serve without the access token. The default, and the only thing main.ts and the launcher ever do, is auth
+   * on (see auth.ts). There is deliberately no CLI flag or env var for this.
+   */
+  insecureNoAuth?: boolean;
   /** one tab at a time (R-M7-5); default true. Tests that need several live sockets pass false */
   oneTab?: boolean;
   /** tests shorten the reload grace (R-M7-6) and the heartbeat (R-M7-7) */
@@ -107,6 +113,9 @@ export async function startServer(o: {
     const supervised = () => process.env.NOTA_BENE_SUPERVISED === '1'
       && process.ppid === Number(process.env.NOTA_BENE_LAUNCHER_PID);
     const codeChanged = codeChecker({ repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..') });
+    // the access token: read once at start (a rotated file takes effect at the next start). Auth is on unless a test says no
+    const token = o.insecureNoAuth ? null : accessToken();
+    const authorize = token === null ? undefined : (req: http.IncomingMessage) => authenticated(req.headers, token, ownPort);
     const allowedHosts: string[] = []; // filled after listen, once the port is known
     const allowedOrigins: string[] = [...(o.allowedOrigins ?? [])];
     // the one source of the project root: a switch changes it, so every route reads it per request
@@ -144,8 +153,37 @@ export async function startServer(o: {
         },
       );
     };
+    // POST /auth {token}: the page's one-time login (the token came in the URL fragment, which never reaches a server). Only
+    // reached with one of our own Origins (http.ts refuses the other POSTs), so a foreign page cannot even try
+    const authRoute: http.RequestListener = (req, res) => {
+      const plain = (status: number, body: string, headers: Record<string, string> = {}) => {
+        res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8', ...headers });
+        res.end(body);
+      };
+      if (req.method !== 'POST') return plain(405, 'method not allowed', { allow: 'POST' });
+      let body = '';
+      let tooBig = false;
+      req.on('data', (d: Buffer) => {
+        body += d;
+        if (body.length > 1024) { tooBig = true; req.destroy(); }
+      });
+      req.on('end', () => {
+        if (tooBig) return;
+        let given: unknown;
+        try {
+          given = (JSON.parse(body) as { token?: unknown }).token;
+        } catch {
+          return plain(400, 'bad request');
+        }
+        if (token === null) return plain(200, '{"ok":true}', { 'content-type': 'application/json; charset=utf-8' });
+        if (typeof given !== 'string' || !sameSecret(given, token)) return plain(401, 'unauthorized');
+        plain(200, '{"ok":true}', { 'content-type': 'application/json; charset=utf-8', 'set-cookie': sessionCookie(token, ownPort), 'cache-control': 'no-store' });
+      });
+    };
     const server = http.createServer(httpHandler({
       hub,
+      open: { '/auth': authRoute },
+      ...(authorize ? { authorize } : {}),
       allowedHosts,
       allowedOrigins,
       extra: {
@@ -202,8 +240,10 @@ export async function startServer(o: {
         const origin = req.headers.origin;
         const ok = isAllowedHost(req.headers.host, allowedHosts)
           && (origin === undefined || allowedOrigins.includes(origin));
-        if (ok) done(true);
-        else done(false, 403, 'forbidden');
+        // an unset Origin (a script, a helper) is let in only with valid auth, and so is every browser page
+        if (!ok) done(false, 403, 'forbidden');
+        else if (authorize && !authorize(req)) done(false, 401, 'unauthorized');
+        else done(true);
       },
     });
     // the wss re-emits the http server's errors; unhandled, a listen error (EADDRINUSE) would throw out of the

@@ -37,7 +37,7 @@ const subagents: FakeSubagent[] = [
 ];
 
 async function boot() {
-  const s = await startServer({ cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }], { subagents }), webDist: dist, oneTab: false, resume: 'fake-session' });
+  const s = await startServer({ insecureNoAuth: true, cwd: '/proj', port: 0, backend: fakeBackend([{ text: 'hello' }], { subagents }), webDist: dist, oneTab: false, resume: 'fake-session' });
   closers.push(s.close);
   return s;
 }

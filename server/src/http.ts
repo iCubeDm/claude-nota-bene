@@ -47,6 +47,12 @@ export function httpHandler(o: {
   extra?: Record<string, RequestListener>;
   /** the per-user control token: a POST to /control/<action> carrying it needs no Origin (server-to-server, system.ts) */
   controlToken?: () => string;
+  /**
+   * Routes anyone may reach without logging in (`/auth`). Everything else the server answers besides the static app shell
+   * (every `extra` route and `/info`) needs `authorize`; undefined = no check (tests only, see startServer).
+   */
+  open?: Record<string, RequestListener>;
+  authorize?: (req: Parameters<RequestListener>[0]) => boolean;
 }): RequestListener {
   const root = path.resolve(o.webDist);
 
@@ -85,9 +91,20 @@ export function httpHandler(o: {
         return;
       }
 
+      const openRoute = o.open?.[rawPath];
+      if (openRoute) {
+        openRoute(req, res);
+        return;
+      }
+
       // /attach/<id> and /marks/<id>[/<name>] are dynamic: matched by prefix
       const prefix = PREFIX_ROUTES.find((p) => rawPath.startsWith(p));
       const route = o.extra?.[prefix ?? rawPath];
+      // data is behind the login; the static app shell below is public (it holds no secrets). /control/ has its own token
+      if ((route || rawPath === '/info') && !control && o.authorize && !o.authorize(req)) {
+        text(res, 401, 'unauthorized');
+        return;
+      }
       if (route) {
         route(req, res);
         return;

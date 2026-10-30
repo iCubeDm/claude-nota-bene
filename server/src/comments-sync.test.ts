@@ -35,7 +35,7 @@ const c = (id: string, extra: Partial<Comment> = {}): Comment => ({
 } as unknown as Comment);
 
 async function boot(o: { resume?: string; backend?: AgentBackend } = {}) {
-  const s = await startServer({
+  const s = await startServer({ insecureNoAuth: true,
     cwd: '/proj', port: 0, backend: o.backend ?? fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false,
     ...(o.resume ? { resume: o.resume } : {}),
   });
@@ -229,7 +229,7 @@ describe('mark files follow their comment', () => {
   it('a media comment dropped from the set loses its folder in the project; a kept one and the merge stand', async () => {
     const proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'nb-csync-proj-')));
     closers.push(async () => fs.rmSync(proj, { recursive: true, force: true }));
-    const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false });
+    const s = await startServer({ insecureNoAuth: true, cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false });
     closers.push(s.close);
     const A = '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
     const B = '1f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
@@ -255,7 +255,7 @@ describe('mark files follow their comment', () => {
     closers.push(async () => { fs.rmSync(proj, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); });
     fs.mkdirSync(path.join(out, 'marks', '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab'), { recursive: true });
     fs.symlinkSync(out, path.join(proj, '.nota-bene'));
-    const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false });
+    const s = await startServer({ insecureNoAuth: true, cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false });
     closers.push(s.close);
     const A = '0f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
     const media = c(A, {
@@ -286,7 +286,7 @@ describe('sent comments keep their mark files', () => {
       fs.mkdirSync(path.join(proj, '.nota-bene', 'marks', id), { recursive: true });
       fs.writeFileSync(path.join(proj, '.nota-bene', 'marks', id, 'frame.jpg'), 'x');
     }
-    const s = await startServer({ cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false, resume: 'sess-m' });
+    const s = await startServer({ insecureNoAuth: true, cwd: proj, port: 0, backend: fakeBackend([{ text: 'hello' }]), webDist: dist, oneTab: false, resume: 'sess-m' });
     closers.push(s.close);
     const cl = await connect(s.url);
     await until(() => lastComments(cl)?.length === 2);
