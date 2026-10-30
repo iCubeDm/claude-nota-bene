@@ -204,6 +204,27 @@ describe('defaults and about', () => {
     expect(mode).toBe('plan');
   });
 
+  it('the UI language is one global pref: validated, stored in prefs.json, merged with the default mode, sent in hello', async () => {
+    const s = await boot();
+    const hello = async (url: string) => {
+      const ws = new WebSocket(url.replace('http', 'ws'));
+      closers.push(async () => void ws.terminate());
+      return new Promise<{ lang?: string }>((res) => ws.on('message', (d) => {
+        const e = JSON.parse(String(d)) as { kind: string; lang?: string };
+        if (e.kind === 'hello') res(e);
+      }));
+    };
+    expect('lang' in (await hello(s.url))).toBe(false); // none chosen yet: the client keeps its own
+    expect((await post(`${s.url}/system/prefs`, { lang: 'de' }, { origin: s.origin })).status).toBe(400);
+    expect((await post(`${s.url}/system/prefs`, {}, { origin: s.origin })).status).toBe(400);
+    expect((await post(`${s.url}/system/prefs`, { defaultMode: 'plan' }, { origin: s.origin })).status).toBe(200);
+    expect((await post(`${s.url}/system/prefs`, { lang: 'ru' }, { origin: s.origin })).status).toBe(200);
+    expect(readPrefs()).toMatchObject({ lang: 'ru', defaultMode: 'plan' }); // neither write dropped the other
+    expect((await hello(s.url)).lang).toBe('ru');
+    const other = await boot(mkExtra('nb-system-lang-')); // another folder's window: same state dir, same language
+    expect((await hello(other.url)).lang).toBe('ru');
+  });
+
   it('an installed package (no .git next to it) reports its package.json version, never git describe', async () => {
     const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-pkgver-'));
     try {

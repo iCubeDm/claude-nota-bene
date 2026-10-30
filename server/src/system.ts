@@ -15,7 +15,7 @@ import path from 'node:path';
 import { MODES, type Mode } from '@nota-bene/shared';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
-import { readPrefs, setDefaultModePref } from './prefs.ts';
+import { readPrefs, setDefaultModePref, setLangPref } from './prefs.ts';
 import { defaultProjectsDir } from './sessions.ts';
 import { stateDir } from './state.ts';
 import { pidAlive, readWindows } from './windows.ts';
@@ -337,10 +337,13 @@ export function systemRoutes(o: {
     '/system/prefs': (req, res) => {
       if (req.method === 'POST') {
         void readJson(req).then((b) => {
-          const mode = (b as { defaultMode?: unknown }).defaultMode;
-          if (!(MODES as readonly unknown[]).includes(mode)) return text(res, 400, 'bad defaultMode');
-          setDefaultModePref(mode as Mode);
-          json(res, 200, { defaultMode: mode });
+          const { defaultMode: mode, lang } = b as { defaultMode?: unknown; lang?: unknown };
+          if (mode === undefined && lang === undefined) return text(res, 400, 'bad defaultMode');
+          if (mode !== undefined && !(MODES as readonly unknown[]).includes(mode)) return text(res, 400, 'bad defaultMode');
+          if (lang !== undefined && lang !== 'ru' && lang !== 'en') return text(res, 400, 'bad lang');
+          if (mode !== undefined) setDefaultModePref(mode as Mode);
+          if (lang !== undefined) setLangPref(lang);
+          json(res, 200, { ...(mode !== undefined ? { defaultMode: mode } : {}), ...(lang !== undefined ? { lang } : {}) });
         }).catch((e: unknown) => (e instanceof SyntaxError || (e instanceof Error && e.message === 'body too large') ? text(res, 400, 'bad request') : fail(res, '/system/prefs', e)));
         return;
       }

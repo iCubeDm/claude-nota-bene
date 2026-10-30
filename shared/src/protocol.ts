@@ -158,7 +158,7 @@ export type ServerEvent =
   /** to the owner just before it is closed with code 4001: another tab took the window over */
   | { kind: 'taken-over' }
   /** right after the replay on every connection (servers before it send none: protocol 0) */
-  | { kind: 'hello'; protocol: number; capabilities?: Capabilities }
+  | { kind: 'hello'; protocol: number; capabilities?: Capabilities; /** the UI language chosen on any window (server prefs.json); absent = none chosen yet */ lang?: 'ru' | 'en' }
   /** `earlier`: how many segments of this conversation, from before its compactions, `/history` holds (R-M7-4); absent for none */
   | { kind: 'replay'; events: ServerEvent[]; earlier?: number }
   /** what the agent said (R-M7-14); `init` and `rate-limit` are server-internal and never sent */

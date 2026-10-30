@@ -16,6 +16,7 @@ import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
 import { complete, fileRoutes } from './fileRoutes.ts';
 import { BlendConverter } from './blend.ts';
+import { readPrefs } from './prefs.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
 import { SwitchError, createSessionManager } from './session.ts';
 import type { IdleConfig } from './idle.ts';
@@ -228,7 +229,8 @@ export async function startServer(o: {
     // the hello every socket gets, owner or not
     const sendHello = (ws: WebSocket) => {
       try {
-        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...caps, model3d } }));
+        const lang = readPrefs().lang; // the user's UI language, shared by every window; absent until one is chosen
+        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...caps, model3d }, ...(lang ? { lang } : {}) }));
       } catch (e) {
         reportError(hub, 'hello', e);
       }

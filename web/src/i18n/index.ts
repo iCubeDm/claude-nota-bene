@@ -26,6 +26,32 @@ export function setLang(l: Lang): void {
   for (const fn of listeners) fn();
 }
 
+/** Tells the server the choice (prefs.json, shared by every window: localStorage is per port). Best effort. */
+export function persistLang(l: Lang): void {
+  try {
+    void fetch('/system/prefs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lang: l }) }).catch(() => {});
+  } catch { /* no fetch: the local cache still holds the choice */ }
+}
+
+/** The user picked a language (header toggle, Settings): apply it here and save it for every window. */
+export function chooseLang(l: Lang): void {
+  setLang(l);
+  persistLang(l);
+}
+
+/**
+ * The server's `hello.lang`: the server's value wins over this origin's localStorage cache. With none on the server yet, a
+ * choice this browser already made (localStorage) is moved up, so it reaches the other windows and nobody loses it.
+ */
+export function adoptServerLang(server: string | undefined): void {
+  if (server === 'ru' || server === 'en') {
+    if (server !== lang) setLang(server);
+    return;
+  }
+  const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem('lang');
+  if (stored === 'ru' || stored === 'en') persistLang(stored);
+}
+
 /** Translate into an explicit language (for text that must not follow the UI language, e.g. a sent batch). */
 export function tIn(l: Lang, key: keyof typeof ru, ...args: unknown[]): string {
   const v = DICTS[l][key] ?? DICTS.en[key] ?? key;

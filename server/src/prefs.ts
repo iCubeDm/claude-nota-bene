@@ -130,3 +130,8 @@ export function updateRawPrefs(fn: (raw: Record<string, unknown>) => void): void
 export function setDefaultModePref(mode: Mode): void {
   updateRawPrefs((raw) => void (raw.defaultMode = mode));
 }
+
+/** The UI language, one for every window of this user (not per project, not per port). */
+export function setLangPref(lang: 'ru' | 'en'): void {
+  updateRawPrefs((raw) => void (raw.lang = lang));
+}

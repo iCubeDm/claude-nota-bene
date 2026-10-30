@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { en } from './en.ts';
 import { initialLang, setLang, t } from './index.ts';
 import { ru } from './ru.ts';
@@ -26,4 +26,40 @@ it('initialLang: the stored choice wins, otherwise English (the browser language
   expect(initialLang('ru')).toBe('ru');
   expect(initialLang('en')).toBe('en');
   expect(initialLang('de')).toBe('en');
+});
+
+it('adoptServerLang: the server value wins over the local cache; with none, a stored local choice is moved up', async () => {
+  const { adoptServerLang, getLang } = await import('./index.ts');
+  const posts: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => { posts.push(JSON.parse(String(init.body))); return new Response('{}'); }));
+  try {
+    localStorage.setItem('lang', 'en');
+    setLang('en');
+    adoptServerLang('ru'); // another window chose Russian: this port's cache is overruled
+    expect(getLang()).toBe('ru');
+    expect(localStorage.getItem('lang')).toBe('ru'); // and the cache follows
+    expect(posts).toEqual([]);
+    localStorage.setItem('lang', 'ru');
+    adoptServerLang(undefined); // the server has none yet: this browser's old choice is saved for all windows
+    expect(posts).toEqual([{ lang: 'ru' }]);
+    posts.length = 0;
+    localStorage.removeItem('lang');
+    adoptServerLang(undefined); // neither: nothing to say, English stays the default
+    expect(posts).toEqual([]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('chooseLang sets the language here and posts it to the server', async () => {
+  const { chooseLang, getLang } = await import('./index.ts');
+  const posts: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => { posts.push(JSON.parse(String(init.body))); return new Response('{}'); }));
+  try {
+    chooseLang('en');
+    expect(getLang()).toBe('en');
+    expect(posts).toEqual([{ lang: 'en' }]);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

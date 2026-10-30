@@ -99,3 +99,15 @@ it('hello.capabilities.model3d switches the 3D viewer; a hello without it (or an
   f.ev({ kind: 'hello', protocol: 4 });
   expect(isModel3d()).toBe(false);
 });
+
+it('hello.lang sets the UI language; a hello without it leaves the local choice', async () => {
+  const { getLang, setLang } = await import('../i18n/index.ts');
+  const f = fake();
+  makeStore({ url: 'u', connect: f.connect });
+  setLang('en');
+  f.ev({ kind: 'hello', protocol: 9, lang: 'ru' });
+  expect(getLang()).toBe('ru');
+  f.ev({ kind: 'hello', protocol: 9 });
+  expect(getLang()).toBe('ru');
+  setLang('en');
+});

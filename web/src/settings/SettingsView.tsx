@@ -3,7 +3,7 @@ import { MODES, type Mode } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
 import { ConfirmDialog } from '@/controls/ConfirmDialog.tsx';
 import { kb } from '@/controls/SessionPicker.tsx';
-import { getLang, setLang, t as tNow, useT } from '@/i18n/index.ts';
+import { getLang, chooseLang, t as tNow, useT } from '@/i18n/index.ts';
 
 type Size = { bytes: number; files: number };
 /** `history`: the archive before compactions (R-M7-1); absent from a server older than M7-12 */
@@ -185,7 +185,7 @@ export function SettingsView({ active }: { active: boolean }) {
 
       <Section title={t('setDefaults')}>
         <Row label={t('defLang')}>
-          <select aria-label={t('defLang')} value={lang} onChange={(e) => { const l = e.target.value as 'ru' | 'en'; setLang(l); setLangState(l); }}
+          <select aria-label={t('defLang')} value={lang} onChange={(e) => { const l = e.target.value as 'ru' | 'en'; chooseLang(l); setLangState(l); }}
             className="rounded-md border border-border-soft bg-transparent px-2 py-1 text-[13px] text-foreground">
             <option value="ru">Русский</option>
             <option value="en">English</option>

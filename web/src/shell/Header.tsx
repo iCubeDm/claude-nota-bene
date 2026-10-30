@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { getLang, setLang, useT } from '@/i18n/index.ts';
+import { getLang, chooseLang, useT } from '@/i18n/index.ts';
 import { selectConn, selectSession, useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { openSettings } from '@/tabs/slice.ts';
 import { ICONS, Svg } from '@/tabs/TabStrip.tsx';
@@ -48,7 +48,7 @@ export function Header() {
         type="button"
         id="langBtn"
         title={t('langTip')}
-        onClick={() => setLang(other)}
+        onClick={() => chooseLang(other)}
         className="cursor-pointer rounded-md border border-border-soft px-2 py-0.5 text-[11px] font-medium hover:text-foreground"
       >
         {other.toUpperCase()}
