@@ -85,10 +85,13 @@ function seedFiles(dir) {
   fs.writeFileSync(path.join(wt, 'only-x.md'), '# Only on feature/x\n\nwritten by another agent\n');
 }
 
+// not under a launcher: whatever launcher env a window's shell passed down (main.ts would drop it, and the nonce with it) is removed
+const inherited = { ...process.env };
+for (const k of ['NOTA_BENE_LAUNCHER_PID', 'NOTA_BENE_SUPERVISED', 'NOTA_BENE_NONCE']) delete inherited[k];
 const child = spawn(
   process.execPath,
   [path.join(root, 'server/src/main.ts'), project, '--port', port, '--fake', path.join(root, 'server/test/fixtures', `${fixture}.json`)],
-  { cwd: root, env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: createHash('sha256').update(`nota-bene e2e nonce ${fixture}`).digest('hex').slice(0, 32), NOTA_BENE_EXPERIMENTAL_3D: fixture === 'files' ? '1' : '0' }, stdio: 'inherit' },
+  { cwd: root, env: { ...inherited, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: createHash('sha256').update(`nota-bene e2e nonce ${fixture}`).digest('hex').slice(0, 32), NOTA_BENE_EXPERIMENTAL_3D: fixture === 'files' ? '1' : '0' }, stdio: 'inherit' },
 );
 
 let done = false;
