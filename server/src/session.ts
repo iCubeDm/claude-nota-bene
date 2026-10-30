@@ -274,6 +274,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       return;
     }
     if (!isIdle) idle.touch();
+    if (name === 'clear') shell.dropQueue(); // as in send
     const id = randomUUID();
     const text = `/${name}`;
     const g = slot.gen;
@@ -314,6 +315,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       const { refs, payload } = resolveImages(attachments, images, (e) => report('attach', e));
       // typed in the composer, /compact and /clear are the buttons' commands: their result never arms idle compaction, a /clear's is live only
       const command = trackedCommand(text, cmds.commands);
+      if (command === 'clear') shell.dropQueue(); // a message right behind it must not carry the old runs into the new conversation (the reset event comes later)
       turns.sent(id, command ? { command } : {});
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
       queue.push({ id, text, force, images: payload, lead: (t) => shell.takeFor(t) }); // the feed shows `text`; the agent also hears of the `! cmd` runs since its last message, taken as it is handed over // handed over in order, after a forced send's interrupt

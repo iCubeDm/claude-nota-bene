@@ -206,6 +206,22 @@ describe('/clear', () => {
   });
 });
 
+describe('a message right behind /clear', () => {
+  for (const how of ['typed', 'button'] as const) {
+    it(`does not carry the old runs into the new conversation (${how})`, async () => {
+      const s = await boot({ turns: [{ text: 'a' }, { text: 'b' }, { text: 'c' }] });
+      const c = await connect(s.url);
+      c.send({ type: 'shell-run', id: 'r1', cmd: 'echo old' });
+      await until(() => !!endOf(c));
+      if (how === 'typed') c.send({ type: 'send', id: 'u1', text: '/clear' });
+      else c.send({ type: 'command', name: 'clear' });
+      c.send({ type: 'send', id: 'u2', text: 'right after' });
+      await until(() => s.backend.prompts.includes('right after'));
+      expect(s.backend.prompts.at(-1)).toBe('right after');
+    });
+  }
+});
+
 describe('what the agent hears', () => {
   it('the next message carries the finished runs; the feed shows the message as typed', async () => {
     const s = await boot();
