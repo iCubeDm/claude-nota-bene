@@ -58,3 +58,16 @@ test('a reload brings the block back @chat', async ({ page }) => {
   await expect(blockOf(page, tag).getByTestId('shell-output')).toContainText(tag);
   await expect(blockOf(page, tag).getByTestId('shell-how')).toHaveText(/exit 0|код 0/);
 });
+
+test('a command that prints without end shows only its tail, and Stop still ends it @chat', async ({ page }) => {
+  await open(page);
+  const tag = uniq('flood');
+  await composer(page).fill(`! echo ${tag}; yes`);
+  await composer(page).press('Enter');
+  const block = blockOf(page, tag);
+  await expect(block.getByTestId('shell-output')).toContainText('y\ny\n');
+  await expect(block.getByText(/earlier output cut|начало вывода отрезано/)).toBeVisible();
+  await page.waitForTimeout(500);
+  await block.getByRole('button', { name: /Stop|Остановить/ }).click();
+  await expect(block.getByTestId('shell-how')).toHaveText(/stopped|остановлена/);
+});
