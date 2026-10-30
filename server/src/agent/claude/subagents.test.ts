@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { agentOfCall, findSubagentMetaByAgent, agentIdFromResult, findSubagentMeta, isRunning, noMetaAdd, noMetaHas, NO_META_TTL_MS, RECENT_MS, resetSubagentCache } from './subagents.ts';
+import { hitFresh, hitGet, hitSet, agentOfCall, findSubagentMetaByAgent, agentIdFromResult, findSubagentMeta, isRunning, noMetaAdd, noMetaHas, NO_META_TTL_MS, RECENT_MS, resetSubagentCache } from './subagents.ts';
 
 const dirs: string[] = [];
 afterAll(() => { for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
@@ -147,5 +147,21 @@ describe('agentOfCall: a call no meta names', () => {
     expect(agentOfCall(call('toolu_X', 'Agent', { description: 'd', subagent_type: 'Explore' }, 'agentId: a1'), 'toolu_X', ['a1'], r, SID, false))
       .toEqual({ agentId: 'a1', type: 'Explore', description: 'd', running: false });
     expect(agentOfCall([], 'toolu_X', ['a1'], r, SID, false)).toBeNull();
+  });
+});
+
+describe('the fallback hit cache', () => {
+  it('keeps a hit per key; a SendMessage hit reads `running` again from the meta, an Agent-result hit is as it was', () => {
+    resetSubagentCache();
+    const r = projects({ a1: { agentType: 'g', description: 'd', toolUseId: 'toolu_A' } });
+    expect(hitGet('k')).toBeUndefined();
+    hitSet('k', { agentId: 'a1', type: 'g', description: 'd', running: false, viaSend: true });
+    expect(hitGet('k')).toMatchObject({ agentId: 'a1' });
+    expect(hitFresh(hitGet('k')!, r, SID, true).running).toBe(true); // unfinished + a live task
+    expect(hitFresh(hitGet('k')!, r, SID, false, Date.now() + RECENT_MS * 2).running).toBe(false);
+    const plain = { agentId: 'a1', type: '', description: '', running: false, viaSend: false };
+    expect(hitFresh(plain, r, SID, true)).toBe(plain);
+    resetSubagentCache();
+    expect(hitGet('k')).toBeUndefined();
   });
 });

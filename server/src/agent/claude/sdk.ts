@@ -4,7 +4,7 @@ import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
-import { agentOfCall, findSubagentMeta, isRunning, noMetaAdd, noMetaHas } from './subagents.ts';
+import { agentOfCall, findSubagentMeta, hitFresh, hitGet, hitSet, isRunning, noMetaAdd, noMetaHas } from './subagents.ts';
 import { defaultProjectsDir } from '../../sessions.ts';
 import { UsageUnavailableError, mapContextUsage, mapUsage } from '../../stats.ts';
 
@@ -206,9 +206,15 @@ export function sdkBackend(): AgentBackend {
         // hasResult) for a few seconds only (noMetaHas): a poll does not parse the whole main transcript again, a late
         // file is still found
         const key = `${sessionId}\0${toolUseId}\0${call?.hasResult ?? ''}`;
-        if (noMetaHas(key)) return null;
-        const hit = agentOfCall(await getSessionMessages(sessionId, { dir: cwd }), toolUseId, ids, defaultProjectsDir(), sessionId, call?.live ?? false);
-        if (!hit) return (noMetaAdd(key), null);
+        const hitKey = `${sessionId}\0${toolUseId}`;
+        const cached = hitGet(hitKey);
+        if (!cached && noMetaHas(key)) return null;
+        let hit = cached ? hitFresh(cached, defaultProjectsDir(), sessionId, call?.live ?? false) : null;
+        if (!hit) {
+          hit = agentOfCall(await getSessionMessages(sessionId, { dir: cwd }), toolUseId, ids, defaultProjectsDir(), sessionId, call?.live ?? false);
+          if (!hit) return (noMetaAdd(key), null);
+          hitSet(hitKey, hit);
+        }
         ({ agentId, type, description, running } = hit);
       }
       return { events: transcriptToEvents(await getSubagentMessages(sessionId, agentId, { dir: cwd }), attachments, onError, { subagent: true }), running, type, description };

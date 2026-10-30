@@ -105,6 +105,24 @@ export function findSubagentMetaByAgent(projectsDir: string, sessionId: string, 
   return null;
 }
 
+export type AgentHit = { agentId: string; type: string; description: string; running: boolean; /** found through a SendMessage's `to` */ viaSend: boolean };
+
+// A hit does not change (a call names one agent for good), so it is kept per (session, call): a running agent's tab polls
+// every 1.5 s and must not parse the whole main transcript each time. Only `running` is read afresh (a file stat).
+const HIT_CAP = 200;
+const hits = new Map<string, AgentHit>();
+export const hitGet = (key: string): AgentHit | undefined => hits.get(key);
+export function hitSet(key: string, h: AgentHit): void {
+  if (hits.size >= HIT_CAP) hits.delete(hits.keys().next().value!);
+  hits.set(key, h);
+}
+/** The cached hit with `running` read again from the agent's meta (a resumed agent's run state moves). */
+export function hitFresh(h: AgentHit, projectsDir: string, sessionId: string, live: boolean, now = Date.now()): AgentHit {
+  if (!h.viaSend) return h;
+  const meta = findSubagentMetaByAgent(projectsDir, sessionId, h.agentId);
+  return { ...h, running: meta ? isRunning(meta, live, now) : false };
+}
+
 /**
  * No meta names the call. The main transcript may still say which subagent it is: an Agent call by `agentId:` in its result
  * (an older CLI), a SendMessage call (a resume: the SDK's second task_started carries that call's id, and a tab saved with
@@ -112,18 +130,18 @@ export function findSubagentMetaByAgent(projectsDir: string, sessionId: string, 
  */
 export function agentOfCall(
   msgs: { type: string; message: unknown }[], toolUseId: string, ids: string[], projectsDir: string, sessionId: string, live: boolean, now = Date.now(),
-): { agentId: string; type: string; description: string; running: boolean } | null {
+): AgentHit | null {
   const found = toolCallIn(msgs, toolUseId);
   if (!found) return null;
   if (found.name === 'SendMessage') {
     const to = found.input.to;
     if (typeof to !== 'string' || !AGENT_ID.test(to) || !ids.includes(to)) return null;
     const meta = findSubagentMetaByAgent(projectsDir, sessionId, to);
-    return { agentId: to, type: meta?.type ?? '', description: meta?.description ?? '', running: meta ? isRunning(meta, live, now) : false };
+    return { agentId: to, type: meta?.type ?? '', description: meta?.description ?? '', running: meta ? isRunning(meta, live, now) : false, viaSend: true };
   }
   const id = found.result ? agentIdFromResult(found.result) : null;
   if (!id || !ids.includes(id)) return null;
-  return { agentId: id, type: String(found.input.subagent_type ?? ''), description: String(found.input.description ?? ''), running: false };
+  return { agentId: id, type: String(found.input.subagent_type ?? ''), description: String(found.input.description ?? ''), running: false, viaSend: false };
 }
 
 /**
@@ -151,6 +169,7 @@ export function resetSubagentCache(): void {
   where.clear();
   missed.clear();
   noMeta.clear();
+  hits.clear();
 }
 
 /** The fallback: the Agent tool's result text names the agent (`agentId: a1b2…`). */
