@@ -144,66 +144,66 @@ All messages are JSON over one WebSocket. The types live in `shared/src/protocol
 The milestone that delivers each item is in brackets. "Verify" lists what the e2e or manual check must show.
 
 **Chat (M0)**
-- [ ] Streaming markdown replies; code highlighting; mermaid and svg blocks rendered — verify: fake agent's markdown fixture renders headings, code and a mermaid diagram.
-- [ ] Messages sent while the agent works are injected mid-turn (`priority: 'next'`); ⌘Enter interrupts and sends (`'now'`); Stop button and Esc interrupt.
-- [ ] Tool lines (`▸ Tool · arg`), subagent tool lines indented, errored tool lines red.
-- [ ] **Expandable tool lines** (added 2026-10-25, as in Claude Code): click a tool line → the full input (the whole command, file path, or pretty JSON) and the tool's output (`tool_result` text; errors red), scrollable, collapsed again on a second click. Also after a reload and on resume (the transcript's tool results are replayed). — delivered in M1 (task M1-19).
-- [ ] Done line with duration and time; interrupted turns marked.
-- [ ] Permission cards (allow / deny) — moved into M0 from M4: without them the real agent stalls on its first prompt.
-- [ ] Transcript replay on reconnect and on resume (`getSessionMessages`); user images in replay come with attachments in M3.
-- [ ] i18n ru/en, auto from the browser language, toggle in the header (every string through `t()` from day one).
-- [ ] Plannotator palette and chrome: header, tab pills, paper card over a grid, footer.
+- [x] Streaming markdown replies; code highlighting; mermaid and svg blocks rendered — verify: fake agent's markdown fixture renders headings, code and a mermaid diagram.
+- [x] Messages sent while the agent works are injected mid-turn (`priority: 'next'`); ⌘Enter interrupts and sends (`'now'`); Stop button and Esc interrupt.
+- [x] Tool lines (`▸ Tool · arg`), subagent tool lines indented, errored tool lines red.
+- [x] **Expandable tool lines** (added 2026-10-25, as in Claude Code): click a tool line → the full input (the whole command, file path, or pretty JSON) and the tool's output (`tool_result` text; errors red), scrollable, collapsed again on a second click. Also after a reload and on resume (the transcript's tool results are replayed). — delivered in M1 (task M1-19).
+- [x] Done line with duration and time; interrupted turns marked.
+- [x] Permission cards (allow / deny) — moved into M0 from M4: without them the real agent stalls on its first prompt.
+- [x] Transcript replay on reconnect and on resume (`getSessionMessages`); user images in replay come with attachments in M3.
+- [x] i18n ru/en, auto from the browser language, toggle in the header (every string through `t()` from day one).
+- [x] Plannotator palette and chrome: header, tab pills, paper card over a grid, footer.
 
 **Comments (M1)**
-- [ ] Select text in a reply, your own message or an open file → "Comment" button → popup; ⌘/Ctrl+Enter adds the comment, Esc cancels.
-- [ ] Pending marks are yellow and rounded; sent marks are dimmed purple; click on a mark → the same card in a popup; edit and delete.
-- [ ] Side panel stack: cards with edit (✓/✕, ⌘Enter/Esc, ? help) and delete; jump to source; count badges on tabs and tree rows.
-- [ ] Batch send: one message of fragments plus comments plus image references.
-- [ ] Anchors persist across reloads and resumes; orphaned comments are shown, not dropped.
-- [ ] **Quick labels** (as in Plannotator), one click adds the comment with no typing: 👍 Looks good · ❓ Clarify this · 🔍 Verify this · 🔬 Give me an example · 🗺️ Missing overview · 🧬 Match existing patterns · 🔄 Consider alternatives · 📉 Ensure no regression · 🚫 Out of scope · 🧪 Needs tests. Labels are translated (ru/en); each may carry a hidden instruction for the agent (e.g. Verify this → "This seems like an assumption. Verify…"), sent with the batch.
-- [ ] **Emoji** in comment text: an emoji menu button in the comment popup, and GitHub-style `:` shortcodes with autocomplete (`:+1` → 👍; ↑↓ Enter/Tab, Esc), the same keyboard behaviour as the `@` picker.
+- [x] Select text in a reply, your own message or an open file → "Comment" button → popup; ⌘/Ctrl+Enter adds the comment, Esc cancels.
+- [x] Pending marks are yellow and rounded; sent marks are dimmed purple; click on a mark → the same card in a popup; edit and delete.
+- [x] Side panel stack: cards with edit (✓/✕, ⌘Enter/Esc, ? help) and delete; jump to source; count badges on tabs and tree rows.
+- [x] Batch send: one message of fragments plus comments plus image references.
+- [x] Anchors persist across reloads and resumes; orphaned comments are shown, not dropped.
+- [x] **Quick labels** (as in Plannotator), one click adds the comment with no typing: 👍 Looks good · ❓ Clarify this · 🔍 Verify this · 🔬 Give me an example · 🗺️ Missing overview · 🧬 Match existing patterns · 🔄 Consider alternatives · 📉 Ensure no regression · 🚫 Out of scope · 🧪 Needs tests. Labels are translated (ru/en); each may carry a hidden instruction for the agent (e.g. Verify this → "This seems like an assumption. Verify…"), sent with the batch.
+- [x] **Emoji** in comment text: an emoji menu button in the comment popup, and GitHub-style `:` shortcodes with autocomplete (`:+1` → 👍; ↑↓ Enter/Tab, Esc), the same keyboard behaviour as the `@` picker.
 
 **Agents & tasks (M2)** — new, beyond the prototype; built after M5 (see Milestones → Order). The last two items below (tab strip, tab context menu) are delivered in M3; see [Agents and background tasks](#agents-and-background-tasks)
 - [x] Task indicator under the composer: count of running subagents and shell tasks; click → bottom drawer (Alt+T). Finished tasks stay (the last 20), shown quietly as `✓ N`.
 - [x] Drawer: tree of tasks (subagents, shell, monitors; nested by `parent_task_id`) with status, elapsed time, tokens, last tool, one-line summary; actions: open, stop (`stopTask`), move to background (`backgroundTasks(toolUseId)`).
-- [ ] Subagent chat in its own tab (live via `forwardSubagentText`), commentable; comments go to the main session.
+- [x] Subagent chat in its own tab (live via `forwardSubagentText`), commentable; comments go to the main session.
 - [x] Shell task output in its own tab (`get_task_output` tail, polled while the tab is open), stop.
-- [ ] Main feed: a subagent call renders as a card (type, description, status) that opens its tab.
-- [ ] Resume: subagent chats of a resumed session restored from disk (`listSubagents` / `getSubagentMessages`).
-- [ ] Tab strip: the main chat is pinned as the first tab and cannot be closed. Media in a closed tab stops; picture-in-picture closes.
-- [ ] Tab context menu (right click), modelled on VS Code / IntelliJ: **Close**, **Close Others**, **Close to the Right**, **Close All**; on the main chat tab only the actions that leave it open (Close Others, Close All). File tabs add **Copy Path** and **Reveal in File Tree** (M3). Middle click closes a tab.
+- [x] Main feed: a subagent call renders as a card (type, description, status) that opens its tab.
+- [x] Resume: subagent chats of a resumed session restored from disk (`listSubagents` / `getSubagentMessages`).
+- [x] Tab strip: the main chat is pinned as the first tab and cannot be closed. Media in a closed tab stops; picture-in-picture closes.
+- [x] Tab context menu (right click), modelled on VS Code / IntelliJ: **Close**, **Close Others**, **Close to the Right**, **Close All**; on the main chat tab only the actions that leave it open (Close Others, Close All). File tabs add **Copy Path** and **Reveal in File Tree** (M3). Middle click closes a tab.
 
 **Files & media (M3)**
-- [ ] File tree sheet (overlay, collapsible, filter, ↻ refresh keeping the open folders, auto-refresh after each live turn).
-- [ ] File tabs: md (rendered, commentable), code (highlighted), image, video, audio; HTTP Range seeking.
-- [ ] A playing video goes to picture-in-picture when its tab is left; audio keeps playing; ▶ dot on the tab; closing the tab stops it.
-- [ ] Clickable project paths in `code` and relative links (HEAD check, strike-through if missing).
-- [ ] `@` mentions: the CLI's `file_suggestions` with our own fuzzy fallback; ↑↓ Enter/Tab, folder keeps the picker open, quoted paths with spaces; clickable in sent messages.
-- [ ] Image attachments: paste, drop, 📎; downscale to ≤1568px; png→jpeg over 3.5 MB; thumbnails, lightbox; in the composer and in comments.
-- [ ] Attachments are stored on the server by content hash (`~/.nota-bene/attachments/<sha256>.<ext>`) and travel over the socket as ids, never as base64 in the replayed history (a session with screenshots would resend megabytes on every reload). Images in a resumed transcript are written to the same store on replay.
-- [ ] Comments on open files (md rendered and code), with count badges on tabs and tree rows; image references in a batch (moved here from M1).
-- [ ] **Branches and worktrees** (requested 2026-10-25: "у меня нет доступа к веткам отсюда"; new, beyond the prototype). The window's checkout is never switched — a live window may run from it. Instead, the tree has a source selector: this checkout (default), every other worktree of the repo (`git worktree list`), and local branches without a worktree (read through `git ls-tree` / `git show`). Files from another source open read-only in tabs marked with the branch name, and are commentable (the anchor carries the ref). Paths the agent prints inside another worktree (absolute, or relative to it) open from that worktree instead of failing as missing.
+- [x] File tree sheet (overlay, collapsible, filter, ↻ refresh keeping the open folders, auto-refresh after each live turn).
+- [x] File tabs: md (rendered, commentable), code (highlighted), image, video, audio; HTTP Range seeking.
+- [x] A playing video goes to picture-in-picture when its tab is left; audio keeps playing; ▶ dot on the tab; closing the tab stops it.
+- [x] Clickable project paths in `code` and relative links (HEAD check, strike-through if missing).
+- [x] `@` mentions: the CLI's `file_suggestions` with our own fuzzy fallback; ↑↓ Enter/Tab, folder keeps the picker open, quoted paths with spaces; clickable in sent messages.
+- [x] Image attachments: paste, drop, 📎; downscale to ≤1568px; png→jpeg over 3.5 MB; thumbnails, lightbox; in the composer and in comments.
+- [x] Attachments are stored on the server by content hash (`~/.nota-bene/attachments/<sha256>.<ext>`) and travel over the socket as ids, never as base64 in the replayed history (a session with screenshots would resend megabytes on every reload). Images in a resumed transcript are written to the same store on replay.
+- [x] Comments on open files (md rendered and code), with count badges on tabs and tree rows; image references in a batch (moved here from M1).
+- [x] **Branches and worktrees** (requested 2026-10-25: "у меня нет доступа к веткам отсюда"; new, beyond the prototype). The window's checkout is never switched — a live window may run from it. Instead, the tree has a source selector: this checkout (default), every other worktree of the repo (`git worktree list`), and local branches without a worktree (read through `git ls-tree` / `git show`). Files from another source open read-only in tabs marked with the branch name, and are commentable (the anchor carries the ref). Paths the agent prints inside another worktree (absolute, or relative to it) open from that worktree instead of failing as missing.
 
 **Session & agent controls (M4)**
-- [ ] Session picker over all folders: grouped by cwd, filter, current project first, new session; in-process switch (no restart).
-- [ ] `cwd` for sessions where `listSessions` omits it (read from the transcript head).
-- [ ] Tab and document title = session title (skipping `/commands`).
-- [ ] Footer meters: context (`getContextUsage`), plan limits 5h/week (usage API + `rate_limit_event` fallback), cost fallback.
-- [ ] Compact and clear (icon buttons); `conversation_reset` clears the feed; compact boundary line.
-- [ ] Plan card for `ExitPlanMode` (rendered, commentable, "approve · continue in ‹previous mode›").
-- [ ] Mode pill and menu (default, acceptEdits, plan, auto), Shift+Tab cycle, follows the CLI's own mode changes, persisted.
-- [ ] Prompt suggestions as ghost placeholder, Tab accepts.
-- [ ] Favicon = NB circle coloured by state: idle (purple), working (blinks orange/purple, orange = the working dot), waiting for you (red), done while away (green).
-- [ ] Server errors as toasts (dedup ×N).
-- [ ] `--chrome` (Claude in Chrome tools) enabled.
-- [ ] ↻ restarts the agent in-process and resumes the same session (R-M4-1); available while busy as the escape hatch; M5's launcher adds a full server restart.
+- [x] Session picker over all folders: grouped by cwd, filter, current project first, new session; in-process switch (no restart).
+- [x] `cwd` for sessions where `listSessions` omits it (read from the transcript head).
+- [x] Tab and document title = session title (skipping `/commands`).
+- [x] Footer meters: context (`getContextUsage`), plan limits 5h/week (usage API + `rate_limit_event` fallback), cost fallback.
+- [x] Compact and clear (icon buttons); `conversation_reset` clears the feed; compact boundary line.
+- [x] Plan card for `ExitPlanMode` (rendered, commentable, "approve · continue in ‹previous mode›").
+- [x] Mode pill and menu (default, acceptEdits, plan, auto), Shift+Tab cycle, follows the CLI's own mode changes, persisted.
+- [x] Prompt suggestions as ghost placeholder, Tab accepts.
+- [x] Favicon = NB circle coloured by state: idle (purple), working (blinks orange/purple, orange = the working dot), waiting for you (red), done while away (green).
+- [x] Server errors as toasts (dedup ×N).
+- [x] `--chrome` (Claude in Chrome tools) enabled.
+- [x] ↻ restarts the agent in-process and resumes the same session (R-M4-1); available while busy as the escape hatch; M5's launcher adds a full server restart.
 - [ ] Background-task line above the composer: running shell tasks and subagents with elapsed time (prototype parity, added 2026-10-25; M2 replaces it with the indicator and drawer).
 
 **Launch & self-hosting (M5)**
-- [ ] `nota-bene [dir] [--port] [--resume id [--fork]] [--new]` bin; resumes the folder's last session by default.
-- [ ] `/nb` skill (`new`, `fork`) using `windows.json`; never opens a second window on the same folder.
-- [ ] Dev mode (Vite HMR + server watch) on its own port, separate from the window you work in.
-- [ ] Prototype retired: the root compat symlinks removed, docs updated.
+- [x] `nota-bene [dir] [--port] [--resume id [--fork]] [--new]` bin; resumes the folder's last session by default.
+- [x] `/nb` skill (`new`, `fork`) using `windows.json`; never opens a second window on the same folder.
+- [x] Dev mode (Vite HMR + server watch) on its own port, separate from the window you work in.
+- [x] Prototype retired: the root compat symlinks removed, docs updated.
 
 ## Milestones
 
