@@ -18,7 +18,8 @@
     "test": "vitest run",
     "e2e": "playwright test -c e2e/playwright.config.ts",
     "dev": "node scripts/dev.mjs",
-    "start": "npm run build -w web && node server/src/main.ts"
+    "start": "npm run build -w web && node server/src/main.ts",
+    "dev:open": "node scripts/dev-open.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

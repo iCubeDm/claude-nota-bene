@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const [fixture, port] = process.argv.slice(2);
@@ -15,6 +16,8 @@ fs.mkdirSync(project);
 // e2e/project/ seeds the project with files the file-tab specs open
 fs.cpSync(path.join(root, 'e2e/project'), project, { recursive: true });
 fs.mkdirSync(home);
+// the access token is on (the server default): a known one per fixture, so the config can log its browsers in (e2e/auth.ts)
+fs.writeFileSync(path.join(home, 'token'), createHash('sha256').update(`nota-bene e2e ${fixture}`).digest('hex'), { mode: 0o600 });
 if (fixture === 'files') seedFiles(project);
 // the controls fixture's second session lives in a sibling folder of the project (removed with tmp)
 // experimental 3D is off by default; only the files fixture (the 3D specs) turns it on. The controls fixture keeps it off and

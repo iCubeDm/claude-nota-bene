@@ -12,6 +12,8 @@ export function devEnv(env, home) {
 }
 
 async function main() {
+  // the page is behind the access token: this opens http://localhost:5173 logged in (the token never goes to a log or argv)
+  console.log('Nota Bene dev: once Vite is up, `npm run dev:open` opens it logged in (the dev state dir has its own token).');
   const { concurrently } = await import('concurrently');
   const env = devEnv(process.env, os.homedir());
   const { result } = concurrently(

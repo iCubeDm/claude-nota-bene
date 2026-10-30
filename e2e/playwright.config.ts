@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
+import { loggedIn } from './auth.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -47,7 +48,7 @@ export default defineConfig({
   projects: fixtures.map((f) => ({
     name: f.name,
     grep: new RegExp(`@${f.name}\\b`),
-    use: { baseURL: `http://127.0.0.1:${f.port}` },
+    use: { baseURL: `http://127.0.0.1:${f.port}`, storageState: loggedIn(f.name, f.port) }, // the page's login cookie; auth.spec.ts covers the login itself
   })),
   webServer: fixtures.map((f) => ({
     command: `node e2e/serve.mjs ${f.name} ${f.port}`,

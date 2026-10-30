@@ -270,7 +270,7 @@ test('a second window takes over: the comment follows through the server, the fi
   await expect(cards(page)).toHaveCount(1);
 
   // a separate context: own localStorage, so the comment can only travel through the server
-  const ctx = await browser.newContext({ baseURL: testInfo.project.use.baseURL, locale: 'en-US' });
+  const ctx = await browser.newContext({ baseURL: testInfo.project.use.baseURL, locale: 'en-US', storageState: testInfo.project.use.storageState });
   const other = await ctx.newPage();
   await other.goto('/');
   await expect(other.getByTestId('onetab')).toHaveAttribute('data-state', 'occupied');
