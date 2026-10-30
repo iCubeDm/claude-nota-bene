@@ -847,6 +847,25 @@ describe('the package lookup (plugin install)', () => {
     expect(Date.now() - t0).toBeLessThan(8000);
   });
 
+  it('--plan on a data dir it cannot write: one NB: line naming the sandbox, exit 0, no NB-RUN, no retry advice', async () => {
+    fs.mkdirSync(data);
+    fs.chmodSync(data, 0o555);
+    try {
+      const r = await plan('new');
+      expect(r.code).toBe(0);
+      expect(r.out.trimEnd().split('\n')).toHaveLength(1);
+      expect(r.out).toMatch(/^NB: cannot write to the plugin data dir .*9\.9\.9.*sandbox/);
+      expect(r.out).not.toMatch(/NB-RUN|run \/nb again/i);
+    } finally {
+      fs.chmodSync(data, 0o755);
+    }
+  });
+
+  it('SKILL.md allowed-tools pins the two patterns that survive a quoted (spaced or non-ASCII) path', () => {
+    const md = fs.readFileSync(path.join(SKILL, 'SKILL.md'), 'utf8');
+    expect(/^allowed-tools: (.*)$/m.exec(md)?.[1]).toBe('Bash(*/nb/open.sh* *), Bash(node */bin/nota-bene.mjs* *)');
+  });
+
   it('a second --run during an install waits for it instead of installing twice', async () => {
     fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
     const first = sh([pkgOpen, '--data', data, '--run', project], { env: { STUB_NPM_SLEEP: '2' } });

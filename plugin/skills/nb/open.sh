@@ -250,6 +250,10 @@ if [ -n "$PLAN" ]; then
   }
   if [ -n "$FIRST_RUN" ]; then
     command -v npm >/dev/null || bail "$NPM_MISSING"
+    # the install needs a writable data dir; under Claude Code's sandbox mode it is not, and the background task would fail the
+    # same way on every retry, so say the likely cause here (a plan runs first) and give no "run /nb again"
+    { mkdir -p "$PREFIX" && : > "$PREFIX/.nb-probe" && rm -f "$PREFIX/.nb-probe"; } 2>/dev/null \
+      || bail "NB: cannot write to the plugin data dir $PREFIX, which the first run needs to install $PKG@$VER. The likely cause is Claude Code's sandbox mode (it blocks writes outside the project): allow writes to that folder in the sandbox settings, or turn the sandbox off for /nb. Retrying will not help until then."
     rm -f "$PREFIX/.nb-install-failed" 2>/dev/null
     # the install runs inside the background task, never in this preprocessing
     RUN="$(q "$SELF") --data $(q "$DATA") --run $(q "$DIR")"
