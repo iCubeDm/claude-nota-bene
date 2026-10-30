@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { shellEnv } from '../server/src/session/shellText.ts';
 // @ts-expect-error plain ESM, no types
 import { acquireLaunchLock, buildLock, candidatePorts, ensureBuild, needsBuild, portFree, serverEnv } from './nota-bene.mjs';
 
@@ -584,6 +585,17 @@ describe('web/dist freshness', () => {
 });
 
 describe('serverEnv', () => {
+  it('strips from the server child what the `! cmd` environment strips (server/src/session/shellText.ts shellEnv)', () => {
+    for (const base of [
+      { npm_execpath: '/x/npm', npm_lifecycle_event: 'start', npm_config_registry: 'r', INIT_CWD: '/w', PATH: '/p/node_modules/.bin:/q/node-gyp-bin:/usr/bin:/bin', HOME: '/h' },
+      { NPM_TOKEN: 't', npm_config_registry: 'r', INIT_CWD: '/w', PATH: '/p/node_modules/.bin:/usr/bin' },
+    ]) {
+      const theirs = serverEnv(base, 1);
+      delete theirs.NOTA_BENE_SUPERVISED;
+      delete theirs.NOTA_BENE_LAUNCHER_PID;
+      expect(shellEnv(base)).toEqual(theirs);
+    }
+  });
   it('drops npm_* and INIT_CWD and the node_modules/.bin PATH prefix npm adds, keeps the rest of PATH', () => {
     const e = serverEnv({
       npm_execpath: '/x/npx-cli.js', npm_config_cache: 'x', npm_lifecycle_event: 'npx', NPM_CONFIG_X: 'y', INIT_CWD: '/z', KEEP: '1', NOTA_BENE_AUTOPORT: undefined,
