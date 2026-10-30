@@ -470,7 +470,7 @@ describe('--plan', () => {
     let r = await plan('');
     expect(lines(r)['NB-RUN']).toBe(`node ${stubBin()} ${project}`);
     expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} `
-      + String.raw`\ \(new\ session:\ no\ earlier\ window\ session\ for\ this\ folder\)`);
+      + "' (new session: no earlier window session for this folder)'");
     const id = 'feedface-0000-4000-8000-000000000001';
     fs.writeFileSync(path.join(nbHome, 'sessions.json'), JSON.stringify({ [project]: id }));
     fs.mkdirSync(path.join(claudeDir, 'projects/p'), { recursive: true });
@@ -478,7 +478,7 @@ describe('--plan', () => {
     r = await plan('');
     expect(lines(r)['NB-RUN']).toBe(`node ${stubBin()} ${project}`);
     expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} `
-      + String.raw`\ \(resumed\ the\ last\ window\ session\ feedface\)`);
+      + "' (resumed the last window session feedface)'");
     expect(launches()).toEqual([]);
   });
 
@@ -486,7 +486,7 @@ describe('--plan', () => {
     const r = await plan('форк');
     expect(r.code).toBe(0);
     expect(lines(r)['NB-RUN']).toBe(`node ${stubBin()} ${project} --resume ${SID} --fork`);
-    expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} ` + String.raw`\ \(forked\ from\ this\ conversation\)`);
+    expect(lines(r)['NB-WAIT']).toBe(`${stubApp} --wait ${project} ` + "' (forked from this conversation)'");
   });
 
   it('a window already open on the folder: the usual NB: line, brought to front, no NB-RUN', async () => {
@@ -580,7 +580,7 @@ describe('--wait', () => {
 
 // --- the plugin install: no checkout above the skill, the launcher comes from the npm package under ${CLAUDE_PLUGIN_DATA}
 describe('the package lookup (plugin install)', () => {
-  const esc = (p: string) => p.replace(/ /g, '\\ '); // printf %q of a plain-ASCII path with spaces
+  const esc = (p: string) => (/[^A-Za-z0-9_./:@%+=,-]/.test(p) ? `'${p.replace(/'/g, "'\\\\''")}'` : p); // q(): safe words as they are, the rest in '...'
   let data: string; // a data dir whose name has a space
   beforeEach(() => {
     data = path.join(path.dirname(project), 'plugin data');
@@ -661,7 +661,7 @@ describe('the package lookup (plugin install)', () => {
     const l = lines(r);
     expect(l['NB-RUN']).toBe(`node ${esc(pkgBin())} ${project}`);
     expect(l['NB-WAIT']).toBe(`${esc(pkgOpen)} --data ${esc(data)} --wait ${project} `
-      + String.raw`\ \(new\ session:\ no\ earlier\ window\ session\ for\ this\ folder\)`);
+      + "' (new session: no earlier window session for this folder)'");
     expect(l['NB-NOTE']).toBeUndefined();
     expect(npmCalls()).toEqual([]);
   });
@@ -822,6 +822,31 @@ describe('the package lookup (plugin install)', () => {
     }
   });
 
+  it('several waiters racing for a stale lock install once (a lock moved aside is never taken twice)', async () => {
+    for (let trial = 0; trial < 3; trial++) {
+      fs.rmSync(path.join(tmp, 'npm.log'), { force: true });
+      fs.rmSync(data, { recursive: true, force: true });
+      lockAt({ ts: 1 });
+      const runs = Array.from({ length: 6 }, () => sh([pkgOpen, '--data', data, '--run', project], { env: { STUB_NPM_SLEEP: '1', NB_INSTALL_WAIT_SECS: '30' } }));
+      const rs = await Promise.all(runs);
+      expect(rs.map((r) => r.code)).toEqual([0, 0, 0, 0, 0, 0]);
+      expect(npmCalls().length, `trial ${trial}`).toBe(1);
+    }
+  }, 60_000);
+
+  it('--wait reports an interrupted install at once: a lock with a dead pid, or (after a short grace) no lock and no marker', async () => {
+    lockAt({ pid: '999999', ts: now() - 10 });
+    const t0 = Date.now();
+    let w = await sh([pkgOpen, '--data', data, '--wait', project]);
+    expect(w.code).toBe(1);
+    expect(w.out).toContain('did not finish: the background task stopped or never started');
+    fs.rmSync(path.join(prefix(), '.nb-install.lock'), { recursive: true });
+    w = await sh([pkgOpen, '--data', data, '--wait', project], { env: { NB_INSTALL_GRACE_SECS: '1' } });
+    expect(w.code).toBe(1);
+    expect(w.out).toContain('did not finish');
+    expect(Date.now() - t0).toBeLessThan(8000);
+  });
+
   it('a second --run during an install waits for it instead of installing twice', async () => {
     fs.rmSync(path.join(tmp, 'argv.log'), { force: true });
     const first = sh([pkgOpen, '--data', data, '--run', project], { env: { STUB_NPM_SLEEP: '2' } });
@@ -866,6 +891,30 @@ describe('the package lookup (plugin install)', () => {
     expect(run).toContain("$'");
     const back = execFileSync('/bin/bash', ['-c', 'eval "set -- $RUN"; printf "%s\\n" "$@"'], { encoding: 'utf8', env: { RUN: run } }).split('\n');
     expect(back).toContain(odd);
+  });
+
+  it('an ASCII folder with a space: single-quoted, never a backslash-escaped space (Claude Code refuses those)', async () => {
+    installed(); // the wait then carries the --last note
+    const odd = path.join(project, 'my project');
+    fs.mkdirSync(odd);
+    const r = await plan('', { cwd: odd });
+    expect(r.out).not.toMatch(/\\ /);
+    expect(lines(r)['NB-RUN']).toContain(`'${odd}'`);
+    expect(lines(r)['NB-WAIT']).toContain(`'${odd}'`);
+    expect(lines(r)['NB-WAIT']).toContain("' (new session: no earlier window session for this folder)'"); // spaces and parentheses
+  });
+
+  it('the quoting sed runs under LC_ALL=C whatever the user\'s locale (invalid UTF-8 would be dropped otherwise)', async () => {
+    const log = path.join(tmp, 'sed-locale.log');
+    fs.rmSync(log, { force: true });
+    const d = binDir('sedspy', [['sed', `#!/bin/sh\necho "$LC_ALL" >> "${log}"\nexec ${which('sed')} "$@"\n`]]);
+    const odd = path.join(project, "Проект д'А");
+    fs.mkdirSync(odd);
+    const r = await plan('new', { cwd: odd, env: { PATH: `${d}:${process.env.PATH}`, LC_ALL: 'en_US.UTF-8', LANG: 'en_US.UTF-8' } });
+    expect(lines(r)['NB-RUN']).toContain("д'\\''А");
+    const seen = fs.readFileSync(log, 'utf8').trim().split('\n');
+    expect(seen.filter((l) => l !== 'C' && l !== 'en_US.UTF-8')).toEqual([]);
+    expect(seen.filter((l) => l === 'C').length).toBeGreaterThan(0); // the quoting calls
   });
 
   it('the plan\'s NB-RUN reads back exactly in bash with a data dir and a folder whose names have spaces and quotes', async () => {

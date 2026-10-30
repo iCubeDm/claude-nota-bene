@@ -207,7 +207,7 @@ export function sdkBackend(): AgentBackend {
         // file is still found
         const key = `${sessionId}\0${toolUseId}\0${call?.hasResult ?? ''}`;
         const hitKey = `${sessionId}\0${toolUseId}`;
-        const cached = hitGet(hitKey);
+        const cached = hitGet(hitKey, ids);
         if (!cached && noMetaHas(key)) return null;
         let hit = cached ? hitFresh(cached, defaultProjectsDir(), sessionId, call?.live ?? false) : null;
         if (!hit) {

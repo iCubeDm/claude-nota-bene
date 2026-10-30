@@ -111,7 +111,11 @@ export type AgentHit = { agentId: string; type: string; description: string; run
 // every 1.5 s and must not parse the whole main transcript each time. Only `running` is read afresh (a file stat).
 const HIT_CAP = 200;
 const hits = new Map<string, AgentHit>();
-export const hitGet = (key: string): AgentHit | undefined => hits.get(key);
+/** The cached hit, only while the agent is still listed (its files may be gone: then it is a miss again, not an empty 200). */
+export const hitGet = (key: string, ids: string[]): AgentHit | undefined => {
+  const h = hits.get(key);
+  return h && ids.includes(h.agentId) ? h : undefined;
+};
 export function hitSet(key: string, h: AgentHit): void {
   if (hits.size >= HIT_CAP) hits.delete(hits.keys().next().value!);
   hits.set(key, h);
@@ -120,7 +124,8 @@ export function hitSet(key: string, h: AgentHit): void {
 export function hitFresh(h: AgentHit, projectsDir: string, sessionId: string, live: boolean, now = Date.now()): AgentHit {
   if (!h.viaSend) return h;
   const meta = findSubagentMetaByAgent(projectsDir, sessionId, h.agentId);
-  return { ...h, running: meta ? isRunning(meta, live, now) : false };
+  // type and description too: a hit made before the meta was written would otherwise keep '' for good
+  return { ...h, type: meta?.type || h.type, description: meta?.description || h.description, running: meta ? isRunning(meta, live, now) : false };
 }
 
 /**

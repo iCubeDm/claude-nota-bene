@@ -7,7 +7,7 @@
 #   Where the launcher lives, in this order:
 #     1. a checkout: bin/nota-bene.mjs three levels above this skill dir (plugin/skills/nb -> repo root), as before;
 #        found through the ~/.claude/skills/nb symlink too. Needs Node >= 23.6 (it runs the .ts sources).
-#     2. the npm package nota-bene-ide@<plugin version> installed under DIR/<version>/ (npm install --prefix DIR/<version>, done on the first
+#     2. the npm package nota-bene-ide@<plugin version> installed under DIR/<version>/ (one install per version, about 330 MB each, not pruned yet; npm install --prefix DIR/<version>, done on the first
 #        run, by --run, i.e. in the background task, never in the --plan preprocessing). Needs Node >= 22.
 #        The version is the plugin's (.claude-plugin/plugin.json); a plugin update therefore reinstalls.
 #   no arguments — a window already open on the folder is just brought to front; otherwise a new window, where the
@@ -20,8 +20,9 @@
 #                                                 the window's log; stopping the task, or ending the session, ends it)
 #   NB-WAIT: <open.sh --wait command>              then waits with it for the window to come up
 #   NB-NAME: Nota Bene · <folder>                  the task's description
-# or one NB: line (an error, a refusal, "already open"). Both commands are quoted with printf %q under LC_ALL=C, so a
-# path with spaces, quotes, $ or non-ASCII is one plain-ASCII word that bash and zsh read back exactly.
+# or one NB: line (an error, a refusal, "already open"). Both commands are built by q(): a word of safe characters stays as it
+# is, anything else (spaces, quotes, $, parentheses, non-ASCII) is single-quoted, so bash and zsh read each back exactly and
+# Claude Code accepts the text (it refuses backslash-escaped spaces and $'\320...' escapes).
 # --wait polls --find every 0.5 s for up to 40 s (NB_WAIT_SECS, test only) and prints "NB: opened URL for DIR<note>."
 # Without --plan the window is started with --detach (terminal use).
 # The launcher is bin/nota-bene.mjs (--find / --last / --detach). It keeps one window per folder (its launch lock),
@@ -50,8 +51,8 @@ elif [ -n "$DATA" ]; then
   VER="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$SKDIR/../../.claude-plugin/plugin.json" 2>/dev/null)"
   VER="${VER%%$'\n'*}"
   [[ "$VER" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]*$ ]] || bail "NB: cannot read the plugin version (.claude-plugin/plugin.json beside skills/): reinstall the plugin."
-  # one install per version: DATA/<version>/. A plugin update installs beside the old one, so a session still on the old
-  # version (or a window running from it) is never touched; old version dirs are not pruned (see the release notes)
+  # one install per version: DATA/<version>/ (about 330 MB each). A plugin update installs beside the old one, so a session
+  # still on the old version (or a window running from it) is never touched. Old version dirs are not pruned yet.
   PREFIX="$DATA/$VER"
   BIN="$PREFIX/node_modules/$PKG/bin/nota-bene.mjs"
   # installed = the marker (written last, after a good install) and the launcher
@@ -75,7 +76,7 @@ fi
 NPM_MISSING="NB: npm not found on PATH; the first run installs $PKG@$VER with it. Install Node.js with npm (nodejs.org), or run \`npm install -g $PKG\` and open it with \`nota-bene\`."
 # install the package into DATA/<version>; progress goes to our stdout (the background task's output). The lock keeps two /nb
 # runs from installing at once. EVERY failure writes .nb-install-failed, which is how --wait learns of it.
-STALE_SECS="${NB_LOCK_STALE_SECS:-1800}"
+STALE_SECS="${NB_LOCK_STALE_SECS:-3600}"   # a live slow install must not be robbed; a recycled pid costs one waiter timeout
 lock_age() { # seconds since the lock was taken; huge when it carries no timestamp and is over a minute old; 0 when just taken
   local ts; ts="$(cat "$1/ts" 2>/dev/null)"
   if [[ "$ts" =~ ^[0-9]+$ ]]; then echo $(( $(date +%s) - ts )); return; fi
@@ -86,12 +87,18 @@ install_pkg() {
   mkdir -p "$PREFIX" 2>/dev/null || { echo "NB: cannot create the plugin data dir $PREFIX."; return 1; }
   ifail() { { echo "$1"; [ -n "${2:-}" ] && tail -n 5 "$2" 2>/dev/null; } | tee "$failed"; rm -rf "$lock" 2>/dev/null; return 1; }
   command -v npm >/dev/null || { echo "$NPM_MISSING" | tee "$failed"; return 1; }
-  until mkdir "$lock" 2>/dev/null; do
+  while true; do
+    # taking the lock = mkdir, then creating the pid file exclusively (noclobber) and finding our own pid in it. A lock another
+    # waiter moved aside, put back or re-created under us fails the write or shows another pid: then it is not ours
+    if mkdir "$lock" 2>/dev/null; then
+      if { set -o noclobber; echo $$ > "$lock/pid"; } 2>/dev/null && [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ]; then set +o noclobber; break; fi
+      set +o noclobber
+      sleep 0.2; continue
+    fi
     local holder age; holder="$(cat "$lock/pid" 2>/dev/null)"; age="$(lock_age "$lock")"
-    # reclaim a lock whose holder is gone (dead pid, after a moment for the pid file to be written) or that is simply old
-    # (a recycled pid); the rename is atomic, so of several waiters one wins, and a lock taken meanwhile is put back
-    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && [ "$age" -gt 3 ]; } || [ "$age" -gt "$STALE_SECS" ] \
-       || { [ -z "$holder" ] && [ "$age" -gt 30 ]; }; then
+    # reclaim a lock whose holder is gone (dead pid) or that is simply old (a recycled pid, or no timestamp at all); the rename
+    # is atomic, so of several waiters one wins, and a lock that turns out fresh is put back
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && [ "$age" -gt 3 ]; } || [ "$age" -gt "$STALE_SECS" ]; then
       if mv "$lock" "$lock.old.$$" 2>/dev/null; then
         if [ "$(lock_age "$lock.old.$$")" -le 3 ]; then mv "$lock.old.$$" "$lock" 2>/dev/null || rm -rf "$lock.old.$$"; else rm -rf "$lock.old.$$"; fi
       fi
@@ -102,7 +109,7 @@ install_pkg() {
     if [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ]; then return 0; fi
     [ "$waited" -ge "${NB_INSTALL_WAIT_SECS:-540}" ] && { echo "NB: another install of $PKG@$VER is still running after ${waited}s." | tee "$failed"; return 1; }
   done
-  echo $$ > "$lock/pid"; date +%s > "$lock/ts"
+  date +%s > "$lock/ts"
   # taken: another run may have finished between our last look and the lock
   if [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ]; then rm -rf "$lock"; return 0; fi
   rm -f "$PREFIX/.nb-installed" "$failed"
@@ -134,9 +141,18 @@ if [ "${1:-}" = --wait ]; then
   if [ -n "$FIRST_RUN" ]; then
     # a first install is under way in the background task: wait for it (patiently), or for its failure marker
     ISECS="${NB_INSTALL_WAIT_SECS:-540}"; [[ "$ISECS" =~ ^[0-9]+$ ]] || ISECS=540
+    GRACE="${NB_INSTALL_GRACE_SECS:-15}"; [[ "$GRACE" =~ ^[0-9]+$ ]] || GRACE=15
     for ((i = 0; i < ISECS * 2; i++)); do
       [ -f "$PREFIX/.nb-installed" ] && [ -f "$BIN" ] && break
       [ -f "$PREFIX/.nb-install-failed" ] && { cat "$PREFIX/.nb-install-failed"; exit 1; }
+      # the background task died or was stopped without a word: its lock names a dead pid, or (after a moment for the task to
+      # start) there is no lock and no marker at all. Say so now instead of waiting out the timeout.
+      holder="$(cat "$PREFIX/.nb-install.lock/pid" 2>/dev/null)"
+      if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } || { [ ! -d "$PREFIX/.nb-install.lock" ] && [ "$i" -ge $((GRACE * 2)) ]; }; then
+        [ -f "$PREFIX/.nb-installed" ] && break
+        echo "NB: the install of $PKG@$VER did not finish: the background task stopped or never started. Run /nb again."
+        exit 1
+      fi
       sleep 0.5
     done
     [ -f "$PREFIX/.nb-installed" ] || { echo "NB: the first install is still running after ${ISECS}s - see the background task's output."; exit 1; }
@@ -218,16 +234,17 @@ fi
 [ -n "${NOTA_BENE_FAKE:-}" ] && ARGS+=(--fake "$NOTA_BENE_FAKE")
 
 if [ -n "$PLAN" ]; then
-  # One shell word that bash and zsh read back exactly. ASCII: printf %q under LC_ALL=C. Non-ASCII without control characters
-  # (a Cyrillic folder): '...' with the raw UTF-8 and ' as '\'' - %q would print $'\320\237...', which Claude Code refuses to
-  # match against allowed-tools ("Text with escape codes"). Control characters keep %q's $'...'. Runs in a subshell: the locale stays.
+  # One shell word that bash and zsh read back exactly, in the only forms Claude Code accepts when it matches allowed-tools: safe
+  # characters as they are, anything else (spaces, parentheses, quotes, $, non-ASCII) in '...' with ' as '\'' (it refuses
+  # backslash-escaped spaces and $'\320...' escapes). Control characters have no such form and keep printf %q's $'...'.
+  # LC_ALL=C on sed too: the subshell's assignment is not exported, and sed in a UTF-8 locale drops invalid sequences.
   q() {
     (
       LC_ALL=C
       case "$1" in
         *[[:cntrl:]]*) printf '%q' "$1" ;;
-        *[!\ -~]*) printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")" ;;
-        *) printf '%q' "$1" ;;
+        ""|*[!A-Za-z0-9_./:@%+=,-]*) printf "'%s'" "$(printf '%s' "$1" | LC_ALL=C sed "s/'/'\\\\''/g")" ;;
+        *) printf '%s' "$1" ;;
       esac
     )
   }

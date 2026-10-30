@@ -154,14 +154,22 @@ describe('the fallback hit cache', () => {
   it('keeps a hit per key; a SendMessage hit reads `running` again from the meta, an Agent-result hit is as it was', () => {
     resetSubagentCache();
     const r = projects({ a1: { agentType: 'g', description: 'd', toolUseId: 'toolu_A' } });
-    expect(hitGet('k')).toBeUndefined();
+    expect(hitGet('k', ['a1'])).toBeUndefined();
     hitSet('k', { agentId: 'a1', type: 'g', description: 'd', running: false, viaSend: true });
-    expect(hitGet('k')).toMatchObject({ agentId: 'a1' });
-    expect(hitFresh(hitGet('k')!, r, SID, true).running).toBe(true); // unfinished + a live task
-    expect(hitFresh(hitGet('k')!, r, SID, false, Date.now() + RECENT_MS * 2).running).toBe(false);
+    expect(hitGet('k', ['a1'])).toMatchObject({ agentId: 'a1' });
+    expect(hitGet('k', [])).toBeUndefined(); // its files are gone: a miss, not a hit
+    expect(hitGet('k', ['zz'])).toBeUndefined();
+    expect(hitFresh(hitGet('k', ['a1'])!, r, SID, true).running).toBe(true); // unfinished + a live task
+    expect(hitFresh(hitGet('k', ['a1'])!, r, SID, false, Date.now() + RECENT_MS * 2).running).toBe(false);
     const plain = { agentId: 'a1', type: '', description: '', running: false, viaSend: false };
     expect(hitFresh(plain, r, SID, true)).toBe(plain);
     resetSubagentCache();
-    expect(hitGet('k')).toBeUndefined();
+    expect(hitGet('k', ['a1'])).toBeUndefined();
+  });
+  it('type and description are read again too, so a hit made before the meta existed does not keep them empty', () => {
+    const r = projects({ a1: { agentType: 'general-purpose', description: 'Re-review', toolUseId: 'toolu_A' } });
+    const early = { agentId: 'a1', type: '', description: '', running: false, viaSend: true };
+    expect(hitFresh(early, r, SID, true)).toMatchObject({ type: 'general-purpose', description: 'Re-review' });
+    expect(hitFresh({ ...early, type: 'kept' }, projects({}), SID, true)).toMatchObject({ type: 'kept' }); // no meta: what it had stays
   });
 });
