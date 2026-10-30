@@ -260,6 +260,8 @@ export const en: Dict = {
   // file viewers (M3-08)
   tooLarge: 'File is too large to show (over 2 MB)',
   binary: 'Binary file, not shown',
+  tmpImageBig: 'This image is over 50 MB and is not shown',
+  tmpImageOpen: 'Open this image in a tab',
   fileGone: 'This file no longer exists',
   noFile: 'no such file in the project',
   openRaw: 'Open raw',

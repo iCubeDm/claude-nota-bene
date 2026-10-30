@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react';
 // copied from the prototype
 export const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
 export const AUDIO = /\.(mp3|wav|m4a|ogg)$/i;
-export const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
+export const IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
 export const MODEL = /\.(glb|gltf|blend)$/i;
 export const BLEND = /\.blend$/i;
 export const MD = /\.(md|markdown)$/i;

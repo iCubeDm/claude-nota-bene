@@ -8,6 +8,7 @@ import { ReactReduxContext } from 'react-redux';
 import { t } from '@/i18n/index.ts';
 import { AUDIO, VIDEO, fileUrl } from '@/files/kinds.ts';
 import { useSources } from '@/files/sources.ts';
+import { useTmpDirs } from '@/files/tmpImages.ts';
 import { openDiagram } from '@/tabs/slice.ts';
 import { HARDEN, renderMermaid, sanitizeSvg, type DiagramLang } from '@/diagram/render.ts';
 import { fileOfImage, markMentions, markRefs, openMediaFile } from '@/refs/refs.ts';
@@ -142,6 +143,7 @@ export const Markdown = memo(
     const redux = useContext(ReactReduxContext);
     // absolute paths become refs only inside a known source's dir: re-mark when the list arrives or changes
     const sources = useSources();
+    const tmpDirs = useTmpDirs(); // likewise a temp folder's images
     const html = useMemo(
       () => {
         currentBase = baseDir;
@@ -165,7 +167,7 @@ export const Markdown = memo(
       if (!ref.current || !final) return;
       markRefs(ref.current, baseDir);
       if (mentions) markMentions(ref.current);
-    }, [html, final, baseDir, sources, mentions]);
+    }, [html, final, baseDir, sources, tmpDirs, mentions]);
     // the wrappers of the reply's video/audio, each hosting our player bar (not without a store: native controls stay)
     const [players, setPlayers] = useState<{ media: HTMLMediaElement; box: HTMLElement }[]>([]);
     useLayoutEffect(() => {

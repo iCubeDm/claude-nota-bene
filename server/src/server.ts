@@ -15,6 +15,7 @@ import { MarkFiles, markRoutes } from './marks.ts';
 import { CommentStore } from './comments.ts';
 import { EventHub } from './hub.ts';
 import { complete, fileRoutes } from './fileRoutes.ts';
+import { tmpDirNames } from './tmpImage.ts';
 import { BlendConverter } from './blend.ts';
 import { readPrefs } from './prefs.ts';
 import { httpHandler, isAllowedHost } from './http.ts';
@@ -296,7 +297,7 @@ export async function startServer(o: {
     const sendHello = (ws: WebSocket) => {
       try {
         const lang = readPrefs().lang; // the user's UI language, shared by every window; absent until one is chosen
-        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...caps, model3d }, ...(lang ? { lang } : {}) }));
+        ws.send(JSON.stringify({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...caps, model3d }, ...(lang ? { lang } : {}), tmpDirs: tmpDirNames() }));
       } catch (e) {
         reportError(hub, 'hello', e);
       }

@@ -26,6 +26,11 @@ export function tmpDirs(): string[] {
   return [...out];
 }
 
+/** The temp folders as a reply may name them (`/tmp/a.png` on macOS is really `/private/tmp/a.png`): the real ones and their given forms. For links only; reading uses `tmpDirs`. */
+export function tmpDirNames(): string[] {
+  return [...new Set([...tmpDirs(), os.tmpdir().replace(/\/+$/, ''), '/tmp', '/private/tmp'])].filter((d) => d.length > 1);
+}
+
 const SAFETY = {
   'x-content-type-options': 'nosniff',
   'content-security-policy': "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",

@@ -12,9 +12,9 @@ import type { FileKind } from '../kinds.ts';
 import type { MediaMarkup } from './useMediaMarkup.ts';
 
 /** The pane of an image, video or audio file (or its "gone" note), with the markup layers over an image or video. */
-export function MediaBody({ kind, path, fileRef, tabId, active, marking, natural, onToggleNatural, mediaUrl, failed, srcGone, onError, onMediaMeta, markup, mediaEl }: {
+export function MediaBody({ kind, path, fileRef, tabId, active, marking, natural, onToggleNatural, mediaUrl, failed, srcGone, note, onError, onMediaMeta, markup, mediaEl }: {
   kind: FileKind; path: string; fileRef: string | undefined; tabId: string; active: boolean; marking: boolean; natural: boolean;
-  onToggleNatural: () => void; mediaUrl: string; failed: boolean; srcGone: boolean; onError: () => void;
+  onToggleNatural: () => void; mediaUrl: string; failed: boolean; srcGone: boolean; note?: string; onError: () => void;
   onMediaMeta: (e: SyntheticEvent<HTMLMediaElement>) => void; markup: MediaMarkup; mediaEl: MutableRefObject<HTMLMediaElement | null>;
 }) {
   const t = useT();
@@ -29,7 +29,7 @@ export function MediaBody({ kind, path, fileRef, tabId, active, marking, natural
       <div data-pane={tabId} hidden={!active} className="grid-pane relative min-h-0 flex-1 overflow-auto">
         {srcGone
           ? <p data-source-gone className="p-4 text-sm text-muted-foreground">{t('sourceGone')}</p>
-          : <p className="p-4 text-sm text-muted-foreground">{t('fileGone')}</p>}
+          : <p className="p-4 text-sm text-muted-foreground">{note ?? t('fileGone')}</p>}
       </div>
     );
   } else if (kind === 'image') {

@@ -22,6 +22,7 @@ import { recordCompactMs } from '../feed/compactTiming.ts';
 import { feedUiSlice, TOOL_SRC } from '../feed/uiSlice.ts';
 import { adoptServerLang } from '../i18n/index.ts';
 import { setModel3d } from '../files/kinds.ts';
+import { setTmpDirs } from '../files/tmpImages.ts';
 import { persistListeners, type PersistState } from './persist.ts';
 import { emptyFeed, historyPrepended, prependHistory, reduce, type FeedState } from './feed.ts';
 
@@ -170,6 +171,7 @@ export function makeStore(o: {
       else if (ev.kind === 'replay') takeoverWanted = false; // a replay goes to the owner only: the takeover went through
       if (ev.kind === 'hello') adoptServerLang(ev.lang);
       if (ev.kind === 'hello') setModel3d(ev.capabilities?.model3d === true); // before the dispatch: views read it on re-render
+      if (ev.kind === 'hello') setTmpDirs(ev.tmpDirs);
       store.dispatch(serverEvent(ev));
     },
     (s) => {

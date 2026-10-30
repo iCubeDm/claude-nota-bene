@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { textOf } from '@/anchors/text.ts';
@@ -7,7 +7,9 @@ import { UserMessage } from '@/feed/UserMessage.tsx';
 import { setLang } from '@/i18n/index.ts';
 import { makeStore } from '@/store/store.ts';
 import { selectTabs } from '@/tabs/slice.ts';
-import { clearRefCache, markRefs, refClick, splitMentions } from './refs.ts';
+import { setTmpDirs } from '@/files/tmpImages.ts';
+import { resetSources, setSources } from '@/files/sources.ts';
+import { clearRefCache, escapeMentions, markRefs, refClick, splitMentions } from './refs.ts';
 
 beforeEach(() => {
   setLang('en');
@@ -195,4 +197,63 @@ it('user @mentions are clickable and keep the message text identical', async () 
   fireEvent.click(ms[1]);
   await tick();
   expect(selectTabs(store.getState()).open.map((t) => t.id)).toContain('file:my doc.md');
+});
+
+// B1e: an image of a temp folder is a ref like a project path, opened without a HEAD (the tab says when it is gone)
+it('a temp image path in code or a link is a ref once the server named its temp folders; other absolute paths stay plain', () => {
+  const html = '<code>/tmp/shot.png</code> <a href="/tmp/b.jpg">b</a> <code>/tmp/notes.txt</code> <code>/etc/c.png</code> <code>/tmp/../etc/d.png</code>';
+  const before = div(html);
+  markRefs(before);
+  expect(before.querySelectorAll('.ref').length).toBe(0); // temp folders not known yet
+  setTmpDirs(['/tmp', '/private/tmp']);
+  try {
+    const d = div(html);
+    markRefs(d);
+    expect([...d.querySelectorAll<HTMLElement>('.ref')].map((e) => e.dataset.path)).toEqual(['/tmp/shot.png', '/tmp/b.jpg']);
+    expect(d.querySelector<HTMLElement>('.ref')!.dataset.tmp).toBe('1');
+  } finally {
+    setTmpDirs([]);
+  }
+});
+
+it('a project path under a temp folder (a project that lives in /tmp) stays a project path', () => {
+  setSources([{ id: 'here', kind: 'checkout', label: '', ref: '', dir: '/tmp/proj' }]);
+  setTmpDirs(['/tmp']);
+  try {
+    const d = div('<code>/tmp/proj/pic.png</code>');
+    markRefs(d);
+    const c = d.querySelector<HTMLElement>('code')!;
+    expect([c.dataset.path, c.dataset.src, c.dataset.tmp]).toEqual(['pic.png', 'here', undefined]);
+  } finally {
+    setTmpDirs([]);
+    resetSources();
+  }
+});
+
+it('a click on a temp image ref opens the tab at once, with no request; a project ref still checks first', async () => {
+  const fetchMock = vi.fn(async () => ({ ok: true }));
+  vi.stubGlobal('fetch', fetchMock);
+  const store = setup((s) => <Box store={s} html='<code class="ref" data-path="/tmp/s.png" data-tmp="1">s</code><code class="ref" data-path="src/a.ts">a</code>' />);
+  fireEvent.click(screen.getByText('s'));
+  await tick();
+  expect(selectTabs(store.getState()).active).toBe('file:/tmp/s.png');
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('a'));
+  await tick();
+  expect(fetchMock).toHaveBeenCalled();
+  expect(selectTabs(store.getState()).active).toBe('file:src/a.ts');
+});
+
+it('a reply and a user message: a temp image in code becomes a ref when the folders arrive', () => {
+  const { container, rerender } = render(<Markdown text="saved to `/tmp/shot.png`" final />);
+  expect(container.querySelector('code.ref')).toBeNull();
+  act(() => setTmpDirs(['/tmp']));
+  try {
+    rerender(<Markdown text="saved to `/tmp/shot.png`" final />);
+    expect(container.querySelector<HTMLElement>('code.ref')?.dataset.path).toBe('/tmp/shot.png');
+    const u = render(<Markdown text={escapeMentions('see [it](/tmp/b.png)')} final breaks noHtml mentions />);
+    expect(u.container.querySelector<HTMLElement>('a.ref')?.dataset.path).toBe('/tmp/b.png');
+  } finally {
+    act(() => setTmpDirs([]));
+  }
 });

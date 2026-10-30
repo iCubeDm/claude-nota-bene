@@ -7,6 +7,7 @@ import { CLAUDE_CAPABILITIES, PROTOCOL, type Capabilities, type ServerEvent } fr
 import { fakeBackend } from './agent/fake.ts';
 import { HistoryArchive } from './archive.ts';
 import { startServer } from './server.ts';
+import { tmpDirNames } from './tmpImage.ts';
 
 let home: string;
 let dist: string;
@@ -103,7 +104,7 @@ describe('server', () => {
     const a = await connect(s.url);
     await until(() => a.events.some((e) => e.kind === 'hello'));
     const kinds = a.events.map((e) => e.kind);
-    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...CLAUDE_CAPABILITIES, model3d: false } });
+    expect(a.events.find((e) => e.kind === 'hello')).toEqual({ kind: 'hello', protocol: PROTOCOL, capabilities: { ...CLAUDE_CAPABILITIES, model3d: false }, tmpDirs: tmpDirNames() });
     expect(kinds.indexOf('hello')).toBeGreaterThan(kinds.indexOf('stats'));
   });
 

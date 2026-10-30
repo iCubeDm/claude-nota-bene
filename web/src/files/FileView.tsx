@@ -10,6 +10,7 @@ import { selectDraft } from '@/media/markup/slice.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { fileTabId } from '@/tabs/slice.ts';
 import { fileUrl, kindOf, useModel3d } from './kinds.ts';
+import { tmpImageUrl, isTmpTabPath } from './tmpImages.ts';
 import { isFixed, sourcesKnown, useSources } from './sources.ts';
 import { SourceChip } from './SourcePicker.tsx';
 import { clearJump, selectJump } from './slice.ts';
@@ -18,8 +19,11 @@ import { MediaBody } from './view/MediaBody.tsx';
 import { ModelPane } from './view/ModelPane.tsx';
 import { TextBody } from './view/TextBody.tsx';
 import { useFileLoad } from './view/useFileLoad.ts';
+import { useTmpImage } from './view/useTmpImage.ts';
 import { useWrapLines, wrapLines } from './wrap.ts';
 import { useMediaMarkup } from './view/useMediaMarkup.ts';
+
+const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
 
 /**
  * One open file. `src`/`refName`: another source (a worktree or a branch; M3-16), shown read-only with a chip. A branch
@@ -35,7 +39,9 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const media = kind !== 'md' && kind !== 'text';
   const markableKind = kind === 'image' || kind === 'video';
   const tabId = fileTabId(path, src);
-  const url = fileUrl(path, undefined, src);
+  // an absolute path is an image of a temp folder (see tmpImages.ts): another route, fetched with the key into a blob
+  const tmp = src === 'here' && kind === 'image' && isTmpTabPath(path);
+  const url = tmp ? tmpImageUrl(path) : fileUrl(path, undefined, src);
   const ref = src === 'here' ? undefined : refName;
   const sources = useSources();
   const fixed = isFixed(src, sources);
@@ -46,8 +52,13 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
   const markingRef = useRef(marking);
   markingRef.current = marking;
   const load = useFileLoad({ path, src, ref, url, kind, media, hasVersion: markableKind || kind === 'model', active, fixed, marking, markingRef });
-  const { data, rev, loadedRev, failed, mediaUrl, resumeAt } = load;
-  const markup = useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl, mediaEl: load.mediaEl });
+  const { data, rev, loadedRev, resumeAt } = load;
+  const blob = useTmpImage(tmp ? load.mediaUrl : null);
+  // until the blob arrives the image shows a 1x1 pixel, not a broken one
+  const mediaUrl = tmp ? (blob.s === 'ok' ? blob.url : PIXEL) : load.mediaUrl;
+  const failed = load.failed || (tmp && (blob.s === 'gone' || blob.s === 'error' || blob.s === 'big'));
+  const note = tmp && blob.s === 'big' ? t('tmpImageBig') : undefined;
+  const markup = useMediaMarkup({ tabId, path, ref, active, marking, mediaUrl: tmp ? load.mediaUrl : mediaUrl, mediaEl: load.mediaEl });
   const { markable } = markup;
   const wrap = useWrapLines();
 
@@ -94,7 +105,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
             className={`rounded px-1.5 hover:bg-muted hover:text-foreground ${wrap ? 'text-foreground' : ''}`}>↩</button>
         )}
         <button type="button" aria-label={t('reload')} title={t('reload')} onClick={load.reloadClick} className="rounded px-1.5 hover:bg-muted hover:text-foreground">↻</button>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
+        <a href={tmp ? (blob.s === 'ok' ? blob.url : undefined) : url} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">{t('openRaw')}</a>
       </div>
       {kind === 'model' ? (
         <ModelPane path={path} src={src} fileRef={ref} tabId={tabId} active={active} reloadKey={load.bust} srcGone={srcGone} />
@@ -102,7 +113,7 @@ export function FileView({ path, active, src = 'here', refName }: { path: string
         <MediaBody
           kind={kind} path={path} fileRef={ref} tabId={tabId} active={active} marking={marking} natural={natural}
           onToggleNatural={() => setNatural((v) => !v)} mediaUrl={mediaUrl} failed={failed} srcGone={srcGone}
-          onError={load.onError} onMediaMeta={load.onMediaMeta} markup={markup} mediaEl={load.mediaEl}
+          onError={load.onError} note={note} onMediaMeta={load.onMediaMeta} markup={markup} mediaEl={load.mediaEl}
         />
       ) : (
         <TextBody data={data} kind={kind} path={path} src={src} fileRef={ref} tabId={tabId} active={active} url={url} paneRef={pane} />

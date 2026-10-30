@@ -1,6 +1,7 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { t } from '@/i18n/index.ts';
 import { fileUrl, isPath } from '@/files/kinds.ts';
+import { isTmpImagePath } from '@/files/tmpImages.ts';
 import { getSources, loadSources, refOf, sourceForAbs } from '@/files/sources.ts';
 import type { AppThunk } from '@/store/store.ts';
 import { openFile } from '@/tabs/slice.ts';
@@ -38,7 +39,13 @@ function mark(el: HTMLElement, first: string | null, src?: string, alt?: string 
 function markAbs(el: HTMLElement, abs: string): void {
   if (!abs.startsWith('/') || abs.startsWith('//') || /[\n`<>|*]/.test(abs)) return;
   const hit = sourceForAbs(abs);
-  if (hit) mark(el, hit.path, hit.src);
+  if (hit) return mark(el, hit.path, hit.src);
+  // an image of a temp folder (the agent's screenshot): the path stays absolute, `data-tmp` tells openRef not to look in a source
+  if (isTmpImagePath(abs)) {
+    el.classList.add('ref');
+    el.dataset.path = abs;
+    el.dataset.tmp = '1';
+  }
 }
 
 /**
@@ -152,6 +159,7 @@ function exists(path: string, src = 'here'): Promise<boolean> {
  * In each source `path` goes first, then the element's `data-alt` (see markRefs).
  */
 export const openRef = (path: string, el: HTMLElement, from = 'here'): AppThunk<Promise<void>> => async (dispatch) => {
+  if (el.dataset.tmp) return void dispatch(openFile({ path })); // no HEAD: a gone file is the tab's own state, and the link stays a link
   const own = el.dataset.src;
   const paths = el.dataset.alt && el.dataset.alt !== path ? [path, el.dataset.alt] : [path];
   const tried = new Set<string>();

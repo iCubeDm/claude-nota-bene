@@ -8,7 +8,7 @@ import path from 'node:path';
 import { EventHub } from './hub.ts';
 import { httpHandler } from './http.ts';
 import { fileRoutes } from './fileRoutes.ts';
-import { TMP_IMAGE_MAX, tmpDirs } from './tmpImage.ts';
+import { TMP_IMAGE_MAX, tmpDirNames, tmpDirs } from './tmpImage.ts';
 
 let dir: string; // a fresh folder in the temp dir
 let outside: string; // a folder outside every temp dir (under home)
@@ -97,6 +97,13 @@ describe('/tmpimage', () => {
     expect(dirs).toContain(fs.realpathSync.native(os.tmpdir()));
     if (fs.existsSync('/tmp')) expect(dirs).toContain(fs.realpathSync.native('/tmp'));
     expect(new Set(dirs).size).toBe(dirs.length);
+  });
+
+  it('names the folders for links too: /tmp as written, and the real ones', () => {
+    const names = tmpDirNames();
+    expect(names).toContain('/tmp');
+    for (const d of tmpDirs()) expect(names).toContain(d);
+    expect(names.every((d) => d.startsWith('/') && !d.endsWith('/'))).toBe(true);
   });
 
   it('a symlink to an image inside the folder is fine; out of the folder, to a key file, to a non-image: refused alike', async () => {
