@@ -39,6 +39,8 @@ export type FakeTurn = {
   match?: string;
   /** raw SDK frames sent right after init (session_id is filled in); `{ sleepMs }` only waits (the turn stays busy) */
   frames?: (Record<string, unknown> | { sleepMs: number })[];
+  /** a local command (`/usage`): the turn is just this `local_command_output` frame and its result, no init and no reply text */
+  localOutput?: string;
   /** a `prompt_suggestion` frame sent after the result, as the SDK does */
   suggestion?: string;
 };
@@ -308,9 +310,23 @@ class FakeSession implements FakeAgentSession {
       }
       const base = this.pick(text);
       this.lastTurn = base;
+      if (base.localOutput !== undefined) {
+        yield* this.local(base.localOutput, uuid);
+        continue;
+      }
       yield* this.turn(base.echoImages ? { ...base, text: `${base.text}${base.text ? '\n' : ''}images: ${images}` } : base, uuid);
       if (this.closed) return;
     }
+  }
+
+  /** A local command's turn as the CLI streams it: its output, then the result. */
+  private async *local(output: string, sendUuid: string): AsyncGenerator<SDKMessage> {
+    const n = ++this.turnNo;
+    yield sdk({ type: 'system', subtype: 'local_command_output', content: output, session_id: this.sessionId, uuid: `fake-lco-${n}` });
+    yield sdk({
+      type: 'result', subtype: 'success', session_id: this.sessionId, uuid: `fake-r-${n}`, duration_ms: 0, is_error: false,
+      result: output, terminal_reason: 'completed', queued_turn_count: 0, user_message_uuid: sendUuid, user_message_uuids: [sendUuid],
+    });
   }
 
   /** Shaped like SDKCompactBoundaryMessage / SDKConversationResetMessage (the latter has a top-level type). */

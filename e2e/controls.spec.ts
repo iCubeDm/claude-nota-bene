@@ -336,3 +336,70 @@ test('switching sessions: the file tabs follow the root, sends wait and the draf
   await expect(page.getByText('alpha answer')).toBeVisible();
   await expect(page.locator('[data-tab="file:other.md"]')).toHaveCount(0);
 });
+
+// B1b: the `/` menu and typed commands. The fixture's command list has a user command with a hint, three builtins on the
+// allowlist, one off it (`model`) and one the CLI tags as terminal-only (`doctor`): the last two are never offered.
+test('the / menu offers the session\'s commands, picks with Tab and runs a skill typed from it @controls', async ({ page }) => {
+  await open(page);
+  const menu = page.getByRole('listbox', { name: en.slashLabel });
+  const rows = menu.getByRole('option');
+  await composer(page).click();
+  await composer(page).pressSequentially('/');
+  await expect(rows.first()).toContainText('/ping');
+  await expect(rows).toHaveCount(5); // ping, hello, usage, compact, clear
+  await expect(menu).not.toContainText('/model');
+  await expect(menu).not.toContainText('/doctor');
+  await expect(menu.getByText(en.slashBuiltin)).toHaveCount(3);
+  await expect(menu).toContainText('[name]');
+  await composer(page).pressSequentially('pi');
+  await expect(rows).toHaveCount(1);
+  await composer(page).press('Tab');
+  await expect(menu).toBeHidden();
+  await expect(composer(page)).toHaveValue('/ping ');
+  await composer(page).press('Enter'); // the menu is closed: Enter sends
+  const reply = page.locator('[data-kind="user"]').filter({ hasText: '/ping' });
+  await expect(reply.first()).toBeVisible();
+  await expect(page.getByText('PONG', { exact: true })).toBeVisible();
+  await expect(page.getByText(en.working)).toBeHidden();
+  // not in the middle of a draft
+  await composer(page).pressSequentially('see /pi');
+  await expect(menu).toBeHidden();
+  await composer(page).fill('');
+});
+
+test('a local command\'s output is a reply and survives a reload; a command that is not offered still runs when typed @controls', async ({ page }) => {
+  await open(page);
+  await composer(page).fill('/usage');
+  await composer(page).press('Escape'); // closes the menu; the draft stays
+  await expect(page.getByRole('listbox')).toBeHidden();
+  await composer(page).press('Enter');
+  const out = page.getByText('Session cost: $0.01 · plan 12% used');
+  await expect(out).toBeVisible();
+  await expect(page.getByText(en.working)).toBeHidden(); // the turn ended cleanly
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await expect(out).toBeVisible();
+  // `model` is not on the menu; typed by hand it is a plain send
+  await composer(page).pressSequentially('/model');
+  await expect(page.getByRole('listbox')).toBeHidden();
+  await composer(page).press('Enter');
+  await expect(page.locator('[data-kind="user"]').filter({ hasText: '/model' }).first()).toBeVisible();
+  await expect(page.getByText(en.working)).toBeHidden();
+});
+
+test('a /clear typed in the composer starts a new conversation like the button @controls', async ({ page }) => {
+  await open(page);
+  await turn(page, '', 'before typed clear');
+  const before = (await page.locator('#session').textContent())?.trim();
+  await composer(page).fill('/clear');
+  await composer(page).press('Escape');
+  await composer(page).press('Enter');
+  await expect(page.locator('[data-kind="marker"]').filter({ hasText: /new conversation · context cleared/ })).toBeVisible();
+  await expect(page.locator('#session')).not.toHaveText(before ?? '');
+  await expect(page.getByText(en.working)).toBeHidden();
+  // the result that follows a /clear is live only: a reload shows an empty feed
+  await page.reload();
+  await expect(composer(page)).toBeVisible();
+  await expect(page.locator('[data-kind="empty"]')).toBeVisible();
+  await expect(page.locator('[data-kind="done"]')).toHaveCount(0);
+});

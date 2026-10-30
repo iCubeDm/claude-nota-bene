@@ -269,3 +269,50 @@ describe('fake backend', () => {
     });
   });
 });
+
+describe('fake backend: slash commands', () => {
+  it('supportedCommands answers the scripted rows through the real backend\'s filter', async () => {
+    const s = fakeBackend([{ text: 'x' }], {
+      commands: [{ name: 'model', description: 'm', builtin: true }, { name: 'ping', description: 'p' }, { name: 'doctor', description: 'd', builtin: true }, { name: 'usage', description: 'u', builtin: true }],
+      terminalCommands: ['doctor'],
+    }).start({ cwd: '/tmp', permissionMode: 'auto', ask: yes });
+    expect((await s.supportedCommands()).map((c) => c.name)).toEqual(['ping', 'usage']);
+    s.close();
+  });
+
+  it('a script without commands has none', async () => {
+    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', permissionMode: 'auto', ask: yes });
+    expect(await s.supportedCommands()).toEqual([]);
+    s.close();
+  });
+
+  it('a localOutput turn is the CLI\'s local command: its output as a reply, then the result, no init', async () => {
+    const s = fakeBackend([{ match: '/usage', text: '', localOutput: 'cost 1' }, { text: 'x' }]).start({ cwd: '/tmp', permissionMode: 'auto', ask: yes });
+    const it = s.messages[Symbol.asyncIterator]();
+    s.send({ uuid: 'c1', text: '/usage', priority: 'next' });
+    const out: AgentEvent[] = [];
+    while (true) {
+      const e = (await it.next()).value as AgentEvent;
+      out.push(e);
+      if (e.t === 'turn-end') break;
+    }
+    expect(out.map((e) => e.t)).toEqual(['message', 'turn-end']);
+    expect(out[0]).toMatchObject({ t: 'message', text: 'cost 1' });
+    expect(out[1]).toMatchObject({ stop: 'done', answers: ['c1'] });
+    s.close();
+  });
+
+  it('a /compact with arguments is the same command', async () => {
+    const s = fakeBackend([{ text: 'x' }]).start({ cwd: '/tmp', permissionMode: 'auto', ask: yes });
+    const it = s.messages[Symbol.asyncIterator]();
+    s.send({ uuid: 'c1', text: '/compact keep the plan', priority: 'next' });
+    const first: AgentEvent[] = [];
+    while (true) {
+      const e = (await it.next()).value as AgentEvent;
+      first.push(e);
+      if (e.t === 'turn-end') break;
+    }
+    expect(first.map((e) => e.t)).toContain('compacted');
+    s.close();
+  });
+});

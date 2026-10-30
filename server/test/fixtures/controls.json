@@ -39,8 +39,20 @@
       ]
     }
   ],
+  "commands": [
+    { "name": "ping", "description": "Reply with PONG", "argumentHint": "" },
+    { "name": "hello", "description": "Say hello", "argumentHint": "[name]" },
+    { "name": "usage", "description": "Show session cost and plan usage", "argumentHint": "", "aliases": ["cost"], "builtin": true },
+    { "name": "compact", "description": "Free up context", "argumentHint": "[how]", "builtin": true },
+    { "name": "clear", "description": "Start a new session", "argumentHint": "", "builtin": true },
+    { "name": "model", "description": "Set the model", "argumentHint": "<model>", "builtin": true },
+    { "name": "doctor", "description": "Health check", "argumentHint": "", "builtin": true }
+  ],
+  "terminalCommands": ["doctor"],
   "turns": [
     { "text": "plain reply", "compactMs": 1500, "suggestions": ["notes.md"] },
+    { "match": "/ping", "text": "PONG" },
+    { "match": "/usage", "text": "", "localOutput": "Session cost: $0.01 · plan 12% used" },
     { "match": "[agents]", "text": "subagents launched", "tools": [
       { "id": "toolu_e2e_done", "name": "Agent", "input": { "subagent_type": "general-purpose", "description": "Review batch fixes", "prompt": "Review the diff" }, "output": "agentId: e2edone01 (finished)" },
       { "id": "toolu_e2e_run", "name": "Agent", "input": { "subagent_type": "Explore", "description": "Look around the repo", "prompt": "Explore" }, "output": "Async agent launched successfully. agentId: e2erun02" }
