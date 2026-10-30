@@ -4,6 +4,12 @@ import type { WireAgentEvent } from './agent.ts';
 export const TOOL_USE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** A task id as the wire carries it (`task-stop`, `/task-output?task=`): the CLI's own ids (`b4k2x9...`), never a path piece. */
 export const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** A `! cmd` run's id (`shell-run`, `shell-stop`, the `shell-*` events): the client's uuid. */
+export const SHELL_ID = /^[A-Za-z0-9_-]{1,128}$/;
+/** The longest `cmd` of `shell-run` the server takes, in bytes. */
+export const SHELL_CMD_MAX = 32 * 1024;
+/** What a `! cmd` run keeps of its output (in the feed, and for the agent): the last 64 K characters, the cut marked `truncated`. */
+export const SHELL_OUTPUT_CAP = 64 * 1024;
 
 /** `ref`: the branch a file comes from when it is not this window's checkout (a branch, or a worktree's branch). */
 export type AnchorSource = { kind: 'message'; id: string; /** the toolUseId of the subagent whose conversation holds the item (protocol 7); absent: the main chat */ agent?: string } | { kind: 'file'; path: string; ref?: string };
@@ -78,9 +84,10 @@ export const generatedImages = (c: Comment): number => (isMediaAnchor(c.anchor) 
  * 7: a message anchor may name a subagent (`source.agent`, the Agent call's tool-use id) and `GET /subagent` serves its conversation;
  * 8: the client's `task-stop` and `task-background`, and `GET /task-output` (a shell task's output tail);
  * 9: a media anchor may carry a `camera` (a comment on a 3D model view); an older server would drop it, so the client offers markup on a model only from 9;
- * 10: the server's `commands` event (the slash menu's list); an older server sends none, so the menu stays closed.
+ * 10: the server's `commands` event (the slash menu's list); an older server sends none, so the menu stays closed;
+ * 11: `! cmd` in the composer: the client's `shell-run` and `shell-stop`, the server's `shell-start`, `shell-out` and `shell-end` events. An older server would send `! cmd` to the agent, so the page runs it as a shell command only from 11.
  */
-export const PROTOCOL = 10;
+export const PROTOCOL = 11;
 
 /** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
 export const TAKEN_OVER_CODE = 4001;
@@ -149,7 +156,11 @@ export type ClientMessage =
   /** protocol 8: stop the running task `id` (a task_id); a refusal comes back as a `server-error` */
   | { type: 'task-stop'; id: string }
   /** protocol 8: move the foreground task started by the tool call `toolUseId` to the background; a refusal (or no match) comes back as a `server-error` */
-  | { type: 'task-background'; toolUseId: string };
+  | { type: 'task-background'; toolUseId: string }
+  /** protocol 11: run `cmd` (at most SHELL_CMD_MAX bytes) as a shell command in the project folder, outside the agent; a refusal comes back as a `server-error` */
+  | { type: 'shell-run'; id: string; cmd: string }
+  /** protocol 11: stop the run `id` (TERM, then KILL); no match is no news */
+  | { type: 'shell-stop'; id: string };
 
 /**
  * Idle compaction of this window's project. `on` is the project's setting; `blocked`: `"idleCompaction": false` in the
@@ -193,7 +204,19 @@ export type ServerEvent =
   | { kind: 'resumed'; id: string }
   | { kind: 'server-error'; where: string; message: string }
   /** to the asking socket only, never stored: a `send` the server did not take (the web side clears its pending state) */
-  | { kind: 'send-refused'; id: string; reason: 'busy' | 'switching' };
+  | { kind: 'send-refused'; id: string; reason: 'busy' | 'switching' }
+  /** a `! cmd` run began (protocol 11); stored, so a reload shows the block */
+  | { kind: 'shell-start'; id: string; cmd: string; ts: number }
+  /** more output of the run `id` (ANSI stripped, stdout and stderr merged); live only. A new socket gets the output so far in one of these. */
+  | { kind: 'shell-out'; id: string; text: string }
+  /**
+   * the run `id` ended. `output`: its merged output, the last SHELL_OUTPUT_CAP characters (`truncated`: more came before).
+   * `code`: the exit code (null: killed by a signal, or never started); `stop`: why the server stopped it (the user's
+   * `shell-stop`, the timeout, a session switch); `error`: it could not start. `cmd` again: the start may have been archived by then.
+   */
+  | { kind: 'shell-end'; id: string; cmd: string; output: string; truncated: boolean; code: number | null; stop?: ShellStop; error?: string; ts: number };
+
+export type ShellStop = 'user' | 'timeout' | 'switch';
 
 type Obj = Record<string, unknown>;
 
@@ -404,6 +427,14 @@ export function parseClientMessage(raw: string): ClientMessage | { error: string
     case 'task-background':
       if (typeof m.toolUseId !== 'string' || !TOOL_USE_ID.test(m.toolUseId)) return { error: 'task-background needs a tool-use id' };
       return { type: 'task-background', toolUseId: m.toolUseId };
+    case 'shell-run':
+      if (typeof m.id !== 'string' || !SHELL_ID.test(m.id)) return { error: 'shell-run needs a run id' };
+      if (typeof m.cmd !== 'string' || m.cmd.trim() === '') return { error: 'shell-run needs a command' };
+      if (new TextEncoder().encode(m.cmd).length > SHELL_CMD_MAX) return { error: `shell-run command is longer than ${SHELL_CMD_MAX} bytes` };
+      return { type: 'shell-run', id: m.id, cmd: m.cmd };
+    case 'shell-stop':
+      if (typeof m.id !== 'string' || !SHELL_ID.test(m.id)) return { error: 'shell-stop needs a run id' };
+      return { type: 'shell-stop', id: m.id };
     case 'idle-compact':
       if (typeof m.on !== 'boolean') return { error: 'idle-compact needs boolean on' };
       return { type: 'idle-compact', on: m.on };

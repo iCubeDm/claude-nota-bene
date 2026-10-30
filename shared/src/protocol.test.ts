@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { generatedImages, parseClientMessage, toAnchor, type MediaAnchor } from './protocol.ts';
+import { generatedImages, parseClientMessage, SHELL_CMD_MAX, toAnchor, type MediaAnchor } from './protocol.ts';
 
 test('accepts a send', () => expect(parseClientMessage('{"type":"send","id":"u1","text":"hi"}')).toEqual({ type: 'send', id: 'u1', text: 'hi' }));
 test('rejects bad json', () => expect(parseClientMessage('{nope')).toHaveProperty('error'));
@@ -367,4 +367,23 @@ test('camera fov bounds: (0, 180) exclusive', () => {
 
 test('a model comment has no time: camera together with time is rejected', () => {
   expect(parseMedia(mediaAnchor({ camera: cam(), time: 2 }))).toHaveProperty('error');
+});
+
+test('accepts shell-run and shell-stop', () => {
+  expect(parseClientMessage('{"type":"shell-run","id":"r1","cmd":"git status"}')).toEqual({ type: 'shell-run', id: 'r1', cmd: 'git status' });
+  expect(parseClientMessage('{"type":"shell-stop","id":"r1"}')).toEqual({ type: 'shell-stop', id: 'r1' });
+});
+test('shell-run refuses a non-string, empty or oversized command and a bad id', () => {
+  const run = (o: Record<string, unknown>) => parseClientMessage(JSON.stringify({ type: 'shell-run', id: 'r1', cmd: 'ls', ...o }));
+  expect(run({ cmd: 5 })).toHaveProperty('error');
+  expect(run({ cmd: null })).toHaveProperty('error');
+  expect(run({ cmd: ['ls'] })).toHaveProperty('error');
+  expect(run({ cmd: '  \n ' })).toHaveProperty('error');
+  expect(run({ cmd: 'x'.repeat(SHELL_CMD_MAX) })).toMatchObject({ cmd: 'x'.repeat(SHELL_CMD_MAX) });
+  expect(run({ cmd: 'x'.repeat(SHELL_CMD_MAX + 1) })).toHaveProperty('error');
+  expect(run({ cmd: 'é'.repeat(SHELL_CMD_MAX / 2 + 1) })).toHaveProperty('error'); // the cap is bytes
+  expect(run({ id: 7 })).toHaveProperty('error');
+  expect(run({ id: '../x' })).toHaveProperty('error');
+  expect(parseClientMessage('{"type":"shell-stop","id":5}')).toHaveProperty('error');
+  expect(parseClientMessage('{"type":"shell-stop"}')).toHaveProperty('error');
 });

@@ -1,5 +1,5 @@
 import { createAction } from '@reduxjs/toolkit';
-import type { ImageRef, ServerEvent, WireAgentEvent } from '@nota-bene/shared';
+import { SHELL_OUTPUT_CAP, type ImageRef, type ServerEvent, type ShellStop, type WireAgentEvent } from '@nota-bene/shared';
 
 export type FeedItem =
   /** idle: the server's own /compact after a quiet stretch, shown as a line, not as the user's message */
@@ -19,6 +19,11 @@ export type FeedItem =
   | { kind: 'marker'; what: 'compacted' | 'compactFailed' | 'cleared'; pre?: number; ms?: number; error?: string; ts: number; key: string }
   | { kind: 'done'; key: string; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
   | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean; archived?: true }
+  /**
+   * a `! cmd` run (protocol 11): the command, its merged output (the last SHELL_OUTPUT_CAP characters, `truncated` when more
+   * came before) and how it ended. `code` null with no `stop`/`error` is a block restored from the transcript (no exit code kept).
+   */
+  | { kind: 'shell'; id: string; cmd: string; output: string; truncated: boolean; running: boolean; code: number | null; stop?: ShellStop; error?: string; ts: number }
   /** `text`: the resumed session id; translated at render. (Server errors are toasts, not feed items: R-M4-5.) */
   | { kind: 'notice'; key: string; text: string };
 
@@ -241,6 +246,26 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
         forcePending: ev.force ? true : s.forcePending,
         waiting: ev.historic ? s.waiting : [...s.waiting, ev.id],
       };
+    }
+    case 'shell-start':
+      return { ...s, items: [...s.items.filter((it) => !(it.kind === 'shell' && it.id === ev.id)), { kind: 'shell', id: ev.id, cmd: ev.cmd, output: '', truncated: false, running: true, code: null, ts: ev.ts }] };
+    case 'shell-out': {
+      const i = s.items.findIndex((it) => it.kind === 'shell' && it.id === ev.id);
+      const cur = s.items[i];
+      if (!cur || cur.kind !== 'shell' || !cur.running) return s; // not (or no longer) running: the end carries the whole output
+      const all = cur.output + ev.text;
+      const cut = all.length > SHELL_OUTPUT_CAP;
+      return { ...s, items: replaceAt(s.items, i, { ...cur, output: cut ? all.slice(all.length - SHELL_OUTPUT_CAP) : all, truncated: cur.truncated || cut }) };
+    }
+    case 'shell-end': {
+      // the start may have been archived by a compaction (or never replayed): the end then makes the block itself
+      const i = s.items.findIndex((it) => it.kind === 'shell' && it.id === ev.id);
+      const cur = s.items[i];
+      const item: FeedItem = {
+        kind: 'shell', id: ev.id, cmd: ev.cmd, output: ev.output, truncated: ev.truncated, running: false, code: ev.code, ts: cur?.kind === 'shell' ? cur.ts : ev.ts,
+        ...(ev.stop ? { stop: ev.stop } : {}), ...(ev.error ? { error: ev.error } : {}),
+      };
+      return { ...s, items: i >= 0 ? replaceAt(s.items, i, item) : [...s.items, item] };
     }
     case 'permission':
       return { ...s, items: [...s.items, { kind: 'permission', id: ev.id, toolName: ev.toolName, input: ev.input }] };

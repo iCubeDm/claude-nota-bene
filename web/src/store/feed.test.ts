@@ -1,4 +1,4 @@
-import type { ServerEvent, WireAgentEvent } from '@nota-bene/shared';
+import { SHELL_OUTPUT_CAP, type ServerEvent, type WireAgentEvent } from '@nota-bene/shared';
 import { describe, expect, test } from 'vitest';
 import { emptyFeed, prependHistory, reduce, type FeedState } from './feed.ts';
 
@@ -444,5 +444,53 @@ describe('a page newer than its server (I3)', () => {
     const s = fold([user()]);
     const future = agent({ t: 'from-the-future' } as unknown as WireAgentEvent);
     expect(reduce(s, future)).toBe(s);
+  });
+});
+
+describe('a ! command block (protocol 11)', () => {
+  const shellStart = (id = 'r1', cmd = 'ls'): ServerEvent => ({ kind: 'shell-start', id, cmd, ts: 7 });
+  const out = (text: string, id = 'r1'): ServerEvent => ({ kind: 'shell-out', id, text });
+  const end = (extra: Partial<Extract<ServerEvent, { kind: 'shell-end' }>> = {}): ServerEvent => ({ kind: 'shell-end', id: 'r1', cmd: 'ls', output: 'a\nb\n', truncated: false, code: 0, ts: 9, ...extra });
+
+  test('a run streams into one block and its end replaces the output; the turn state is untouched', () => {
+    const mid = fold([shellStart(), out('a\n'), out('b\n')]);
+    expect(mid.items).toEqual([{ kind: 'shell', id: 'r1', cmd: 'ls', output: 'a\nb\n', truncated: false, running: true, code: null, ts: 7 }]);
+    expect(mid.busy).toBe(false);
+    const done = reduce(mid, end());
+    expect(done.items).toEqual([{ kind: 'shell', id: 'r1', cmd: 'ls', output: 'a\nb\n', truncated: false, running: false, code: 0, ts: 7 }]);
+    expect(done.busy).toBe(false);
+    expect(done.waiting).toEqual([]);
+  });
+
+  test('the live output keeps the last 64 K characters and marks the cut', () => {
+    const s = fold([shellStart(), out('x'.repeat(SHELL_OUTPUT_CAP)), out('tail')]);
+    const it = s.items[0]!;
+    expect(it.kind === 'shell' && it.output.length).toBe(SHELL_OUTPUT_CAP);
+    expect(it.kind === 'shell' && it.output.endsWith('xtail')).toBe(true);
+    expect(it.kind === 'shell' && it.truncated).toBe(true);
+  });
+
+  test('output of a run that is not on screen, or already ended, changes nothing', () => {
+    const s = fold([user()]);
+    expect(reduce(s, out('x'))).toBe(s);
+    const ended = fold([shellStart(), end()]);
+    expect(reduce(ended, out('late'))).toBe(ended);
+  });
+
+  test('an end with no start (archived by a compaction) makes the block itself; stop and error are kept', () => {
+    const s = fold([end({ code: null, stop: 'timeout' }), end({ id: 'r2', code: null, error: 'spawn failed' })]);
+    expect(s.items).toMatchObject([{ id: 'r1', running: false, code: null, stop: 'timeout' }, { id: 'r2', error: 'spawn failed' }]);
+  });
+
+  test('a replay rebuilds the block; the catch-up output that follows continues it', () => {
+    const r = reduce(emptyFeed, { kind: 'replay', events: [shellStart()] });
+    const s = fold([out('so far\n'), out('more\n')], r);
+    expect(s.items).toMatchObject([{ kind: 'shell', running: true, output: 'so far\nmore\n' }]);
+  });
+
+  test('a start of the same id replaces the old block instead of doubling it', () => {
+    const s = fold([shellStart(), out('x'), shellStart()]);
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0]).toMatchObject({ output: '' });
   });
 });
