@@ -1,4 +1,4 @@
-import type { Mode } from './protocol.ts';
+import type { Mode, SlashCommand } from './protocol.ts';
 
 /**
  * What an agent backend says to the server, whatever agent is behind it (R-M7-13, R-M7-14). Named after ACP's
@@ -20,7 +20,8 @@ export type AgentEvent =
   | { t: 'mode'; mode: Mode }                                // ACP current_mode_update
   | { t: 'task'; id: string; phase: 'started' | 'progress' | 'updated' | 'done'; desc?: string; type?: string; /** `started`: the id of the Agent / Task tool call that started it (the card's join key) */ call?: string; /** `started`: task_id of the subagent task that launched this one (absent: the main thread) */ parent?: string; /** `started` / `updated`: the CLI says the task runs in the background (true) or blocks its tool call (false) */ bg?: boolean; /** `started`: a watcher the user did not start as work (kept out of the counts, still listed) */ ambient?: boolean; tokens?: number; tool?: string; summary?: string; /** `done`: how it ended; absent = completed */ status?: 'failed' | 'stopped' }
   | { t: 'suggestion'; text: string }
-  | { t: 'rate-limit'; info: unknown };                      // server-internal (stats)
+  | { t: 'rate-limit'; info: unknown }                       // server-internal (stats)
+  | { t: 'commands'; commands: SlashCommand[] };             // server-internal: the agent's command list changed (the server sends the `commands` event)
 
-/** What reaches the clients (R-M7-14): every AgentEvent but the server-internal `init` and `rate-limit`. */
-export type WireAgentEvent = Exclude<AgentEvent, { t: 'init' } | { t: 'rate-limit' }>;
+/** What reaches the clients (R-M7-14): every AgentEvent but the server-internal `init`, `rate-limit` and `commands`. */
+export type WireAgentEvent = Exclude<AgentEvent, { t: 'init' } | { t: 'rate-limit' } | { t: 'commands' }>;

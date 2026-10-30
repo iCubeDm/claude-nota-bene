@@ -9,6 +9,7 @@ import type { EventHub } from './hub.ts';
 import { setIdleCompactPref } from './prefs.ts';
 import { titleOf } from './sessions.ts';
 import { AgentSlot } from './session/agentSlot.ts';
+import { CommandKeeper } from './session/commands.ts';
 import { archiveCut } from './session/archiveCut.ts';
 import { readHistory } from './session/history.ts';
 import { SessionIdentity } from './session/identity.ts';
@@ -35,6 +36,12 @@ const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after
 const INTERRUPT_TIMEOUT_MS = 2000; // a busy restart's interrupt; a stuck CLI must not hold the restart
 const HISTORY_TIMEOUT_MS = 20_000; // a transcript read that hangs must not hold `switching`
 
+/** The command a message line starts with, when it is one the server tracks (the buttons send the plain form; the CLI also takes arguments and the aliases). */
+export function trackedCommand(text: string): 'compact' | 'clear' | undefined {
+  const m = /^\/(compact|clear|reset|new)(\s|$)/.exec(text);
+  return m ? (m[1] === 'compact' ? 'compact' : 'clear') : undefined;
+}
+
 /**
  * The façade (R-M7-11): it wires the parts under ./session/ and owns the pump, the switch procedure and the command
  * hand-over. Phase: live/switching/closed. TurnLedger: every send, the turn facts. PermissionBroker: the open asks.
@@ -56,6 +63,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
   const who = new SessionIdentity({ root: o.cwd, resume: o.resume, fork: o.fork, title: () => titles.title, emit: (ev) => hub.emit(ev), report });
   const modes = new ModeKeeper({ modes: backend.capabilities.modes, dir: who.root, emit: (ev) => hub.emit(ev, { store: false }), report });
   const models = new ModelKeeper({ dir: who.root, emit: (ev) => hub.emit(ev, { store: false }), report });
+  const cmds = new CommandKeeper((ev) => hub.emit(ev, { store: false }));
   const switchListeners: ((id: string | null, o: { restart: boolean }) => void)[] = [];
 
   const phase = new Phase();
@@ -92,6 +100,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
   function startAgent(g: number): AgentSession {
     const a = backend.start({ ...who.startOptions(), permissionMode: modes.mode, ...models.forStart(who.root), ask: permissions.ask(() => slot.gen, g) });
     if (backend.capabilities.models) models.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) report('models', e); });
+    cmds.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) report('commands', e); });
     return a;
   }
 
@@ -108,7 +117,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     }
   }
 
-  /** One event of the current agent. Every kind but `init` and `rate-limit` (server-internal) reaches the clients. */
+  /** One event of the current agent. Every kind but `init`, `rate-limit` and `commands` (server-internal) reaches the clients. */
   function onAgent(e: AgentEvent): void {
     switch (e.t) {
       case 'init':
@@ -119,6 +128,9 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
         return;
       case 'rate-limit':
         stats.onAgent(e);
+        return;
+      case 'commands':
+        cmds.set(e.commands);
         return;
       case 'reset':
         onReset(e);
@@ -209,6 +221,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       tornDown = true;
       // 1. stop everything of the old session; nothing it does later may reach the hub (the slot's generation)
       stats.stop();
+      cmds.set([]); // the new project has its own skills; the new agent brings them
       idle.disarm(); // the new session gets compacted only after a turn of its own
       await slot.teardown(o.closeTimeoutMs ?? CLOSE_TIMEOUT_MS, () => permissions.denyAll());
       titles.stop();
@@ -275,7 +288,9 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       idle.touch();
       slot.ensure();
       const { refs, payload } = resolveImages(attachments, images, (e) => report('attach', e));
-      turns.sent(id);
+      // typed in the composer, /compact and /clear are the buttons' commands: their result never arms idle compaction, a /clear's is live only
+      const command = trackedCommand(text);
+      turns.sent(id, command ? { command } : {});
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
       queue.push({ id, text, force, images: payload }); // handed over in order, after a forced send's interrupt
       return null;
@@ -302,6 +317,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     },
     model: () => models.current,
     models: () => models.models,
+    commands: () => cmds.commands,
     async setModel(next, id) {
       if (phase.switching) return models.ack(id); // the switch announces the new session's model
       const g = slot.gen;

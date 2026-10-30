@@ -116,7 +116,7 @@ export class EventHub {
   }
 
   private stamp(ev: EmitInput): ServerEvent {
-    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'send-refused' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode' || ev.kind === 'model' || ev.kind === 'models' || ev.kind === 'idle-compact' || ev.kind === 'hello' || ev.kind === 'occupied' || ev.kind === 'taken-over') return ev;
+    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'send-refused' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode' || ev.kind === 'model' || ev.kind === 'models' || ev.kind === 'commands' || ev.kind === 'idle-compact' || ev.kind === 'hello' || ev.kind === 'occupied' || ev.kind === 'taken-over') return ev;
     return { ...ev, ts: ev.ts ?? Date.now() } as ServerEvent;
   }
 }

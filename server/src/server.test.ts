@@ -139,6 +139,27 @@ describe('server', () => {
     expect(backend.setModels).toEqual(['sonnet']);
   });
 
+  it('every new socket gets the slash commands, filtered: the user\'s first, the allowlisted builtins, nothing bound to a terminal', async () => {
+    const backend = fakeBackend([{ text: 'hello' }], {
+      commands: [
+        { name: 'model', description: 'm', builtin: true }, { name: 'compact', description: 'c', argumentHint: '[how]', builtin: true },
+        { name: 'ping', description: 'p' }, { name: 'doctor', description: 'd', builtin: true }, { name: 'color', description: 'x' },
+      ],
+      terminalCommands: ['doctor', 'color'],
+    });
+    const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist, oneTab: false });
+    closers.push(s.close);
+    const a = await connect(s.url);
+    const want = { kind: 'commands', commands: [{ name: 'ping', description: 'p' }, { name: 'compact', description: 'c', hint: '[how]', builtin: true }] };
+    await until(() => a.events.some((e) => e.kind === 'commands' && e.commands.length > 0));
+    expect(a.events.findLast((e) => e.kind === 'commands')).toEqual(want);
+    const b = await connect(s.url); // a later socket gets the list with the other state, not through the replay
+    await until(() => b.events.some((e) => e.kind === 'commands'));
+    expect(b.events.findLast((e) => e.kind === 'commands')).toEqual(want);
+    const replay = b.events[0]!;
+    if (replay.kind === 'replay') expect(replay.events.some((e) => e.kind === 'commands')).toBe(false);
+  });
+
   it('an allow that carries a modified input still runs the original input', async () => {
     const seen: unknown[] = [];
     const base = fakeBackend([{ text: 'ok', ask: { toolName: 'Bash', input: { command: 'ls' } } }]);

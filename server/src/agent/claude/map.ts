@@ -2,7 +2,8 @@ import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 // the fake backend speaks SDK frames through this mapper (R-M7-13); it takes the frame type from here, not the SDK
 export type { SDKMessage };
 import { MODES, TASK_ID, TOOL_USE_ID, taskKind } from '@nota-bene/shared';
-import type { AgentEvent, Mode, WireAgentEvent } from '@nota-bene/shared';
+import type { AgentEvent, Mode, SlashCommand, WireAgentEvent } from '@nota-bene/shared';
+import { toSlash } from './commands.ts';
 
 /**
  * The one place that knows the Claude SDK's frame shapes (R-M7-13). Pure: one frame gives zero or more events.
@@ -30,6 +31,8 @@ type Frame = {
   task_id?: string; parent_task_id?: string; tool_use_id?: string; description?: string; subagent_type?: string; task_type?: string; ambient?: boolean; skip_transcript?: boolean;
   usage?: { total_tokens?: number }; last_tool_name?: string; summary?: string;
   patch?: { status?: string; description?: string; is_backgrounded?: boolean }; is_backgrounded?: boolean;
+  // commands_changed, local_command_output
+  commands?: unknown; content?: unknown;
   // prompt_suggestion, rate_limit_event
   suggestion?: unknown; rate_limit_info?: unknown;
 };
@@ -95,6 +98,17 @@ function system(m: Frame): AgentEvent[] {
       return [{ t: 'compacted', preTokens: m.compact_metadata?.pre_tokens ?? 0, ...(m.compact_metadata?.duration_ms ? { ms: m.compact_metadata.duration_ms } : {}) }];
     case 'conversation_reset':
       return reset(m);
+    case 'commands_changed': {
+      // the full list: it replaces the last one (unfiltered here; the backend knows which ones are bound to the terminal)
+      const rows = Array.isArray(m.commands) ? (m.commands as Parameters<typeof toSlash>[0][]).filter((r) => typeof r?.name === 'string') : [];
+      return [{ t: 'commands', commands: rows.map(toSlash) satisfies SlashCommand[] }];
+    }
+    case 'local_command_output': {
+      // what a local command printed (the CLI shows it as a reply); the turn's own result follows as usual
+      const text = str(m.content);
+      const id = str(m.uuid);
+      return text && id ? [{ t: 'message', id: `${id}:out`, text }] : [];
+    }
     case 'task_started': case 'task_progress': case 'task_updated': case 'task_notification':
       return task(m);
     default:
@@ -183,5 +197,5 @@ export async function* mapFrames(frames: AsyncIterable<SDKMessage>): AsyncGenera
   for await (const m of frames) yield* mapSdk(m);
 }
 
-/** The events a client may get (R-M7-14): `init` and `rate-limit` stay in the server. */
-export const isWire = (e: AgentEvent): e is WireAgentEvent => e.t !== 'init' && e.t !== 'rate-limit';
+/** The events a client may get (R-M7-14): `init`, `rate-limit` and `commands` stay in the server. */
+export const isWire = (e: AgentEvent): e is WireAgentEvent => e.t !== 'init' && e.t !== 'rate-limit' && e.t !== 'commands';

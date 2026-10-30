@@ -12,6 +12,11 @@ const LABEL_RE = /^\[[^\]\n]{1,200}\]$/;
 // SessionMessage carries no timestamp, so replayed events get a deterministic ts of 0.
 const TS = 0;
 
+// how the CLI records a slash command: the command line as tags, its output as another user record
+const COMMAND_NAME = /<command-name>\s*(\/?[^<\s]+)\s*<\/command-name>/;
+const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+const COMMAND_OUT = /^\s*<local-command-stdout>([\s\S]*?)<\/local-command-stdout>\s*$/;
+
 function agent(out: ServerEvent[], frame: Record<string, unknown>): void {
   for (const e of mapSdk(frame as unknown as SDKMessage).filter(isWire)) out.push({ kind: 'agent', e, ts: TS });
 }
@@ -52,7 +57,19 @@ export function transcriptToEvents(msgs: SessionMessage[], attachments: Attachme
           if (!reported) { reported = true; onError?.(e); }
         }
       });
-      const text = blocks.filter((b, i) => b.type === 'text' && !labels.has(i)).map((b) => b.text ?? '').join('\n');
+      let text = blocks.filter((b, i) => b.type === 'text' && !labels.has(i)).map((b) => b.text ?? '').join('\n');
+      if (!own && !images.length) {
+        const printed = COMMAND_OUT.exec(text);
+        if (printed) {
+          if (printed[1].trim()) out.push({ kind: 'agent', e: { t: 'message', id: `${sm.uuid}:out`, text: printed[1].trim() }, ts: TS });
+          continue;
+        }
+        const name = COMMAND_NAME.exec(text);
+        if (name) {
+          const args = COMMAND_ARGS.exec(text)?.[1].trim();
+          text = `${name[1].startsWith('/') ? name[1] : `/${name[1]}`}${args ? ` ${args}` : ''}`;
+        }
+      }
       if (own && !images.length && text.trimStart().startsWith('<system-reminder>')) continue; // the harness's note to the subagent, not part of the talk
       if (text.trim() || images.length) out.push({ kind: 'user', id: sm.uuid, text, historic: true, ts: TS, ...(images.length ? { images } : {}) });
     }

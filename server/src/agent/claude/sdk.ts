@@ -1,7 +1,8 @@
 import { getSessionInfo, getSessionMessages, getSubagentMessages, listSessions, listSubagents, query } from '@anthropic-ai/claude-agent-sdk';
-import type { ModelInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type ModelOption } from '@nota-bene/shared';
+import type { ModelInfo, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type EffortLevel, type Mode, type ModelOption, type SlashCommand } from '@nota-bene/shared';
 import type { AgentBackend, AgentSession, PermissionAsk, SendImage } from '../types.ts';
+import { offered, pickCommands, toSlash } from './commands.ts';
 import { mapFrames } from './map.ts';
 import { transcriptToEvents } from './transcript.ts';
 import { agentOfCall, findSubagentMeta, hitFresh, hitGet, hitSet, isRunning, noMetaAdd, noMetaHas } from './subagents.ts';
@@ -71,6 +72,8 @@ class SdkSession implements AgentSession {
   private readonly input = new InputQueue();
   private readonly q: ReturnType<typeof query>;
   private readonly warmup: NodeJS.Timeout;
+  // the commands the CLI tags as bound to its terminal, from the first init (a turn's start): never offered
+  private terminal: string[] = [];
 
   constructor(o: Parameters<AgentBackend['start']>[0]) {
     this.q = query({
@@ -94,10 +97,23 @@ class SdkSession implements AgentSession {
             : { behavior: 'deny', message: 'User denied this action in the UI.' },
       },
     });
-    this.messages = mapFrames(this.q);
+    this.messages = offered(mapFrames(this.noted(this.q)), () => this.terminal);
     // warm the CLI's file index (it answers [] for a few seconds after start); the failure does not matter
     this.warmup = setTimeout(() => void this.fileSuggestions('').catch(() => {}), 2000);
     this.warmup.unref();
+  }
+
+  /** the frames unchanged; the init's terminal-only command names are kept on the way */
+  private async *noted(frames: AsyncIterable<SDKMessage>): AsyncGenerator<SDKMessage> {
+    for await (const m of frames) {
+      const t = (m as { subtype?: string; terminal_slash_commands?: unknown }).terminal_slash_commands;
+      if (m.type === 'system' && m.subtype === 'init') this.terminal = Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : [];
+      yield m;
+    }
+  }
+
+  async supportedCommands(): Promise<SlashCommand[]> {
+    return pickCommands((await this.q.supportedCommands()).map(toSlash), this.terminal);
   }
 
   async fileSuggestions(query: string): Promise<string[]> {

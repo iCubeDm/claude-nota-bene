@@ -132,3 +132,26 @@ describe('transcriptToEvents of a subagent', () => {
     expect(evs.map((e) => (e.kind === 'agent' ? `${e.e.t}${e.e.t === 'tool-call' ? `:sub=${e.e.sub}` : ''}` : e.kind))).toEqual(['tool-call:sub=true']);
   });
 });
+
+describe('transcriptToEvents: slash commands', () => {
+  const user = (uuid: string, text: string) => ({ type: 'user', uuid, session_id: 's', parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content: text } }) as unknown as SessionMessage;
+
+  it('a command\'s record is the line the user typed, not the CLI\'s tags', () => {
+    const events = transcriptToEvents([
+      user('c1', '<command-message>hello</command-message>\n<command-name>/hello</command-name>\n<command-args>world</command-args>'),
+      user('c2', '<command-name>/context</command-name>\n            <command-message>context</command-message>\n            <command-args></command-args>'),
+    ], store());
+    expect(events).toEqual([
+      { kind: 'user', id: 'c1', text: '/hello world', historic: true, ts: 0 },
+      { kind: 'user', id: 'c2', text: '/context', historic: true, ts: 0 },
+    ]);
+  });
+
+  it('a local command\'s output is a reply; an empty one is nothing', () => {
+    const events = transcriptToEvents([
+      user('o1', '<local-command-stdout>## Context Usage\n\n4%</local-command-stdout>'),
+      user('o2', '<local-command-stdout></local-command-stdout>'),
+    ], store());
+    expect(events).toEqual([{ kind: 'agent', ts: 0, e: { t: 'message', id: 'o1:out', text: '## Context Usage\n\n4%' } }]);
+  });
+});

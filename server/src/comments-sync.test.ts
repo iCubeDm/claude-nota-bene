@@ -200,7 +200,7 @@ describe('comment sync', () => {
 });
 
 describe('a model comment', () => {
-  it('is stored with its camera, replayed with it, and hello announces protocol 9', async () => {
+  it('is stored with its camera, replayed with it, and hello announces protocol 9 or later', async () => {
     const s = await boot({ resume: 'sess-cam' });
     const camera = { position: [1, 2, 3], target: [0, 0.5, 0], fov: 45 };
     const A = '2f8b2c4e-1a2b-4c3d-9e8f-0123456789ab';
@@ -208,7 +208,7 @@ describe('a model comment', () => {
       anchor: { kind: 'media', source: { kind: 'file', path: 'm/a.glb' }, width: 800, height: 600, version: '"v"', camera, junk: 1, shapes: [{ kind: 'rect', color: '#ff3b30', x: 0, y: 0, w: 1, h: 1 }] },
     } as unknown as Partial<Comment>);
     const cl = await connect(s.url);
-    expect(cl.events.find((e) => e.kind === 'hello')).toMatchObject({ protocol: 9 });
+    expect((cl.events.find((e) => e.kind === 'hello') as { protocol: number }).protocol).toBeGreaterThanOrEqual(9);
     cl.ws.send(JSON.stringify({ type: 'comments', sessionId: 'sess-cam', items: [model] }));
     await until(() => lastComments(cl)?.length === 1);
     const anchor = lastComments(cl)![0].anchor as unknown as Record<string, unknown>;

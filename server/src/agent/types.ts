@@ -1,4 +1,4 @@
-import type { AgentEvent, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, Stats, SubagentView } from '@nota-bene/shared';
+import type { AgentEvent, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, SlashCommand, Stats, SubagentView } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
@@ -16,6 +16,8 @@ export interface AgentSession {
   setPermissionMode(mode: Mode): Promise<void>;
   /** The models the agent offers; rejects when the CLI cannot answer. */
   supportedModels(): Promise<ModelOption[]>;
+  /** The slash commands and skills of the session as the `/` menu shows them (nothing bound to a terminal; the user's first); rejects when the CLI cannot answer. A later change arrives as a `commands` event. */
+  supportedCommands(): Promise<SlashCommand[]>;
   /** From the next response on (a running turn goes on); null: the agent's default. Rejects when the CLI refuses. */
   setModel(model: string | null): Promise<void>;
   /** From the next response on; null: the model's default effort. */

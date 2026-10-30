@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type EffortLevel, type Mode, type ModelOption, type ServerEvent, type Stats } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type EffortLevel, type Mode, type ModelOption, type ServerEvent, type SlashCommand, type Stats } from '@nota-bene/shared';
 import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
+import { offered, pickCommands, toSlash } from './claude/commands.ts';
 import { isWire, mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
 import { transcriptToEvents } from './claude/transcript.ts';
 import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
@@ -94,6 +95,8 @@ function subagentMessages(a: FakeSubagent): SessionMessage[] {
  */
 export type FakeShell = { taskId: string; chunks: string[] };
 
+export type FakeCommand = { name: string; description: string; argumentHint?: string; aliases?: string[]; builtin?: boolean };
+
 /** What the fake knows of tasks, shared by its sessions: the scripted shells, how far each was read, and what was asked. */
 type TaskState = {
   shells: FakeShell[]; reads: Map<string, number>; stopped: Set<string>; stops: string[]; backgrounds: string[];
@@ -110,6 +113,10 @@ export type FakeScript = FakeTurn[] | {
   /** what the fake agent can do; default: Claude's full set */ capabilities?: Partial<Capabilities>;
   /** the models it offers (default none); with any, every init reports the running one (the first until one is picked) */
   models?: ModelOption[];
+  /** the slash commands and skills the session has, in the SDK's row shape (`builtin` marks the agent's own): `supportedCommands` answers them through the same filter as the real backend; default none */
+  commands?: FakeCommand[];
+  /** the commands the CLI tags as bound to its terminal (hidden from the list) */
+  terminalCommands?: string[];
   /** the subagents the Agent calls of the script started (`GET /subagent`) */
   subagents?: FakeSubagent[];
   /** the shell / Monitor tasks of the script (`GET /task-output`) */
@@ -173,10 +180,12 @@ class FakeSession implements FakeAgentSession {
   private sessionId: string; // a /clear replaces it
 
   private readonly tasks: TaskState;
+  private readonly cmds: { rows: FakeCommand[]; terminal: string[] };
   private injected: SDKMessage[] = []; // frames outside a turn (a task's end); sent as soon as the stream is idle
 
-  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], mdl: ModelState, tasks: TaskState, resume?: string, fork?: boolean) {
+  constructor(turns: FakeTurn[], ask: PermissionAsk, modes: Mode[], mdl: ModelState, tasks: TaskState, cmds: { rows: FakeCommand[]; terminal: string[] }, resume?: string, fork?: boolean) {
     this.turns = turns;
+    this.cmds = cmds;
     this.tasks = tasks;
     this.mdl = mdl;
     this.modes = modes;
@@ -184,13 +193,13 @@ class FakeSession implements FakeAgentSession {
     // a resumed CLI session keeps its id; a fork gets a new one
     this.sessionId = resume && fork ? `${resume}-fork-${++forkCount}` : (resume ?? DEFAULT_SESSION_ID);
     this.frames = { [Symbol.asyncIterator]: () => this.run() };
-    this.messages = { [Symbol.asyncIterator]: () => mapFrames(this.frames) };
+    this.messages = { [Symbol.asyncIterator]: () => offered(mapFrames(this.frames), () => this.cmds.terminal) };
   }
 
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: unknown[] }): void {
     if (this.closed) return;
     // like the CLI, the plain string `/compact` or `/clear` is a command, not a prompt
-    const command = m.text === '/compact' ? 'compact' : m.text === '/clear' ? 'clear' : undefined;
+    const command = /^\/compact(\s|$)/.test(m.text) ? 'compact' : /^\/clear(\s|$)/.test(m.text) ? 'clear' : undefined;
     this.pending.push({ uuid: m.uuid, text: m.text, images: m.images?.length ?? 0, ...(command ? { command } : {}) });
     this.wake?.();
   }
@@ -226,6 +235,10 @@ class FakeSession implements FakeAgentSession {
 
   async setPermissionMode(mode: Mode): Promise<void> {
     this.modes.push(mode);
+  }
+
+  async supportedCommands(): Promise<SlashCommand[]> {
+    return pickCommands(this.cmds.rows.map(toSlash), this.cmds.terminal);
   }
 
   async supportedModels(): Promise<ModelOption[]> {
@@ -438,7 +451,7 @@ type Started = { cwd: string; permissionMode: Mode; resume?: string; fork?: bool
  */
 export function fakeBackend(
   turns: FakeTurn[],
-  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; subagents?: FakeSubagent[]; shells?: FakeShell[]; background?: boolean | 'throw'; refuseStop?: string[] } = {},
+  o: { sessions?: FakeSessionScript[]; base?: string; historyDelayMs?: number; capabilities?: Partial<Capabilities>; models?: ModelOption[]; commands?: FakeCommand[]; terminalCommands?: string[]; subagents?: FakeSubagent[]; shells?: FakeShell[]; background?: boolean | 'throw'; refuseStop?: string[] } = {},
 ): Omit<AgentBackend, 'start'> & {
   start: (o: Parameters<AgentBackend['start']>[0]) => FakeAgentSession; startModes: Mode[]; setModes: Mode[]; starts: Started[];
   /** every setModel / setEffort call, in order */
@@ -475,7 +488,7 @@ export function fakeBackend(
         cwd: s.cwd, permissionMode: s.permissionMode, ...(s.resume ? { resume: s.resume } : {}), ...(s.fork ? { fork: true } : {}),
         ...(s.model ? { model: s.model } : {}), ...(s.effort ? { effort: s.effort } : {}),
       });
-      return new FakeSession(turns, s.ask, setModes, { options: o.models ?? [], ...(s.model ? { running: s.model } : {}), sets: setModels, efforts: setEfforts }, tasks, s.resume, s.fork);
+      return new FakeSession(turns, s.ask, setModes, { options: o.models ?? [], ...(s.model ? { running: s.model } : {}), sets: setModels, efforts: setEfforts }, tasks, { rows: o.commands ?? [], terminal: o.terminalCommands ?? [] }, s.resume, s.fork);
     },
     listSessions: async () => sessions.map((x) => {
       const cwd = cwdOf(x);
@@ -504,5 +517,5 @@ export function fakeBackend(
 export function fakeFromScript(script: FakeScript, base: string): ReturnType<typeof fakeBackend> {
   return Array.isArray(script)
     ? fakeBackend(script, { base })
-    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.subagents ? { subagents: script.subagents } : {}), ...(script.shells ? { shells: script.shells } : {}), ...(script.background !== undefined ? { background: script.background } : {}), ...(script.refuseStop ? { refuseStop: script.refuseStop } : {}) });
+    : fakeBackend(script.turns, { sessions: script.sessions ?? [], base, ...(script.historyDelayMs ? { historyDelayMs: script.historyDelayMs } : {}), ...(script.capabilities ? { capabilities: script.capabilities } : {}), ...(script.models ? { models: script.models } : {}), ...(script.commands ? { commands: script.commands } : {}), ...(script.terminalCommands ? { terminalCommands: script.terminalCommands } : {}), ...(script.subagents ? { subagents: script.subagents } : {}), ...(script.shells ? { shells: script.shells } : {}), ...(script.background !== undefined ? { background: script.background } : {}), ...(script.refuseStop ? { refuseStop: script.refuseStop } : {}) });
 }

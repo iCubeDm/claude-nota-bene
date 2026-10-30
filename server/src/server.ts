@@ -267,6 +267,11 @@ export async function startServer(o: {
         reportError(hub, 'model', e);
       }
       try {
+        ws.send(JSON.stringify({ kind: 'commands', commands: manager.commands() }));
+      } catch (e) {
+        reportError(hub, 'commands', e);
+      }
+      try {
         ws.send(JSON.stringify({ kind: 'idle-compact', state: manager.idleCompact() }));
       } catch (e) {
         reportError(hub, 'idle-compact', e);

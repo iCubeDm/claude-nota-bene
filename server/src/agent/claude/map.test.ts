@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentEvent } from '@nota-bene/shared';
-import { mapSdk } from './map.ts';
+import { isWire, mapSdk } from './map.ts';
 
 const f = (m: object) => m as unknown as SDKMessage;
 const map = (m: object): AgentEvent[] => mapSdk(f(m));
@@ -283,4 +283,24 @@ describe('mapSdk: tasks, suggestion, rate limit', () => {
 it('an id-less tool_use or tool_result maps to nothing (they could only pair through an empty id)', () => {
   expect(mapSdk({ type: 'assistant', uuid: 'a', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } } as never)).toEqual([]);
   expect(mapSdk({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x' }] } } as never)).toEqual([]);
+});
+
+describe('mapSdk: slash commands', () => {
+  it('commands_changed -> the full list in the wire shape (server-internal event)', () => {
+    const ev = map({ type: 'system', subtype: 'commands_changed', uuid: 'u', session_id: 's', commands: [
+      { name: 'ping', description: 'd', argumentHint: '' },
+      { name: 'compact', description: 'c', argumentHint: '[x]', aliases: ['k'], builtin: true },
+    ] });
+    expect(ev).toEqual([{ t: 'commands', commands: [{ name: 'ping', description: 'd' }, { name: 'compact', description: 'c', hint: '[x]', aliases: ['k'], builtin: true }] }]);
+    expect(ev.every((e) => !isWire(e))).toBe(true);
+  });
+
+  it('commands_changed with no list -> an empty list', () => {
+    expect(map({ type: 'system', subtype: 'commands_changed' })).toEqual([{ t: 'commands', commands: [] }]);
+  });
+
+  it('local_command_output -> a reply message; an empty one -> nothing', () => {
+    expect(map({ type: 'system', subtype: 'local_command_output', content: 'Context: 4%', uuid: 'u1', session_id: 's' })).toEqual([{ t: 'message', id: 'u1:out', text: 'Context: 4%' }]);
+    expect(map({ type: 'system', subtype: 'local_command_output', content: '', uuid: 'u2' })).toEqual([]);
+  });
 });

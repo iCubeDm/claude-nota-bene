@@ -1,4 +1,4 @@
-import type { EffortLevel, IdleCompact, ImageRef, Mode, ModelOption, Stats } from '@nota-bene/shared';
+import type { EffortLevel, IdleCompact, ImageRef, Mode, ModelOption, SlashCommand, Stats } from '@nota-bene/shared';
 
 export type SessionManager = {
   /** Returns 'switching' for a send refused during a switch (nothing sent or emitted; the server tells the asking socket), else null. */
@@ -13,6 +13,8 @@ export type SessionManager = {
   model(): { model: string | null; effort?: EffortLevel };
   /** the models the agent offers (empty until it is up) */
   models(): ModelOption[];
+  /** the slash commands and skills of the session (empty until the agent is up) */
+  commands(): SlashCommand[];
   /** Applies from the agent's next response (a running turn goes on), then persists; a refusal is reported. Answers with one `model` event carrying `ack: id`. */
   setModel(next: { model: string; effort?: EffortLevel }, id?: string): Promise<void>;
   info(): { id: string | null; root: string; title: string | null; model: string | null };

@@ -77,9 +77,10 @@ export const generatedImages = (c: Comment): number => (isMediaAnchor(c.anchor) 
  * `capabilities.models`;
  * 7: a message anchor may name a subagent (`source.agent`, the Agent call's tool-use id) and `GET /subagent` serves its conversation;
  * 8: the client's `task-stop` and `task-background`, and `GET /task-output` (a shell task's output tail);
- * 9: a media anchor may carry a `camera` (a comment on a 3D model view); an older server would drop it, so the client offers markup on a model only from 9.
+ * 9: a media anchor may carry a `camera` (a comment on a 3D model view); an older server would drop it, so the client offers markup on a model only from 9;
+ * 10: the server's `commands` event (the slash menu's list); an older server sends none, so the menu stays closed.
  */
-export const PROTOCOL = 9;
+export const PROTOCOL = 10;
 
 /** close code the owner gets when another tab takes the window over (R-M7-5/8); the page never reconnects after it by itself */
 export const TAKEN_OVER_CODE = 4001;
@@ -94,6 +95,11 @@ export type EffortLevel = (typeof EFFORT_LEVELS)[number];
  * the agent reports for it once running (`claude-…`), to match the two; `efforts` only for a model that has effort levels.
  */
 export type ModelOption = { value: string; name: string; description: string; resolved?: string; efforts?: EffortLevel[] };
+/**
+ * A slash command or skill the composer's `/` menu offers (already filtered by the server: nothing bound to a terminal).
+ * `hint` is the argument hint (`[name]`), `aliases` other names that run it; `builtin`: the agent's own, not the user's or a plugin's.
+ */
+export type SlashCommand = { name: string; description: string; hint?: string; aliases?: string[]; builtin?: boolean };
 /** a model with its effort; the model alone when the effort is the model's default */
 export type ModelChoice = { model: string; effort?: EffortLevel };
 
@@ -179,6 +185,8 @@ export type ServerEvent =
   | { kind: 'model'; model: string | null; effort?: EffortLevel; ack?: string }
   /** the models the agent offers; never stored */
   | { kind: 'models'; models: ModelOption[] }
+  /** the slash commands and skills of the session (user's first), replacing the last list; never stored */
+  | { kind: 'commands'; commands: SlashCommand[] }
   /** never stored in history */
   | { kind: 'idle-compact'; state: IdleCompact }
   /** stored once after the replayed transcript of a resumed session; the only source of the "resumed" notice */

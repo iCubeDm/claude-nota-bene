@@ -262,6 +262,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'mode':
     case 'model': // the controls slice
     case 'models':
+    case 'commands': // the controls slice
     case 'idle-compact': // the controls slice
     case 'hello':
     case 'occupied': // the conn slice (M7-15)
