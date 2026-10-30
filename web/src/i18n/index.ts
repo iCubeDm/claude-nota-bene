@@ -6,16 +6,13 @@ export type Lang = 'ru' | 'en';
 
 const DICTS: Record<Lang, Record<string, unknown>> = { ru, en };
 
-export function initialLang(navLang: string, stored: string | null): Lang {
-  if (stored === 'ru' || stored === 'en') return stored;
-  return /^ru\b/i.test(navLang) ? 'ru' : 'en';
+/** A stored choice wins; otherwise English, whatever the browser language says. */
+export function initialLang(stored: string | null): Lang {
+  return stored === 'ru' || stored === 'en' ? stored : 'en';
 }
 
 const listeners = new Set<() => void>();
-let lang: Lang = initialLang(
-  typeof navigator === 'undefined' ? '' : navigator.language,
-  typeof localStorage === 'undefined' ? null : localStorage.getItem('lang'),
-);
+let lang: Lang = initialLang(typeof localStorage === 'undefined' ? null : localStorage.getItem('lang'));
 if (typeof document !== 'undefined') document.documentElement.lang = lang;
 
 export function getLang(): Lang {

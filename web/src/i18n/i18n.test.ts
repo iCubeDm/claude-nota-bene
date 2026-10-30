@@ -21,8 +21,9 @@ it('t() formats function values in the current language', () => {
   expect(localStorage.getItem('lang')).toBe('en');
 });
 
-it('initialLang prefers the stored choice, then the browser language', () => {
-  expect(initialLang('ru-RU', null)).toBe('ru');
-  expect(initialLang('en-US', null)).toBe('en');
-  expect(initialLang('ru-RU', 'en')).toBe('en');
+it('initialLang: the stored choice wins, otherwise English (the browser language is ignored)', () => {
+  expect(initialLang(null)).toBe('en');
+  expect(initialLang('ru')).toBe('ru');
+  expect(initialLang('en')).toBe('en');
+  expect(initialLang('de')).toBe('en');
 });
