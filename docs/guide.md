@@ -229,7 +229,7 @@ The marked frame and layer are saved in the project folder under `.nota-bene/mar
 
 ### Images in the temp folder
 
-When the agent leaves an image in a temporary folder, for example a screenshot saved to `/tmp/x.png`, the absolute path in the chat text and in tool lines (Read, Write) is a link. Click it and the image opens in a read-only tab, like a project file.
+When the agent leaves an image in a temporary folder, for example a screenshot saved to `/tmp/x.png`, the absolute path in inline code in the chat is a link, and a tool line that names one gets a button beside it. Click it and the image opens in a tab, like a project file: you can mark it up and comment on it. If the file is gone, the tab says so.
 
 This is narrow on purpose. Only absolute paths inside the system temp folders (`/tmp`, `/private/tmp` and `os.tmpdir()`, checked after resolving symbolic links) are served, only image files (png, jpg, jpeg, gif, webp, avif, bmp, svg), up to 50 MB, one file at a time. There is no listing and no search of the temp folder, and nothing else outside the project is readable this way.
 
