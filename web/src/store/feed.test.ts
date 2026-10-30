@@ -496,3 +496,19 @@ describe('a ! command block (protocol 11)', () => {
     expect(s.items[0]).toMatchObject({ output: '' });
   });
 });
+
+describe('an archived ! command block', () => {
+  const page = (events: ServerEvent[], s: FeedState) => prependHistory({ ...s, earlier: 1, session: { id: 'S', root: '/', title: null, model: null } }, { events, segment: 1, more: false, session: 'S', epoch: s.epoch });
+
+  test('whose end never came is not running: it must not stop later commands', () => {
+    const live = fold([user()]);
+    const p = page([{ kind: 'shell-start', id: 'old', cmd: 'sleep 9', ts: 1 }], live);
+    expect(p.items[0]).toMatchObject({ kind: 'shell', id: 'old', running: false });
+  });
+
+  test('a run that is still going keeps running when its start is in the page too', () => {
+    const live = fold([{ kind: 'shell-start', id: 'r1', cmd: 'yes', ts: 1 }]);
+    const p = page([{ kind: 'shell-start', id: 'r1', cmd: 'yes', ts: 1 }], live);
+    expect(p.items.filter((i) => i.kind === 'shell')).toMatchObject([{ id: 'r1', running: true }]);
+  });
+});

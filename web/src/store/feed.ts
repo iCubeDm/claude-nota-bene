@@ -89,6 +89,7 @@ export function prependHistory(s: FeedState, p: HistoryPrepend): FeedState {
     }
     // an ask in the archive can no longer be answered: nobody is waiting for it
     if ('key' in it) return { ...it, key: `h${p.segment}${it.key}` }; // segments restart the counter: the segment number keeps keys apart
+    if (it.kind === 'shell') return { ...it, running: false }; // an archived start whose end never came: nothing runs for it now (a live run is the object above)
     return it.kind === 'permission' ? { ...it, archived: true as const } : it;
   });
   const tail = moved.size ? s.items.filter((it) => !moved.has(it)) : s.items;
