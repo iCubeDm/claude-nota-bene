@@ -18,6 +18,7 @@ import { Panes } from './tabs/Panes.tsx';
 import { TabStrip } from './tabs/TabStrip.tsx';
 import { Header } from './shell/Header.tsx';
 import { LeftStrip, RightStrip } from './shell/ToolStrip.tsx';
+import { LoginRequired } from './shell/LoginRequired.tsx';
 import { OneTab } from './shell/OneTab.tsx';
 import { Toasts } from './shell/Toasts.tsx';
 import { useFavicon } from './shell/Favicon.ts';
@@ -37,7 +38,7 @@ export function App() {
   const rootGen = useAppSelector((s) => selectTabs(s).rootGen);
   // another tab owns the window (M7-15): the app stays mounted but inert under the overlay
   const conn = useAppSelector(selectConn);
-  const blocked = conn === 'occupied' || conn === 'taken';
+  const blocked = conn === 'occupied' || conn === 'taken' || conn === 'unauthorized';
   return (
     <TooltipProvider>
       <div className="contents" inert={blocked}>
@@ -79,6 +80,7 @@ export function App() {
       <RecentFiles />
       </div>
       <OneTab />
+      <LoginRequired />
     </TooltipProvider>
   );
 }

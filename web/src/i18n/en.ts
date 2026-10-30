@@ -14,6 +14,8 @@ export const en: Dict = {
   occupiedTitle: 'The window is already open in another tab',
   takenTitle: 'Open in another tab',
   workHere: 'Work here',
+  loginRequiredTitle: 'This window is not logged in',
+  loginRequiredBody: 'Open it again with the nota-bene command, or with /nb from Claude Code: the address they open carries the login. A link without it (a bookmark, a copied address) is not enough.',
   connecting: 'connecting…',
   offline: 'no connection to the server…',
   serverError: (w) => `Server error${w ? ' · ' + w : ''}`,

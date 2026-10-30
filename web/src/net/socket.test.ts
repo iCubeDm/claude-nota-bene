@@ -159,3 +159,57 @@ describe('defaultSocketUrl', () => {
     expect(mine()).toHaveLength(2); // closed for good: the listeners are gone
   });
 });
+
+describe('a refused socket (no login)', () => {
+  const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+
+  it('a socket that never got a frame is checked; refused for auth stops the retries and says so once', async () => {
+    const states: string[] = [];
+    const probe = vi.fn(async () => true);
+    connect('ws://x/ws', () => {}, (s) => states.push(s), WS, probe);
+    FakeWS.instances[0].drop(); // the handshake was refused: closed, never a frame
+    await settle();
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(states).toEqual(['unauthorized']);
+    vi.advanceTimersByTime(10_000);
+    expect(FakeWS.instances).toHaveLength(1); // no endless reconnect
+  });
+
+  it('a socket down for another reason (server restarting) reconnects as before', async () => {
+    const states: string[] = [];
+    const probe = vi.fn(async () => false);
+    connect('ws://x/ws', () => {}, (s) => states.push(s), WS, probe);
+    FakeWS.instances[0].drop();
+    await settle();
+    expect(states).toEqual([]);
+    vi.advanceTimersByTime(1100);
+    expect(FakeWS.instances).toHaveLength(2);
+  });
+
+  it('a socket that was attached and then dropped is not probed as a refusal', async () => {
+    const probe = vi.fn(async () => true);
+    const states: string[] = [];
+    connect('ws://x/ws', () => {}, (s) => states.push(s), WS, probe);
+    FakeWS.instances[0].open();
+    replay(FakeWS.instances[0]);
+    FakeWS.instances[0].drop();
+    await settle();
+    // a restart looks the same from here; the next attempt that gets no frame is the one that is checked
+    expect(states).toEqual(['open', 'closed']);
+    vi.advanceTimersByTime(1100);
+    FakeWS.instances[1].drop();
+    await settle();
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(states.at(-1)).toBe('unauthorized');
+  });
+
+  it('close() while the check is out stops everything', async () => {
+    const probe = vi.fn(async () => false);
+    const c = connect('ws://x/ws', () => {}, () => {}, WS, probe);
+    FakeWS.instances[0].drop();
+    c.close();
+    await settle();
+    vi.advanceTimersByTime(5000);
+    expect(FakeWS.instances).toHaveLength(1);
+  });
+});

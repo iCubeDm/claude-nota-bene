@@ -1,6 +1,7 @@
 import { configureStore, createAction, createListenerMiddleware, createSlice, type Middleware, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, useStore, type TypedUseSelectorHook } from 'react-redux';
 import type { ClientMessage, ImageRef, ServerEvent } from '@nota-bene/shared';
+import { refusedForAuth } from '../net/auth.ts';
 import { connect as realConnect, type Connection, type SocketState } from '../net/socket.ts';
 import { t } from '../i18n/index.ts';
 import { composerSlice } from '../composer/slice.ts';
@@ -57,8 +58,9 @@ export const feedSlice = createSlice({
     .addCase(historyPrepended, (state, a) => prependHistory(state as FeedState, a.payload)),
 });
 
+// unauthorized = the server refused the page's login (the access token, net/auth.ts)
 // connecting = never open yet; closed = dropped after an open; occupied = another tab owns the window; taken = another tab took it from us (M7-15)
-export type ConnState = 'connecting' | 'open' | 'closed' | 'occupied' | 'taken';
+export type ConnState = 'connecting' | 'open' | 'closed' | 'occupied' | 'taken' | 'unauthorized';
 
 export const connSlice = createSlice({
   name: 'conn',
@@ -114,7 +116,7 @@ export function makeStore(o: {
   connect?: (url: string | (() => string), onEvent: (ev: ServerEvent) => void, onState: (s: SocketState) => void) => Connection;
   pip?: PipApi;
 }) {
-  const connectFn = o.connect ?? realConnect;
+  const connectFn = o.connect ?? ((u, e, st) => realConnect(u, e, st, WebSocket, refusedForAuth));
   // the server recognises a reconnect of the owning tab by it: no grace, no occupied (M7-15 fix round 1)
   const tabId = newTabId();
   const baseUrl = `${o.url}${o.url.includes('?') ? '&' : '?'}tab=${tabId}`;

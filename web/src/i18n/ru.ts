@@ -12,6 +12,8 @@ export const ru = {
   occupiedTitle: 'Окно уже открыто в другой вкладке',
   takenTitle: 'Открыто в другой вкладке',
   workHere: 'Работать здесь',
+  loginRequiredTitle: 'Окно не авторизовано',
+  loginRequiredBody: 'Откройте его заново командой nota-bene или через /nb в Claude Code: адрес, который они открывают, содержит вход. Ссылки без него (закладки, скопированного адреса) недостаточно.',
   connecting: 'подключение…', // new in M0 (the prototype set the label from markup)
   offline: 'нет связи с сервером…',
   serverError: (w?: string) => `Ошибка сервера${w ? ' · ' + w : ''}`,
