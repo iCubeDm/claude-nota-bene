@@ -387,6 +387,24 @@ describe('it adds no way in but the owner’s socket', () => {
 describe('signals that end the server', () => {
   const MAIN = new URL('./main.ts', import.meta.url).pathname;
   const FAKE = new URL('../test/fixtures/hello.json', import.meta.url).pathname;
+  it('a straggler that ignored TERM is killed when the server exits inside the 3 s', async () => {
+    const child = spawn(process.execPath, [MAIN, proj, '--port', '0', '--fake', FAKE], { env: { ...process.env, NOTA_BENE_HOME: path.join(tmp, 'home') }, stdio: ['ignore', 'pipe', 'inherit'] });
+    closers.push(async () => { child.kill('SIGKILL'); });
+    let out = '';
+    child.stdout!.on('data', (d) => { out += String(d); });
+    const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
+    await until(() => /Nota Bene: http:\/\/127\.0\.0\.1:\d+/.test(out));
+    const c = await connect(/Nota Bene: (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1]!);
+    const pidFile = path.join(tmp, 'pid-straggler');
+    c.send({ type: 'shell-run', id: 'r1', cmd: `(trap '' TERM; touch ${tmp}/ready; while :; do sleep 0.05; done) & while [ ! -f ${tmp}/ready ]; do sleep 0.02; done; echo $! > ${pidFile}` });
+    await until(() => !!endOf(c)); // the shell is gone, the block closed; the straggler ignores TERM and its KILL is 3 s away
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    expect(alive(pid)).toBe(true);
+    child.kill('SIGTERM');
+    await exited;
+    await until(() => !alive(pid), 3000);
+  }, 15000);
+
   for (const sig of ['SIGTERM', 'SIGHUP', 'SIGQUIT', 'SIGINT'] as const) {
     it(`${sig} stops a running command's whole group, and the server exits`, async () => {
       const child = spawn(process.execPath, [MAIN, proj, '--port', '0', '--fake', FAKE], { env: { ...process.env, NOTA_BENE_HOME: path.join(tmp, 'home') }, stdio: ['ignore', 'pipe', 'inherit'] });

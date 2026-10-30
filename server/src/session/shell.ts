@@ -15,8 +15,10 @@ const PIPE_GRACE_MS = 300;
 export const SHELL_FLUSH_MS = 100;
 /** how many finished runs wait for the agent's next message; the oldest go first */
 const QUEUE_MAX = 10;
-/** shells that take `-lc cmd` like sh does; any other $SHELL (csh, tcsh, nologin, false) is not used */
-const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish']);
+/** shells that take `-lc -- cmd` like sh does (fish is left out: that form is untested there); any other $SHELL (csh, tcsh, fish, nologin, false) is not used, /bin/sh runs the command */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+/** how often a group that was sent TERM is looked at: once it is empty the KILL is cancelled, its id may be reused */
+const POLL_MS = 150;
 
 type Run = {
   id: string; cmd: string; child?: ChildProcess;
@@ -29,6 +31,8 @@ type Run = {
   timers: ReturnType<typeof setTimeout>[];
   /** the KILL that follows a TERM: it outlives the run's end, a child that ignored TERM must not be left behind */
   killTimer?: ReturnType<typeof setTimeout>;
+  /** polls whether the group is gone, to cancel the KILL (a pgid may be recycled) */
+  poll?: ReturnType<typeof setInterval>;
   /** a flush of the output is scheduled */
   flush?: ReturnType<typeof setTimeout>;
   done: boolean;
@@ -57,7 +61,7 @@ function killAllOnExit(): void {
   });
 }
 
-function signalGroup(r: Run, sig: NodeJS.Signals): boolean {
+function signalGroup(r: Run, sig: NodeJS.Signals | 0): boolean {
   const pid = r.child?.pid;
   if (pid === undefined) return false;
   try {
@@ -207,8 +211,7 @@ export class ShellRunner {
   private terminate(r: Run, why: ShellStop | 'switch'): void {
     if (r.done || r.stop) return;
     r.stop = why;
-    signalGroup(r, 'SIGTERM');
-    this.armKill(r);
+    if (signalGroup(r, 'SIGTERM')) this.armKill(r);
   }
 
   /** TERM to what is left of the group after the shell ended, and KILL a little later if any of it stayed. */
@@ -216,16 +219,26 @@ export class ShellRunner {
     if (signalGroup(r, 'SIGTERM')) this.armKill(r);
   }
 
+  /**
+   * The KILL that follows a TERM that landed. The run stays in `live` (the exit hook kills it) until the KILL has gone or the group
+   * is empty, which a poll notices: then there is nothing to kill, and the group id must not be signalled again.
+   */
   private armKill(r: Run): void {
     if (r.killTimer) return;
-    r.killTimer = setTimeout(() => signalGroup(r, 'SIGKILL'), this.o.killMs);
+    const end = () => {
+      clearTimeout(r.killTimer);
+      clearInterval(r.poll);
+      live.delete(r);
+    };
+    r.killTimer = setTimeout(() => { signalGroup(r, 'SIGKILL'); end(); }, this.o.killMs);
+    r.poll = setInterval(() => { if (!signalGroup(r, 0)) end(); }, POLL_MS);
     r.killTimer.unref(); // after the run ended it only guards stragglers; it must not hold the process open
+    r.poll.unref();
   }
 
   private finish(r: Run): void {
     if (r.done) return;
     for (const t of r.timers) clearTimeout(t); // not killTimer: a child that ignored TERM is still to be killed
-    live.delete(r);
     // a background child may hold the pipes: let go of them, the output so far is what the run printed
     r.child?.stdout?.destroy();
     r.child?.stderr?.destroy();
@@ -235,6 +248,7 @@ export class ShellRunner {
     r.done = true;
     if (this.current === r) this.current = null;
     if (!r.killTimer) this.signalRest(r); // the pipes closed before the shell's exit was seen: the group still goes
+    if (!r.killTimer) live.delete(r); // nothing left to kill; otherwise it stays until the KILL or an empty group
     if (r.quiet) return;
     const code = r.exit?.code ?? null;
     this.o.emit({

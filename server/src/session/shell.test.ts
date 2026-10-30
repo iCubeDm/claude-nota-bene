@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHELL_OUTPUT_CAP, type ServerEvent } from '@nota-bene/shared';
 import type { EmitInput } from '../hub.ts';
 import { ShellRunner } from './shell.ts';
@@ -192,6 +192,21 @@ describe('ShellRunner', () => {
     await until(() => !alive(bg), 3000);
   });
 
+  it('does not signal a group again once it is empty: no KILL for an id that may be reused', async () => {
+    const r = make({ killMs: 700 });
+    const kill = vi.spyOn(process, 'kill');
+    try {
+      r.run('r1', 'sleep 20 & echo $!');
+      await until(() => !!ended(), 3000);
+      const bg = Number(ended()!.output.trim());
+      await until(() => !alive(bg), 3000); // TERM took it
+      await sleep(900); // past the KILL's time
+      expect(kill.mock.calls.filter(([, sig]) => sig === 'SIGKILL')).toEqual([]);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
   it('a stopped run’s KILL still comes after the run has ended', async () => {
     const r = make({ killMs: 200 });
     r.run('r1', "trap '' TERM; echo $$; while :; do sleep 0.05; done");
@@ -314,7 +329,7 @@ describe('small things of the run', () => {
   it('uses $SHELL only when it is a shell that takes -lc like sh does', async () => {
     const prev = process.env.SHELL;
     try {
-      for (const bad of ['/bin/csh', '/usr/bin/false', '/usr/sbin/nologin', '/nonexistent/bash', 'bash']) {
+      for (const bad of ['/bin/csh', '/usr/bin/false', '/usr/sbin/nologin', '/usr/local/bin/fish', '/nonexistent/bash', 'bash']) {
         process.env.SHELL = bad;
         const end = await runToEnd(make(), 'echo ran', `r-${bad}`);
         expect(end).toMatchObject({ code: 0, output: 'ran\n' });
