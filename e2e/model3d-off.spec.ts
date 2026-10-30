@@ -1,3 +1,4 @@
+import { apiGet } from './auth.ts';
 import { expect, test } from '@playwright/test';
 
 // Experimental 3D is off by default (NOTA_BENE_EXPERIMENTAL_3D unset; the controls fixture runs with it off and holds models/cube.glb):
@@ -8,9 +9,9 @@ test('experimental 3D off: a .glb opens as a plain file, /model is 404, no 3D ch
   await page.goto('/');
   await expect(page.locator('#composer-input')).toBeVisible();
 
-  const info = (await (await page.request.get('/info')).json()) as { blender: boolean };
+  const info = (await (await apiGet(page, '/info')).json()) as { blender: boolean };
   expect(info.blender).toBe(false);
-  expect((await page.request.get('/model?path=models%2Fcube.glb')).status()).toBe(404);
+  expect((await apiGet(page, '/model?path=models%2Fcube.glb')).status()).toBe(404);
 
   const sheet = page.locator('#tree-sheet');
   if (await sheet.isHidden()) await page.locator('#toggleTree').click();

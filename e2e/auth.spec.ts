@@ -33,7 +33,8 @@ test('the URL fragment logs in, is taken out of the address bar, and the window 
   expect(await page.evaluate(() => document.cookie)).not.toContain('nb_'); // HttpOnly: the page cannot read it
   expect(await page.evaluate(() => localStorage.getItem('nb.key'))).toMatch(/^[0-9a-f]{64}$/); // the key that opens the socket and writes
   // images and media are plain subresource loads: the cookie goes with them
-  expect((await ctx.request.get('/info')).status()).toBe(200);
+  expect((await ctx.request.get('/info')).status()).toBe(401); // the cookie alone opens /file and /attach only
+  expect((await ctx.request.get('/info', { headers: { 'x-nota-bene-key': (await page.evaluate(() => localStorage.getItem('nb.key')))! } })).status()).toBe(200);
   await ctx.close();
 });
 
@@ -59,7 +60,7 @@ test('the API and the socket refuse a request without the cookie, even from our 
 test('the cookie alone (no key in the page) reads files but cannot open the socket or write: the overlay @chat', async ({ browser, baseURL }) => {
   const cookieOnly = { cookies: loggedIn('chat', PORT).cookies, origins: [] };
   const ctx = await browser.newContext({ baseURL, locale: 'en-US', storageState: cookieOnly });
-  expect((await ctx.request.get('/info')).status()).toBe(200);
+  expect((await ctx.request.get('/info')).status()).toBe(401); // /info needs the key too
   expect((await ctx.request.get('/file?path=README.md')).status()).not.toBe(401);
   // a write with the cookie and the page's own Origin, as a program that got the cookie would send it
   expect((await ctx.request.post('/restart-server', { headers: { origin: baseURL! } })).status()).toBe(401);

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import nodePath from 'node:path';
+import { apiGet } from './auth.ts';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // M3-13: comments on an open file, in a real browser (hidden panes and rects cannot be checked in jsdom).
@@ -496,7 +497,7 @@ async function addMarkComment(page: Page, text: string): Promise<string> {
   return (await card.getAttribute('data-comment-id'))!;
 }
 
-const projectRoot = async (page: Page): Promise<string> => ((await (await page.request.get('/info')).json()) as { root: string }).root;
+const projectRoot = async (page: Page): Promise<string> => ((await (await apiGet(page, '/info')).json()) as { root: string }).root;
 const markDir = (root: string, id: string) => nodePath.join(root, '.nota-bene', 'marks', id);
 
 /** Decodes a project PNG in the browser (via /file) and reads its size and the alpha at `pts` (natural px). */
@@ -1204,7 +1205,7 @@ test('a model with a KTX2 texture renders instead of an error, with both texture
 });
 
 // ---- .blend: models/scene.blend (e2e/fixtures/make-blend.mjs, made by the real Blender) is converted by the server's Blender.
-const hasBlender = (page: Page) => page.request.get('/info').then((r) => r.json()).then((j: { blender?: boolean }) => !!j.blender);
+const hasBlender = (page: Page) => apiGet(page, '/info').then((r) => r.json()).then((j: { blender?: boolean }) => !!j.blender);
 
 test('a .blend opens as a 3D view through /model: converted note, drawn pixels, a comment on it names the camera @files', async ({ page }) => {
   const frames = sentFrames(page);

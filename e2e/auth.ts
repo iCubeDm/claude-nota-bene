@@ -3,6 +3,7 @@
 // POST /auth: the HttpOnly cookie (read tier) and the key in localStorage (write tier, the socket).
 // The formulas are server/src/auth.ts's (scripts/e2e-auth.test.ts checks the two agree).
 import { createHash, createHmac } from 'node:crypto';
+import type { APIResponse, Page } from '@playwright/test';
 
 /** The fixture's token (serve.mjs writes the same into its state dir). */
 export const e2eToken = (fixture: string): string => createHash('sha256').update(`nota-bene e2e ${fixture}`).digest('hex');
@@ -25,4 +26,10 @@ export function loggedIn(fixture: string, port: number) {
     }],
     origins: [{ origin: `http://127.0.0.1:${port}`, localStorage: [{ name: 'nb.key', value: e2eKey(fixture, port) }] }],
   };
+}
+
+/** A GET the way the page does it: the context's cookie and the key from its localStorage (everything but /file and /attach needs it). */
+export async function apiGet(page: Page, path: string): Promise<APIResponse> {
+  const key = await page.evaluate(() => localStorage.getItem('nb.key'));
+  return page.request.get(path, key ? { headers: { 'x-nota-bene-key': key } } : {});
 }
