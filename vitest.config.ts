@@ -8,6 +8,7 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['shared/**/*.test.ts', 'server/**/*.test.ts', 'scripts/**/*.test.ts'],
+          exclude: ['scripts/nb-open.test.ts', '**/node_modules/**'], // the /nb tests spawn servers on shared ports: the launcher project
         },
       },
       {
@@ -15,7 +16,7 @@ export default defineConfig({
         test: {
           name: 'launcher',
           environment: 'node',
-          include: ['bin/**/*.test.ts', 'plugin/**/*.test.ts'],
+          include: ['bin/**/*.test.ts', 'scripts/nb-open.test.ts'],
           fileParallelism: false,
         },
       },

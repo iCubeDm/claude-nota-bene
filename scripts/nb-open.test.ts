@@ -12,9 +12,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const SKILL = fileURLToPath(new URL('.', import.meta.url));
-const REAL_BIN = fileURLToPath(new URL('../../../bin/nota-bene.mjs', import.meta.url));
-const FAKE = fileURLToPath(new URL('../../../server/test/fixtures/hello.json', import.meta.url));
+const SKILL = fileURLToPath(new URL('../plugin/skills/nb', import.meta.url)); // not beside the test: the plugin dir ships to users
+const REAL_BIN = fileURLToPath(new URL('../bin/nota-bene.mjs', import.meta.url));
+const FAKE = fileURLToPath(new URL('../server/test/fixtures/hello.json', import.meta.url));
 const SID = '0123abcd-4567-89ab-cdef-0123456789ab';
 
 let tmp: string; // the whole suite's temp root (also TMPDIR of every run)
