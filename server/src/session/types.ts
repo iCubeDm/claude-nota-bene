@@ -1,8 +1,10 @@
 import type { EffortLevel, IdleCompact, ImageRef, Mode, ModelOption, SlashCommand, Stats } from '@nota-bene/shared';
 
 export type SessionManager = {
-  /** Returns 'switching' for a send refused during a switch (nothing sent or emitted; the server tells the asking socket), else null. */
-  send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): 'switching' | null;
+  /** Returns the reason for a send refused (nothing sent or emitted; the server tells the asking socket): 'switching' during a switch, 'busy' for a /compact or /clear typed while the agent is busy; else null. */
+  send(m: { id: string; text: string; force?: boolean; images?: ImageRef[] }): 'switching' | 'busy' | null;
+  /** What `send` would answer for this text right now, without sending (the server asks before it marks comments sent). */
+  refusal(text: string): 'switching' | 'busy' | null;
   interrupt(): void;
   answer(permissionId: string, allow: boolean): void;
   mode(): Mode;

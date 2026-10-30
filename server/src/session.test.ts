@@ -8,7 +8,7 @@ import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
 import type { AgentBackend, PermissionAsk } from './agent/types.ts';
 import { EventHub } from './hub.ts';
-import { createSessionManager } from './session.ts';
+import { createSessionManager, trackedCommand } from './session.ts';
 import { lastSession } from './state.ts';
 import { prefsKey, readPrefs, setModePref } from './prefs.ts';
 import { AttachmentStore } from './attachments.ts';
@@ -937,6 +937,25 @@ describe('switch', () => {
     s.close();
   });
 
+  it('a /clear or /compact typed while the agent is busy is refused like the buttons: nothing is sent or shown; a skill still queues', async () => {
+    const backend = fakeBackend([{ text: 'x'.repeat(3000), chunk: 1, delayMs: 5 }]);
+    const { events, make } = setup(backend);
+    const s = await make();
+    s.send({ id: 'u1', text: 'work' });
+    await until(() => s.busy());
+    const users = () => events.filter((e) => e.kind === 'user').length;
+    expect(users()).toBe(1);
+    expect(s.send({ id: 'c1', text: '/clear' })).toBe('busy');
+    expect(s.send({ id: 'c2', text: '/compact keep the plan' })).toBe('busy');
+    expect(s.send({ id: 'c3', text: '/clear', force: true })).toBe('busy');
+    expect(users()).toBe(1);
+    expect(s.send({ id: 'k1', text: '/some-skill arg' })).toBeNull(); // not a tracked command: queued as any message
+    expect(users()).toBe(2);
+    expect(s.send({ id: 'c1', text: '/clear' })).toBe('busy'); // the refused id was never registered: it can be sent again later
+    await s.interrupt();
+    s.close();
+  });
+
   it('a reset that did not follow a /clear command keeps its result stored', async () => {
     const backend = fakeBackend([{ text: 'x', frames: [{ type: 'conversation_reset', new_conversation_id: '44444444-4444-4444-8444-444444444444' }] }]);
     const { hub, events } = setup(backend);
@@ -996,5 +1015,28 @@ describe('switch', () => {
       expect(lastSession(home)).toBeUndefined();
       m.close();
     });
+  });
+});
+
+describe('trackedCommand', () => {
+  const row = (name: string, o: { builtin?: boolean; aliases?: string[] } = {}) => ({ name, description: '', ...o });
+  it('with no list only the literal /compact and /clear count, with or without arguments', () => {
+    expect(trackedCommand('/clear', [])).toBe('clear');
+    expect(trackedCommand('/compact keep it', [])).toBe('compact');
+    expect(trackedCommand('/clear\n\nComments on the conversation:', [])).toBe('clear');
+    expect(trackedCommand('/new', [])).toBeUndefined();
+    expect(trackedCommand('/reset', [])).toBeUndefined();
+    expect(trackedCommand('/clearer', [])).toBeUndefined();
+    expect(trackedCommand('hi /clear', [])).toBeUndefined();
+  });
+  it('an alias counts when a builtin has it; the user\'s own command of that name wins', () => {
+    const list = [row('new', {}), row('clear', { builtin: true, aliases: ['reset', 'new'] }), row('compact', { builtin: true })];
+    expect(trackedCommand('/reset', list)).toBe('clear');
+    expect(trackedCommand('/new', list)).toBeUndefined(); // a skill named new
+    expect(trackedCommand('/clear', list)).toBe('clear');
+    expect(trackedCommand('/new', [row('clear', { builtin: true, aliases: ['reset', 'new'] })])).toBe('clear');
+  });
+  it('a user command that shares the name /clear is not the builtin', () => {
+    expect(trackedCommand('/clear', [row('clear'), row('compact', { builtin: true })])).toBeUndefined();
   });
 });

@@ -418,3 +418,19 @@ describe('server', () => {
     });
   });
 });
+
+describe('server: tracked commands while busy', () => {
+  it('a /clear typed during a turn gets send-refused busy on the asking socket; nothing reaches the feed', async () => {
+    const backend = fakeBackend([{ text: 'x'.repeat(3000), chunk: 1, delayMs: 5 }]);
+    const s = await startServer({ cwd: '/proj', port: 0, backend, webDist: dist, oneTab: false });
+    closers.push(s.close);
+    const c = await connect(s.url);
+    c.ws.send(JSON.stringify({ type: 'send', id: 'u1', text: 'work' }));
+    await until(() => c.events.some((e) => e.kind === 'user'));
+    c.ws.send(JSON.stringify({ type: 'send', id: 'c1', text: '/clear' }));
+    await until(() => c.events.some((e) => e.kind === 'send-refused'));
+    expect(c.events.find((e) => e.kind === 'send-refused')).toEqual({ kind: 'send-refused', id: 'c1', reason: 'busy' });
+    expect(c.events.filter((e) => e.kind === 'user')).toHaveLength(1);
+    c.ws.send(JSON.stringify({ type: 'interrupt' }));
+  });
+});

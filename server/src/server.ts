@@ -296,11 +296,14 @@ export async function startServer(o: {
     const handleOwner = (ws: WebSocket, msg: ClientMessage) => {
         switch (msg.type) {
           case 'send':
-            if (manager.switching()) {
+            {
               // before markSent: a refused send must not flip its comments to sent. Only the asking socket hears
               // of it (not stored, not broadcast)
-              ws.send(JSON.stringify({ kind: 'send-refused', id: msg.id, reason: 'switching' }));
-              break;
+              const why = manager.refusal(msg.text);
+              if (why) {
+                ws.send(JSON.stringify({ kind: 'send-refused', id: msg.id, reason: why }));
+                break;
+              }
             }
             if (msg.commentIds?.length) {
               // before the agent call: the UI flips to sent even if the agent later fails

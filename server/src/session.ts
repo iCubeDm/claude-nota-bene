@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { AgentEvent } from '@nota-bene/shared';
+import type { AgentEvent, SlashCommand } from '@nota-bene/shared';
 import { HistoryArchive } from './archive.ts';
 import { AttachmentStore } from './attachments.ts';
 import type { AgentBackend, AgentSession } from './agent/types.ts';
@@ -36,10 +36,17 @@ const CLOSE_TIMEOUT_MS = 5000; // a CLI that does not end its message loop after
 const INTERRUPT_TIMEOUT_MS = 2000; // a busy restart's interrupt; a stuck CLI must not hold the restart
 const HISTORY_TIMEOUT_MS = 20_000; // a transcript read that hangs must not hold `switching`
 
-/** The command a message line starts with, when it is one the server tracks (the buttons send the plain form; the CLI also takes arguments and the aliases). */
-export function trackedCommand(text: string): 'compact' | 'clear' | undefined {
-  const m = /^\/(compact|clear|reset|new)(\s|$)/.exec(text);
-  return m ? (m[1] === 'compact' ? 'compact' : 'clear') : undefined;
+/**
+ * The tracked command (`/compact`, `/clear`) a message starts with, as the CLI would resolve it: the first word names a command, or
+ * is an alias of a builtin; a command of the user's own by that name wins over an alias. `list` is the session's cached command
+ * list; with none yet only the literal names count.
+ */
+export function trackedCommand(text: string, list: readonly SlashCommand[]): 'compact' | 'clear' | undefined {
+  const word = /^\/([^\s/]+)(\s|$)/.exec(text)?.[1];
+  if (!word) return undefined;
+  const named = list.find((c) => c.name === word) ?? list.find((c) => c.builtin && c.aliases?.includes(word));
+  const name = named ? (named.builtin ? named.name : undefined) : word;
+  return name === 'compact' || name === 'clear' ? name : undefined;
 }
 
 /**
@@ -276,25 +283,36 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     }
   }
 
+  /**
+   * Why a send is not taken. A tracked command is refused while anything is unanswered, like the buttons: queued behind a turn,
+   * its reset would settle the sends after it and its result would be stored.
+   */
+  function refused(text: string): 'switching' | 'busy' | null {
+    if (phase.switching) return 'switching';
+    return busy() && trackedCommand(text, cmds.commands) ? 'busy' : null;
+  }
+
   await load(who.id);
   slot.ensure();
   stats.start();
 
   return {
     send({ id, text, force, images }) {
-      if (phase.switching) return 'switching';
+      const refusal = refused(text);
+      if (refusal) return refusal;
       turns.assertNew(id); // first: a reused id is refused with no side effects
       turns.userTurn(); // a real turn follows: its result is a normal one
       idle.touch();
       slot.ensure();
       const { refs, payload } = resolveImages(attachments, images, (e) => report('attach', e));
       // typed in the composer, /compact and /clear are the buttons' commands: their result never arms idle compaction, a /clear's is live only
-      const command = trackedCommand(text);
+      const command = trackedCommand(text, cmds.commands);
       turns.sent(id, command ? { command } : {});
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
       queue.push({ id, text, force, images: payload }); // handed over in order, after a forced send's interrupt
       return null;
     },
+    refusal: refused,
     command: (name) => runCommand(name, false),
     interrupt() {
       const g = slot.gen;
