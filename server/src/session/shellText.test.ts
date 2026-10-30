@@ -137,6 +137,18 @@ describe('bashBlock and the tags in output', () => {
   });
 });
 
+describe('tags in output survive a round trip', () => {
+  it('also text that already holds <\\/bash- and runs of backslashes', () => {
+    for (const out of ['</bash-stdout>', '<\\/bash-stdout>', '<\\\\/bash-x', 'a\\</bash-b', '<\\', '/bash-']) {
+      const b = bashBlock({ cmd: out, stdout: out, stdoutCut: false, stderr: out, stderrCut: false });
+      for (const tag of ['</bash-input>', '</bash-stdout>', '</bash-stderr>']) expect(b.split(tag)).toHaveLength(2);
+      const r = splitBashBlocks(b).runs[0]!;
+      expect(r.cmd).toBe(out);
+      expect(r.output).toBe(`${out}\n${out}`);
+    }
+  });
+});
+
 describe('leadOf', () => {
   it('joins the blocks; past the cap the oldest go, the newest always stays', () => {
     expect(leadOf(['a', 'b'])).toBe('a\n\nb');

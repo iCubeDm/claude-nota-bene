@@ -99,9 +99,12 @@ export const AGENT_STREAM_CAP = 32 * 1024;
 /** the runs put in front of a message come to at most this many characters, the newest first kept (the newest run is always in) */
 export const LEAD_CAP = 64 * 1024;
 
-/** Output must not close our tags: `</bash-` becomes `<\/bash-` (the reader of a block turns it back). */
-const neutral = (s: string): string => s.replaceAll('</bash-', '<\\/bash-');
-const restore = (s: string): string => s.replaceAll('<\\/bash-', '</bash-');
+/**
+ * Output must not close our tags: `</bash-` becomes `<\/bash-`. A backslash run before `/bash-` is doubled first (k backslashes
+ * become 2k+1), so what the output really held, `<\/bash-` included, comes back as it was.
+ */
+const neutral = (s: string): string => s.replace(/<(\\*)\/bash-/g, (_m, bs: string) => `<${bs}${bs}\\/bash-`);
+const restore = (s: string): string => s.replace(/<(\\+)\/bash-/g, (m, bs: string) => (bs.length % 2 ? `<${'\\'.repeat((bs.length - 1) / 2)}/bash-` : m));
 
 /**
  * The text Claude Code puts in the conversation for a command typed with `!` (checked against its transcripts):
