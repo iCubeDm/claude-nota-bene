@@ -197,3 +197,11 @@ it('running a command shows the chat, where its block appears', async () => {
   feed({ kind: 'shell-start', id: 'r1', cmd: 'ls', ts: 1 });
   expect(screen.getByTestId('shell-block')).toBeInTheDocument();
 });
+
+it('a pasted command with its trailing newline is still a shell command', async () => {
+  const { sent, box, store } = setup();
+  act(() => void store.dispatch(setDraft('! echo paste\n')));
+  expect(screen.getByTestId('shell-cue')).toBeInTheDocument();
+  await userEvent.type(box, '{Enter}');
+  expect(sent).toMatchObject([{ type: 'shell-run', cmd: 'echo paste' }]);
+});
