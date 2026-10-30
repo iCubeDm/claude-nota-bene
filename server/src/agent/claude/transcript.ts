@@ -13,8 +13,9 @@ const LABEL_RE = /^\[[^\]\n]{1,200}\]$/;
 const TS = 0;
 
 // how the CLI records a slash command: the command line as tags, its output as another user record
-const COMMAND_NAME = /<command-name>\s*(\/?[^<\s]+)\s*<\/command-name>/;
+const COMMAND_NAME = /^\s*(?:<command-message>[^<]*<\/command-message>\s*)?<command-name>\s*(\/?[^<\s]+)\s*<\/command-name>/;
 const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+const CAVEAT = /^\s*<local-command-caveat>/;
 const COMMAND_OUT = /^\s*<local-command-stdout>([\s\S]*?)<\/local-command-stdout>\s*$/;
 
 function agent(out: ServerEvent[], frame: Record<string, unknown>): void {
@@ -59,6 +60,7 @@ export function transcriptToEvents(msgs: SessionMessage[], attachments: Attachme
       });
       let text = blocks.filter((b, i) => b.type === 'text' && !labels.has(i)).map((b) => b.text ?? '').join('\n');
       if (!own && !images.length) {
+        if (CAVEAT.test(text)) continue;
         const printed = COMMAND_OUT.exec(text);
         if (printed) {
           if (printed[1].trim()) out.push({ kind: 'agent', e: { t: 'message', id: `${sm.uuid}:out`, text: printed[1].trim() }, ts: TS });

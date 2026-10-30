@@ -154,4 +154,15 @@ describe('transcriptToEvents: slash commands', () => {
     ], store());
     expect(events).toEqual([{ kind: 'agent', ts: 0, e: { t: 'message', id: 'o1:out', text: '## Context Usage\n\n4%' } }]);
   });
+
+  it('a message that merely contains the tags is the user\'s text, not a command', () => {
+    const text = 'why does <command-name>/foo</command-name> show up in the log?\nand <command-args>x</command-args>';
+    expect(transcriptToEvents([user('t1', text)], store())).toEqual([{ kind: 'user', id: 't1', text, historic: true, ts: 0 }]);
+    const out = 'look: <local-command-stdout>hi</local-command-stdout>';
+    expect(transcriptToEvents([user('t2', out)], store())).toEqual([{ kind: 'user', id: 't2', text: out, historic: true, ts: 0 }]);
+  });
+
+  it('the CLI\'s local-command caveat is never a bubble', () => {
+    expect(transcriptToEvents([user('v1', '<local-command-caveat>The command below was run directly in Claude Code.</local-command-caveat>')], store())).toEqual([]);
+  });
 });
