@@ -23,6 +23,33 @@ function make(o: { interrupt?: () => Promise<void>; sendThrows?: boolean; interr
   return { q, log, errors, bump: () => { gen++; }, die: () => { current = false; } };
 }
 
+describe('SendQueue lead', () => {
+  it('asks for the lead as the text is handed over, once, and sends what it gave', async () => {
+    const { q, log } = make();
+    const taken: string[] = [];
+    q.push({ id: 'A', text: 'a', lead: (t) => (taken.push(t), { text: `LEAD\n\n${t}`, restore: () => log.push('restored') }) });
+    await q.idle();
+    expect(taken).toEqual(['a']);
+    expect(log).toEqual(['running A', 'send A:next']);
+  });
+
+  it('a hand-over that throws gives the lead back', async () => {
+    const { q, log } = make({ sendThrows: true });
+    q.push({ id: 'A', text: 'a', lead: (t) => ({ text: t, restore: () => log.push('restored') }) });
+    await q.idle();
+    expect(log).toEqual(['running A', 'restored', 'fail A: send failed']);
+  });
+
+  it('a send dropped because the session moved on never asks for it', async () => {
+    const { q, bump } = make();
+    let asked = 0;
+    q.push({ id: 'A', text: 'a', lead: (t) => (asked++, { text: t, restore() {} }) });
+    bump();
+    await q.idle();
+    expect(asked).toBe(0);
+  });
+});
+
 describe('SendQueue', () => {
   it('sends in order; a forced send interrupts first and goes "now"', async () => {
     const { q, log } = make();

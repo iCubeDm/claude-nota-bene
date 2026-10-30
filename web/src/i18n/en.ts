@@ -407,6 +407,7 @@ export const en: Dict = {
   shellCue: 'Shell · Enter runs',
   shellWithAttachments: 'Not run: the message has pending comments or images. Send or remove them first.',
   shellBusy: 'Not run: a command is still running. Stop it or wait for it.',
+  shellSwitching: 'Not run: a session switch is in progress',
   shellTooLong: 'Not run: the command is longer than 32 KB.',
   shellBlock: 'Shell command',
   shellStop: 'Stop',

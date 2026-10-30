@@ -64,7 +64,7 @@ export type SessionManager = {
   /** Stops the run `id` (TERM, then KILL); another id is no news. */
   shellStop(id: string): void;
   /** The output so far of the run in progress, for a socket that attached meanwhile (null: none running or no output yet). */
-  shellSnapshot(): { id: string; text: string } | null;
+  shellSnapshot(): { id: string; text: string; truncated: boolean } | null;
   /** Context, plan limits and cost as last measured (what a new socket gets). */
   stats(): Stats;
   /** A socket attached: the stats catch up when the skipped 5-minute ticks left them stale. */

@@ -8,6 +8,13 @@ export const TASK_ID = /^[A-Za-z0-9_-]{1,128}$/;
 export const SHELL_ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** The longest `cmd` of `shell-run` the server takes, in bytes. */
 export const SHELL_CMD_MAX = 32 * 1024;
+/** The last `cap` characters of `s`, never starting inside a surrogate pair. */
+export function cutTail(s: string, cap: number): string {
+  if (s.length <= cap) return s;
+  const t = s.slice(s.length - cap);
+  const c = t.charCodeAt(0);
+  return c >= 0xdc00 && c <= 0xdfff ? t.slice(1) : t;
+}
 /** What a `! cmd` run keeps of its output (in the feed, and for the agent): the last 64 K characters, the cut marked `truncated`. */
 export const SHELL_OUTPUT_CAP = 64 * 1024;
 
@@ -207,8 +214,14 @@ export type ServerEvent =
   | { kind: 'send-refused'; id: string; reason: 'busy' | 'switching' }
   /** a `! cmd` run began (protocol 11); stored, so a reload shows the block */
   | { kind: 'shell-start'; id: string; cmd: string; ts: number }
-  /** more output of the run `id` (ANSI stripped, stdout and stderr merged); live only. A new socket gets the output so far in one of these. */
-  | { kind: 'shell-out'; id: string; text: string }
+  /**
+   * the output of the run `id` so far, ANSI stripped, stdout and stderr merged: the last SHELL_OUTPUT_CAP characters, REPLACING what the
+   * page shows (`truncated`: more came before). Sent at most about ten times a second, and not to a socket that is far behind, so
+   * a flood cannot pile up in the server; live only. A new socket gets the output so far in one of these.
+   */
+  | { kind: 'shell-out'; id: string; text: string; truncated: boolean }
+  /** to the asking socket only, never stored: a `shell-run` the server did not take (the page puts the draft back) */
+  | { kind: 'shell-refused'; id: string; reason: 'running' | 'switching' }
   /**
    * the run `id` ended. `output`: its merged output, the last SHELL_OUTPUT_CAP characters (`truncated`: more came before).
    * `code`: the exit code (null: killed by a signal, or never started); `stop`: why the server stopped it (the user's

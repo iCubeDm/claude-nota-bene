@@ -28,7 +28,11 @@ export class SendQueue {
     this.o = o;
   }
 
-  push(m: { id: string; text: string; force?: boolean; images?: SendImage[] }): void {
+  /**
+   * `lead`: asked at the hand-over, right before the agent gets the text, for what goes in front of it (the `! cmd` runs since the
+   * agent's last message); its `restore` is called when the hand-over throws, so nothing is lost with the failed send.
+   */
+  push(m: { id: string; text: string; force?: boolean; images?: SendImage[]; lead?: (text: string) => { text: string; restore(): void } }): void {
     const { gen, agent, report } = this.o;
     const g = gen();
     this.chain = this.chain.then(async () => {
@@ -47,7 +51,13 @@ export class SendQueue {
         if (g !== gen()) return;
         const a = agent();
         this.o.running(m.id);
-        a.send({ uuid: m.id, text: m.text, priority: m.force ? 'now' : 'next', ...(m.images?.length ? { images: m.images } : {}) });
+        const led = m.lead?.(m.text);
+        try {
+          a.send({ uuid: m.id, text: led?.text ?? m.text, priority: m.force ? 'now' : 'next', ...(m.images?.length ? { images: m.images } : {}) });
+        } catch (e) {
+          led?.restore();
+          throw e;
+        }
       } catch (e) {
         if (g !== gen()) return;
         report('send', e);

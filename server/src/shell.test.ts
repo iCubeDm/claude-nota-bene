@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,7 +64,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Of<K extends ServerEvent['kind']> = Extract<ServerEvent, { kind: K }>;
 const ofKind = <K extends ServerEvent['kind']>(c: Client, k: K) => c.events.filter((e): e is Of<K> => e.kind === k);
 const endOf = (c: Client, id = 'r1') => ofKind(c, 'shell-end').find((e) => e.id === id);
-const errors = (c: Client) => ofKind(c, 'server-error').filter((e) => e.where === 'shell');
+const refused = (c: Client) => ofKind(c, 'shell-refused');
 const isResult = (e: ServerEvent) => e.kind === 'agent' && e.e.t === 'turn-end';
 
 describe('running a command', () => {
@@ -107,8 +108,9 @@ describe('running a command', () => {
     c.send({ type: 'shell-run', id: 'r1', cmd: 'sleep 30' });
     await until(() => ofKind(c, 'shell-start').length === 1);
     c.send({ type: 'shell-run', id: 'r2', cmd: 'echo second' });
-    await until(() => errors(c).length === 1);
-    expect(errors(c)[0]!.message).toMatch(/already running/);
+    await until(() => refused(c).length === 1);
+    expect(refused(c)[0]).toEqual({ kind: 'shell-refused', id: 'r2', reason: 'running' });
+    expect(c.events.filter((e) => e.kind === 'server-error')).toEqual([]); // a refusal is not a toast: the page puts the draft back
     expect(ofKind(c, 'shell-start')).toHaveLength(1);
     c.send({ type: 'shell-stop', id: 'r1' });
     await until(() => !!endOf(c));
@@ -144,7 +146,7 @@ describe('running a command', () => {
     await until(() => b.events.some((e) => e.kind === 'hello'));
     const replay = ofKind(b, 'replay')[0]!;
     expect(replay.events.map((e) => e.kind)).toContain('shell-start');
-    expect(ofKind(b, 'shell-out')).toMatchObject([{ id: 'r1', text: 'first\n' }]);
+    expect(ofKind(b, 'shell-out')[0]).toEqual({ kind: 'shell-out', id: 'r1', text: 'first\n', truncated: false });
     b.send({ type: 'shell-stop', id: 'r1' });
     await until(() => !!endOf(a));
     const c = await connect(s.url);
@@ -152,6 +154,55 @@ describe('running a command', () => {
     const again = ofKind(c, 'replay')[0]!.events.filter((e) => e.kind.startsWith('shell'));
     expect(again.map((e) => e.kind)).toEqual(['shell-start', 'shell-end']);
     expect(ofKind(c, 'shell-out')).toEqual([]);
+  });
+});
+
+describe('a flood', () => {
+  const rss = () => process.memoryUsage().rss;
+
+  it('a client that reads nothing does not make the server pile up output, and Stop still works for the others', async () => {
+    const s = await boot();
+    const stalled = await connect(s.url);
+    const live = await connect(s.url);
+    await until(() => stalled.events.some((e) => e.kind === 'hello') && live.events.some((e) => e.kind === 'hello'));
+    (stalled.ws as unknown as { _socket: { pause(): void } })._socket.pause(); // its socket buffer fills, the server's side backs up
+    const rss0 = rss();
+    live.send({ type: 'shell-run', id: 'r1', cmd: 'yes' });
+    await sleep(2500);
+    expect(rss() - rss0).toBeLessThan(200 * 1024 * 1024);
+    const frames = ofKind(live, 'shell-out');
+    expect(frames.length).toBeGreaterThan(5);
+    expect(frames.length).toBeLessThan(2500 / 100 + 5);
+    const t0 = Date.now();
+    live.send({ type: 'shell-stop', id: 'r1' });
+    await until(() => !!endOf(live), 4000);
+    expect(Date.now() - t0).toBeLessThan(2500);
+    expect(endOf(live)).toMatchObject({ stop: 'user', truncated: true });
+    // the stalled one got far fewer frames than the live one: it was skipped while behind
+    const seen = ofKind(stalled, 'shell-out').length;
+    expect(seen).toBeLessThan(frames.length);
+  }, 20000);
+});
+
+describe('/clear', () => {
+  it('stops a running command, drops its output and its place in the queue', async () => {
+    const s = await boot({ turns: [{ text: 'a' }, { text: 'b' }] });
+    const c = await connect(s.url);
+    const pidFile = path.join(tmp, 'pid');
+    c.send({ type: 'shell-run', id: 'r1', cmd: `echo old-output; sleep 60 & echo $! > ${pidFile}; wait` });
+    await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    c.send({ type: 'command', name: 'clear' });
+    await until(() => ofKind(c, 'agent').some((e) => e.e.t === 'reset'));
+    await until(() => !alive(pid));
+    await sleep(300);
+    expect(endOf(c)).toBeUndefined();
+    expect(ofKind(c, 'shell-out').filter((e) => e.id === 'r1').length).toBeLessThanOrEqual(1); // none after the reset
+    c.send({ type: 'send', id: 'u1', text: 'new conversation' });
+    await until(() => s.backend.prompts.includes('new conversation'));
+    expect(s.backend.prompts.at(-1)).toBe('new conversation');
+    c.send({ type: 'shell-run', id: 'r2', cmd: 'echo fresh' }); // a new run is free to start
+    await until(() => !!endOf(c, 'r2'));
   });
 });
 
@@ -229,8 +280,8 @@ describe('what the agent hears', () => {
     c.send({ type: 'switch', id: SB, dir: other });
     await sleep(100);
     c.send({ type: 'shell-run', id: 'r1', cmd: `touch ${path.join(tmp, 'ran')}` });
-    await until(() => errors(c).length === 1);
-    expect(errors(c)[0]!.message).toMatch(/switching/);
+    await until(() => refused(c).length === 1);
+    expect(refused(c)[0]).toMatchObject({ id: 'r1', reason: 'switching' });
     await sleep(300);
     expect(fs.existsSync(path.join(tmp, 'ran'))).toBe(false);
   });
@@ -331,4 +382,29 @@ describe('it adds no way in but the owner’s socket', () => {
     await until(() => !!endOf(c));
     expect(endOf(c)!.output).toBe('a b$HOME\n');
   });
+});
+
+describe('signals that end the server', () => {
+  const MAIN = new URL('./main.ts', import.meta.url).pathname;
+  const FAKE = new URL('../test/fixtures/hello.json', import.meta.url).pathname;
+  for (const sig of ['SIGTERM', 'SIGHUP', 'SIGQUIT', 'SIGINT'] as const) {
+    it(`${sig} stops a running command's whole group, and the server exits`, async () => {
+      const child = spawn(process.execPath, [MAIN, proj, '--port', '0', '--fake', FAKE], { env: { ...process.env, NOTA_BENE_HOME: path.join(tmp, 'home') }, stdio: ['ignore', 'pipe', 'inherit'] });
+      closers.push(async () => { child.kill('SIGKILL'); });
+      let out = '';
+      child.stdout!.on('data', (d) => { out += String(d); });
+      const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
+      await until(() => /Nota Bene: http:\/\/127\.0\.0\.1:\d+/.test(out));
+      const url = /Nota Bene: (http:\/\/127\.0\.0\.1:\d+)/.exec(out)![1]!;
+      const c = await connect(url);
+      const pidFile = path.join(tmp, `pid-${sig}`);
+      c.send({ type: 'shell-run', id: 'r1', cmd: `sleep 60 & echo $! > ${pidFile}; wait` });
+      await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
+      const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+      expect(alive(pid)).toBe(true);
+      child.kill(sig);
+      await exited;
+      await until(() => !alive(pid), 3000);
+    }, 15000);
+  }
 });

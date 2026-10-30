@@ -187,4 +187,22 @@ describe('transcriptToEvents: the `! cmd` runs in front of a message', () => {
     expect(events.map((e) => e.kind)).toEqual(['shell-start', 'shell-end']);
     expect(events[1]).toMatchObject({ output: '' });
   });
+
+  it('also for a message that carries images', () => {
+    const png = 'iVBORw0KGgo=';
+    const m = { type: 'user', uuid: 'm3', session_id: 's', parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content: [
+      { type: 'text', text: `${block('ls', 'a')}\n\nlook at this` },
+      { type: 'text', text: '[Image 1]' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+    ] } } as unknown as SessionMessage;
+    const events = transcriptToEvents([m], store());
+    expect(events.map((e) => e.kind)).toEqual(['shell-start', 'shell-end', 'user']);
+    expect(events[2]).toMatchObject({ kind: 'user', text: 'look at this', images: [{ label: '[Image 1]' }] });
+  });
+
+  it('only the exact form at the very start counts', () => {
+    const text = `see this:\n\n${block('ls', 'a')}`;
+    expect(transcriptToEvents([user('m4', text)], store())).toEqual([{ kind: 'user', id: 'm4', text, historic: true, ts: 0 }]);
+  });
 });
+

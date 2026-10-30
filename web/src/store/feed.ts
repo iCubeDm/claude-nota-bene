@@ -1,5 +1,5 @@
 import { createAction } from '@reduxjs/toolkit';
-import { SHELL_OUTPUT_CAP, type ImageRef, type ServerEvent, type ShellStop, type WireAgentEvent } from '@nota-bene/shared';
+import { SHELL_OUTPUT_CAP, cutTail, type ImageRef, type ServerEvent, type ShellStop, type WireAgentEvent } from '@nota-bene/shared';
 
 export type FeedItem =
   /** idle: the server's own /compact after a quiet stretch, shown as a line, not as the user's message */
@@ -250,12 +250,11 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'shell-start':
       return { ...s, items: [...s.items.filter((it) => !(it.kind === 'shell' && it.id === ev.id)), { kind: 'shell', id: ev.id, cmd: ev.cmd, output: '', truncated: false, running: true, code: null, ts: ev.ts }] };
     case 'shell-out': {
+      // the whole tail so far: it replaces what is shown (frames may be skipped on the way, the next one carries it all)
       const i = s.items.findIndex((it) => it.kind === 'shell' && it.id === ev.id);
       const cur = s.items[i];
       if (!cur || cur.kind !== 'shell' || !cur.running) return s; // not (or no longer) running: the end carries the whole output
-      const all = cur.output + ev.text;
-      const cut = all.length > SHELL_OUTPUT_CAP;
-      return { ...s, items: replaceAt(s.items, i, { ...cur, output: cut ? all.slice(all.length - SHELL_OUTPUT_CAP) : all, truncated: cur.truncated || cut }) };
+      return { ...s, items: replaceAt(s.items, i, { ...cur, output: cutTail(ev.text, SHELL_OUTPUT_CAP), truncated: ev.truncated }) };
     }
     case 'shell-end': {
       // the start may have been archived by a compaction (or never replayed): the end then makes the block itself
@@ -293,6 +292,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
     case 'occupied': // the conn slice (M7-15)
     case 'taken-over':
     case 'send-refused': // composer/refused.ts: restores the draft, never the feed
+    case 'shell-refused': // the same, for a `! cmd`
     case 'server-error': // a toast (store.ts), live only, never swallowed (M0 error policy)
       return s;
     default: {

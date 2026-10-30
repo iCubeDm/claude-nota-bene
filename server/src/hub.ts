@@ -1,6 +1,10 @@
 import { reduceTasks, type ServerEvent, type Task } from '@nota-bene/shared';
 
-type Sock = { send(data: string): void };
+/** `buffered`: bytes accepted but not yet written to the peer (a WebSocket's bufferedAmount) */
+type Sock = { send(data: string): void; buffered?(): number };
+
+/** A socket this far behind does not get the frames that can be skipped (`lossy`): the next one carries all they did. */
+export const LOSSY_BACKLOG = 1024 * 1024;
 
 type Unstamped<E> = E extends { ts: number } ? Omit<E, 'ts'> & { ts?: number } : E;
 export type EmitInput = Exclude<Unstamped<ServerEvent>, { kind: 'replay' }>;
@@ -18,11 +22,12 @@ export class EventHub {
   private archived = new WeakSet<ServerEvent>();
   private socks = new Set<Sock>();
 
-  emit(ev: EmitInput, o: { store?: boolean } = {}): void {
+  emit(ev: EmitInput, o: { store?: boolean; lossy?: boolean } = {}): void {
     const stamped = this.stamp(ev);
     if (o.store ?? true) this.history.push(stamped);
     const frame = JSON.stringify(stamped);
     for (const s of [...this.socks]) {
+      if (o.lossy && (s.buffered?.() ?? 0) > LOSSY_BACKLOG) continue;
       try {
         s.send(frame);
       } catch {
@@ -96,7 +101,10 @@ export class EventHub {
     const lastSession = before.findLastIndex((ev) => ev.kind === 'session');
     const answered = new Set(before.flatMap((ev) => (ev.kind === 'permission-done' ? [ev.id] : [])));
     const taskKept = runningTasks(before);
+    // a `! cmd` run still going: its block stays, so a reload has it and its Stop
+    const shellEnded = new Set(this.history.flatMap((ev) => (ev.kind === 'shell-end' ? [ev.id] : [])));
     const stays = (ev: ServerEvent, i: number) => i === lastSession
+      || (ev.kind === 'shell-start' && !shellEnded.has(ev.id))
       || (ev.kind === 'permission' && !answered.has(ev.id))
       || taskKept.has(i)
       || (o.keep?.(ev) ?? false);
@@ -116,7 +124,7 @@ export class EventHub {
   }
 
   private stamp(ev: EmitInput): ServerEvent {
-    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'send-refused' || ev.kind === 'shell-out' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode' || ev.kind === 'model' || ev.kind === 'models' || ev.kind === 'commands' || ev.kind === 'idle-compact' || ev.kind === 'hello' || ev.kind === 'occupied' || ev.kind === 'taken-over') return ev;
+    if (ev.kind === 'session' || ev.kind === 'resumed' || ev.kind === 'server-error' || ev.kind === 'send-refused' || ev.kind === 'shell-out' || ev.kind === 'shell-refused' || ev.kind === 'comments' || ev.kind === 'stats' || ev.kind === 'mode' || ev.kind === 'model' || ev.kind === 'models' || ev.kind === 'commands' || ev.kind === 'idle-compact' || ev.kind === 'hello' || ev.kind === 'occupied' || ev.kind === 'taken-over') return ev;
     return { ...ev, ts: ev.ts ?? Date.now() } as ServerEvent;
   }
 }

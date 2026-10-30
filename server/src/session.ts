@@ -183,7 +183,8 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     turns.reset();
     hub.reset();
     titles.reset();
-    shell.dropQueue(); // a new conversation: what the old one never heard is not its business
+    shell.stopAll(); // a run in progress belongs to the conversation that was cleared: stopped, its output dropped
+    shell.dropQueue(); // and what the old one never heard is not the new one's business
     const next = who.reset(e.newId);
     hub.emit({ kind: 'agent', e }, { store: false });
     who.announce();
@@ -315,7 +316,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       const command = trackedCommand(text, cmds.commands);
       turns.sent(id, command ? { command } : {});
       hub.emit({ kind: 'user', id, text, ...(force ? { force: true } : {}), ...(refs.length ? { images: refs } : {}) });
-      queue.push({ id, text: shell.take(text), force, images: payload }); // the feed shows `text`; the agent also hears of the `! cmd` runs since its last message // handed over in order, after a forced send's interrupt
+      queue.push({ id, text, force, images: payload, lead: (t) => shell.takeFor(t) }); // the feed shows `text`; the agent also hears of the `! cmd` runs since its last message, taken as it is handed over // handed over in order, after a forced send's interrupt
       return null;
     },
     refusal: refused,

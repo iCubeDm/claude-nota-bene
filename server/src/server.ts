@@ -241,7 +241,7 @@ export async function startServer(o: {
 
     // the owner's wiring: replay (via the hub), state frames, hello. Returns nothing; the message handler is shared
     const attachOwner = (ws: WebSocket, tab: string | null) => {
-      const hubDetach = hub.attach({ send: (d) => ws.send(d) });
+      const hubDetach = hub.attach({ send: (d) => ws.send(d), buffered: () => ws.bufferedAmount });
       let detached = false;
       const detach = () => { if (!detached) { detached = true; hubDetach(); } };
       detachers.set(ws, detach);
@@ -287,7 +287,7 @@ export async function startServer(o: {
       // a `! cmd` run in progress: the replay holds its start, this brings the output printed so far (live chunks follow)
       try {
         const snap = manager.shellSnapshot();
-        if (snap) ws.send(JSON.stringify({ kind: 'shell-out', id: snap.id, text: snap.text }));
+        if (snap) ws.send(JSON.stringify({ kind: 'shell-out', id: snap.id, text: snap.text, truncated: snap.truncated }));
       } catch (e) {
         reportError(hub, 'shell', e);
       }
@@ -398,9 +398,9 @@ export async function startServer(o: {
             );
             break;
           case 'shell-run': {
+            // only the asking socket hears of a refusal (not stored): the page puts the draft back
             const why = manager.shellRun(msg.id, msg.cmd);
-            if (why === 'running') reportError(hub, 'shell', new Error('a command is already running'));
-            else if (why === 'switching') reportError(hub, 'shell', new Error('the session is switching; the command was not run'));
+            if (why === 'running' || why === 'switching') ws.send(JSON.stringify({ kind: 'shell-refused', id: msg.id, reason: why }));
             break;
           }
           case 'shell-stop':

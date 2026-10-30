@@ -40,7 +40,7 @@ In any project, inside Claude Code:
 
 The window runs as a background task of that Claude Code session: it shows in the task list (its output is the window's log), stop it there, and it stops when the session ends.
 
-In the composer, a draft that starts with `!` is a shell command, as in the Claude Code terminal: `! git status` and Enter runs it in the project folder and shows the output as a block in the chat (Stop ends it; 10 minutes at most; one at a time; it works while the agent is busy). The agent is told of it with your next message. There is no terminal behind it, so an interactive command (an editor, a pager, `git rebase -i`, a password prompt) gets an empty stdin and ends by itself, usually with an error; run those in a real terminal. To send a message that begins with `!`, put a space before it.
+In the composer, a draft that starts with `!` is a shell command, as in the Claude Code terminal: `! git status` and Enter runs it in the project folder and shows the output as a block in the chat (Stop ends it; 10 minutes at most; one at a time; it works while the agent is busy). The agent is told of it with your next message. There is no terminal behind it, so an interactive command (an editor, a pager, `git rebase -i`, a password prompt) gets an empty stdin and ends by itself, usually with an error; run those in a real terminal. To send a message that begins with `!`, put a space before it; a draft of several lines is always a message.
 
 Without the skill:
 

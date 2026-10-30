@@ -22,7 +22,11 @@ export function highlight(text: string, q: string): ReactNode[] {
  * `@path` mention autocomplete for any textarea (composer, comment popup). Same key contract as ShortcodePicker:
  * while open, keys are taken at WINDOW capture so Enter/Tab/Esc never reach the host's own handlers.
  */
-export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElement | null> }) {
+/** A path as a shell word: as it is when it is safe, else in single quotes. */
+export const shellWord = (p: string): string => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`);
+
+/** `shell`: the field holds a `! cmd` draft right now; the pick is then the plain path (a shell word), not an `@` mention the shell would not know. */
+export function MentionPicker({ target, shell }: { target: RefObject<HTMLTextAreaElement | null>; shell?: () => boolean }) {
   const t = useT();
   const [state, setState] = useState<Open | null>(null);
   const live = useRef<Open | null>(null);
@@ -74,7 +78,7 @@ export function MentionPicker({ target }: { target: RefObject<HTMLTextAreaElemen
     const onSel = () => { if (document.activeElement === ta && live.current) update(); };
     const insert = (p: string, start: number) => {
       const end = ta.selectionStart;
-      const ref = /\s/.test(p) ? `@"${p}"` : `@${p}`;
+      const ref = shell?.() ? shellWord(p) : /\s/.test(p) ? `@"${p}"` : `@${p}`;
       const tail = p.endsWith('/') ? '' : ' '; // a folder keeps the picker going for its files
       close();
       // an input event follows, which re-queries for a folder and closes for a file

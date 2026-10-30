@@ -1,12 +1,12 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { ClientMessage } from '@nota-bene/shared';
+import { PROTOCOL, type ClientMessage } from '@nota-bene/shared';
 import { TooltipProvider } from '@/components/ui/tooltip.tsx';
 import { CommentPopup } from '@/comments/CommentPopup.tsx';
 import type { PendingSelection } from '@/comments/SelectionButton.tsx';
 import { setLang } from '@/i18n/index.ts';
-import { makeStore } from '@/store/store.ts';
+import { makeStore, serverEvent } from '@/store/store.ts';
 import { Composer } from './Composer.tsx';
 
 type Resolver = { q: string; resolve: (v: string[]) => void; signal?: AbortSignal | null };
@@ -175,4 +175,28 @@ it('Shift+Tab closes the picker without picking, so the composer can cycle the m
   fireEvent.keyDown(box, { key: 'Tab', shiftKey: true });
   expect(screen.queryByRole('listbox')).toBeNull();
   expect(box.value).toBe('@a');
+});
+
+it('in a ! command the pick is the plain path, quoted only when the shell needs it', async () => {
+  const { type, store, box } = setup();
+  act(() => void store.dispatch(serverEvent({ kind: 'hello', protocol: PROTOCOL })));
+  type('! cat @al');
+  await flush();
+  await answer(0, ['docs/alpha.md', 'my notes/it\'s.md']);
+  fireEvent.keyDown(box, { key: 'Enter' });
+  expect(box.value).toBe('! cat docs/alpha.md ');
+  type('! cat @my');
+  await flush();
+  await answer(1, ['my notes/it\'s.md']);
+  fireEvent.keyDown(box, { key: 'Enter' });
+  expect(box.value).toBe("! cat 'my notes/it'\\''s.md' ");
+});
+
+it('against a server without shell mode ! is plain text and the pick stays an @ mention', async () => {
+  const { type, box } = setup();
+  type('! cat @al');
+  await flush();
+  await answer(0, ['docs/alpha.md']);
+  fireEvent.keyDown(box, { key: 'Enter' });
+  expect(box.value).toBe('! cat @docs/alpha.md ');
 });

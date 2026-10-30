@@ -128,8 +128,9 @@ async function main(): Promise<void> {
       () => process.exit(1),
     );
   };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
+  // SIGHUP (the terminal closed) and SIGQUIT end the process by default without running anything: stop through close(), so a
+  // `! cmd` run's process group goes with us
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'] as const) process.on(sig, stop);
   watchLauncher(process.env.NOTA_BENE_LAUNCHER_PID, stop);
 }
 

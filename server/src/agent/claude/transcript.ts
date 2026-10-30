@@ -60,14 +60,16 @@ export function transcriptToEvents(msgs: SessionMessage[], attachments: Attachme
         }
       });
       let text = blocks.filter((b, i) => b.type === 'text' && !labels.has(i)).map((b) => b.text ?? '').join('\n');
-      if (!own && !images.length) {
-        // the `! cmd` runs the server put in front of this message (session/shellText.ts bashBlock): blocks again, then the message itself
+      // the `! cmd` runs the server put in front of this message (session/shellText.ts bashBlock), images or not: blocks again, then the message itself
+      if (!own) {
         const bash = splitBashBlocks(text);
         bash.runs.forEach((r, i) => {
           const id = `${sm.uuid}:sh${i}`;
           out.push({ kind: 'shell-start', id, cmd: r.cmd, ts: TS }, { kind: 'shell-end', id, cmd: r.cmd, output: r.output, truncated: false, code: null, ts: TS });
         });
         text = bash.rest;
+      }
+      if (!own && !images.length) {
         if (CAVEAT.test(text)) continue;
         const printed = COMMAND_OUT.exec(text);
         if (printed) {

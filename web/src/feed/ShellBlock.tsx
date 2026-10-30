@@ -27,14 +27,14 @@ export function ShellBlock({ item }: { item: Extract<FeedItem, { kind: 'shell' }
     <div data-kind="shell" data-testid="shell-block" data-running={item.running || undefined} aria-label={t('shellBlock')} className="my-2.5 overflow-hidden rounded-lg border border-border-soft bg-muted/30">
       <div className="flex items-start gap-2 px-3 py-1.5 font-mono text-[12px]">
         <span aria-hidden className="select-none text-nb-accent">$</span>
-        <span data-testid="shell-cmd" className="min-w-0 flex-1 whitespace-pre-wrap break-all text-foreground">{item.cmd}</span>
+        <span data-testid="shell-cmd" className="min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground">{item.cmd}</span>
         {item.running ? (
           <>
             <span className="shrink-0 animate-pulse text-[11px] text-nb-accent">● {t('shellRunning')}</span>
             <Button
               type="button" variant="ghost" size="sm" disabled={stopping} title={t('shellStopTip')}
               className="-my-1 h-6 shrink-0 px-2 text-[11px] text-destructive hover:bg-destructive/15"
-              onClick={() => { setStopping(true); dispatch(stopShell(item.id)); }}
+              onClick={() => { setStopping(true); if (!dispatch(stopShell(item.id))) setStopping(false); }}
             >
               {t('shellStop')}
             </Button>

@@ -12,6 +12,34 @@ function sock() {
 
 afterEach(() => vi.restoreAllMocks());
 
+describe('EventHub: lossy frames and a running ! command', () => {
+  it('a lossy frame skips a socket that is far behind, and only that one', () => {
+    const hub = new EventHub();
+    const fast = sock();
+    const slow = { ...sock(), buffered: () => 5 * 1024 * 1024 };
+    hub.attach(fast);
+    hub.attach(slow);
+    hub.emit({ kind: 'shell-out', id: 'r', text: 'x', truncated: false }, { store: false, lossy: true });
+    hub.emit({ kind: 'shell-out', id: 'r', text: 'y', truncated: false }, { store: false });
+    expect(fast.frames).toHaveLength(3); // replay + both
+    expect(slow.frames).toHaveLength(2); // replay + the one that was not lossy
+  });
+
+  it('a compaction keeps the start of a run that has not ended, and lets an ended run go', () => {
+    const hub = new EventHub();
+    hub.emit({ kind: 'shell-start', id: 'live', cmd: 'sleep 9' });
+    hub.emit({ kind: 'shell-start', id: 'done', cmd: 'ls' });
+    hub.emit({ kind: 'shell-end', id: 'done', cmd: 'ls', output: '', truncated: false, code: 0 });
+    hub.emit({ kind: 'agent', e: { t: 'compacted', preTokens: 1 } });
+    hub.cut({ archive: () => 1 });
+    const s = sock();
+    hub.attach(s);
+    const kept = (JSON.parse(s.frames[0]!) as { events: ServerEvent[] }).events;
+    expect(kept.filter((e) => e.kind === 'shell-start').map((e) => (e as { id: string }).id)).toEqual(['live']);
+    expect(kept.some((e) => e.kind === 'shell-end')).toBe(false);
+  });
+});
+
 describe('EventHub', () => {
   it('late subscriber gets a replay of stored events', () => {
     const hub = new EventHub();

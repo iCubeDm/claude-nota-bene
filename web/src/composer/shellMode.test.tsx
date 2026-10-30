@@ -61,12 +61,56 @@ it('Enter runs the command, not a message: shell-run with the text after the !, 
   expect(box).toHaveFocus();
 });
 
-it('the space after ! is optional, and a multi-line command goes whole', async () => {
+it('the space after ! is optional', async () => {
   const { sent, box } = setup();
   await userEvent.type(box, '!echo hi{Enter}');
   expect(sent[0]).toMatchObject({ cmd: 'echo hi' });
-  await userEvent.type(box, '!for i in 1 2; do{Shift>}{Enter}{/Shift}echo $i{Shift>}{Enter}{/Shift}done{Enter}');
-  expect(sent[1]).toMatchObject({ cmd: 'for i in 1 2; do\necho $i\ndone' });
+});
+
+it('a draft of several lines is a message, not a command: a pasted script must not run on one Enter', async () => {
+  const { sent, box } = setup();
+  await userEvent.type(box, '!rm -rf build{Shift>}{Enter}{/Shift}echo done');
+  expect(screen.queryByTestId('shell-cue')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+  await userEvent.keyboard('{Enter}');
+  expect(sent).toMatchObject([{ type: 'send', text: '!rm -rf build\necho done' }]);
+});
+
+it('![ is a markdown image or link, a message', async () => {
+  const { sent, box } = setup();
+  await userEvent.type(box, '![[alt](pic.png)');
+  expect(screen.queryByTestId('shell-cue')).toBeNull();
+  await userEvent.keyboard('{Enter}');
+  expect(sent).toMatchObject([{ type: 'send', text: '![alt](pic.png)' }]);
+});
+
+it('a refusal from the server (a second command raced, a switch began) puts the draft back', async () => {
+  const { sent, box, feed } = setup();
+  await userEvent.type(box, '!make test{Enter}');
+  const id = (sent[0] as Extract<ClientMessage, { type: 'shell-run' }>).id;
+  expect(box.value).toBe('');
+  feed({ kind: 'shell-refused', id, reason: 'running' });
+  expect(box.value).toBe('!make test');
+  expect(titles()).toContain('Not run: a command is still running. Stop it or wait for it.');
+});
+
+it('when the user has typed something new the refused command rides in the toast instead', async () => {
+  const { sent, box, feed } = setup();
+  await userEvent.type(box, '!make test{Enter}');
+  const id = (sent[0] as Extract<ClientMessage, { type: 'shell-run' }>).id;
+  await userEvent.type(box, 'next thing');
+  feed({ kind: 'shell-refused', id, reason: 'switching' });
+  expect(box.value).toBe('next thing');
+  expect(getToasts().find((x) => x.title.startsWith('Not run: a session switch'))?.msg).toBe('!make test');
+});
+
+it('a started command is not restored by a later refusal of something else', async () => {
+  const { sent, box, feed } = setup();
+  await userEvent.type(box, '!ls{Enter}');
+  const id = (sent[0] as Extract<ClientMessage, { type: 'shell-run' }>).id;
+  feed({ kind: 'shell-start', id, cmd: 'ls', ts: 1 });
+  feed({ kind: 'shell-refused', id, reason: 'running' });
+  expect(box.value).toBe('');
 });
 
 it('the Run button runs it too', async () => {

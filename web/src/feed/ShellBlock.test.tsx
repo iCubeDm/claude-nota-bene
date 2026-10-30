@@ -24,7 +24,7 @@ const end = (o: Partial<Extract<ServerEvent, { kind: 'shell-end' }>> = {}): Serv
 it('a running command shows the command, the output so far and Stop; Stop sends shell-stop once', async () => {
   const { sent, feed } = setup();
   feed(start());
-  feed({ kind: 'shell-out', id: 'r1', text: 'line 1\n' });
+  feed({ kind: 'shell-out', id: 'r1', text: 'line 1\n', truncated: false });
   expect(screen.getByTestId('shell-cmd')).toHaveTextContent('npm test');
   expect(screen.getByTestId('shell-output')).toHaveTextContent('line 1');
   expect(screen.getByText(/running…/)).toBeInTheDocument();
@@ -32,6 +32,20 @@ it('a running command shows the command, the output so far and Stop; Stop sends 
   await userEvent.click(stop);
   expect(sent).toEqual([{ type: 'shell-stop', id: 'r1' }]);
   expect(stop).toBeDisabled(); // asked: no second Stop
+});
+
+it('Stop is usable again when the stop did not go out (offline)', async () => {
+  const sent: ClientMessage[] = [];
+  let ok = false;
+  const store = makeStore({ url: 'ws://x', connect: ((_u: unknown, _e: unknown, onState: (s: 'open') => void) => (onState('open'), { send: (m: ClientMessage) => (sent.push(m), ok), close() {} })) as never });
+  act(() => void store.dispatch(serverEvent({ kind: 'shell-start', id: 'r1', cmd: 'sleep 9', ts: 1 })));
+  render(<Provider store={store}><Feed /></Provider>);
+  await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+  ok = true;
+  await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  expect(sent).toHaveLength(2);
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
 });
 
 it('a finished command shows the exit code; the Stop button is gone', () => {

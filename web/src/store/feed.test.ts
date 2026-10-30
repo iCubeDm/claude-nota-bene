@@ -449,11 +449,11 @@ describe('a page newer than its server (I3)', () => {
 
 describe('a ! command block (protocol 11)', () => {
   const shellStart = (id = 'r1', cmd = 'ls'): ServerEvent => ({ kind: 'shell-start', id, cmd, ts: 7 });
-  const out = (text: string, id = 'r1'): ServerEvent => ({ kind: 'shell-out', id, text });
+  const out = (text: string, id = 'r1', truncated = false): ServerEvent => ({ kind: 'shell-out', id, text, truncated });
   const end = (extra: Partial<Extract<ServerEvent, { kind: 'shell-end' }>> = {}): ServerEvent => ({ kind: 'shell-end', id: 'r1', cmd: 'ls', output: 'a\nb\n', truncated: false, code: 0, ts: 9, ...extra });
 
   test('a run streams into one block and its end replaces the output; the turn state is untouched', () => {
-    const mid = fold([shellStart(), out('a\n'), out('b\n')]);
+    const mid = fold([shellStart(), out('a\n'), out('a\nb\n')]); // each frame is the whole tail so far
     expect(mid.items).toEqual([{ kind: 'shell', id: 'r1', cmd: 'ls', output: 'a\nb\n', truncated: false, running: true, code: null, ts: 7 }]);
     expect(mid.busy).toBe(false);
     const done = reduce(mid, end());
@@ -462,12 +462,14 @@ describe('a ! command block (protocol 11)', () => {
     expect(done.waiting).toEqual([]);
   });
 
-  test('the live output keeps the last 64 K characters and marks the cut', () => {
-    const s = fold([shellStart(), out('x'.repeat(SHELL_OUTPUT_CAP)), out('tail')]);
+  test('a frame replaces the output, and carries the cut mark', () => {
+    const s = fold([shellStart(), out('x'.repeat(SHELL_OUTPUT_CAP) + 'tail', 'r1', true)]);
     const it = s.items[0]!;
     expect(it.kind === 'shell' && it.output.length).toBe(SHELL_OUTPUT_CAP);
     expect(it.kind === 'shell' && it.output.endsWith('xtail')).toBe(true);
     expect(it.kind === 'shell' && it.truncated).toBe(true);
+    const later = reduce(s, out('short'));
+    expect(later.items[0]).toMatchObject({ output: 'short', truncated: false });
   });
 
   test('output of a run that is not on screen, or already ended, changes nothing', () => {
@@ -484,8 +486,8 @@ describe('a ! command block (protocol 11)', () => {
 
   test('a replay rebuilds the block; the catch-up output that follows continues it', () => {
     const r = reduce(emptyFeed, { kind: 'replay', events: [shellStart()] });
-    const s = fold([out('so far\n'), out('more\n')], r);
-    expect(s.items).toMatchObject([{ kind: 'shell', running: true, output: 'so far\nmore\n' }]);
+    const s = fold([out('so far\n')], r);
+    expect(s.items).toMatchObject([{ kind: 'shell', running: true, output: 'so far\n' }]);
   });
 
   test('a start of the same id replaces the old block instead of doubling it', () => {

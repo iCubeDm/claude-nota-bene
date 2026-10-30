@@ -38,7 +38,9 @@ export function Composer() {
   // mid-switch the server refuses sends: Send is off (Enter too) and the draft simply waits for the new session
   const switching = useAppSelector(selectSwitching);
   const suggestion = useAppSelector(selectSuggestion);
-  const shellMode = useAppSelector(selectShellMode); // a draft that starts with `!` is a shell command: Enter runs it
+  const shellMode = useAppSelector(selectShellMode); // a one-line draft that starts with `!` is a shell command: Enter runs it
+  const shellModeRef = useRef(shellMode);
+  shellModeRef.current = shellMode;
   const showSug = !!suggestion && !text && !busy && !switching;
   const [failed, setFailed] = useState(false);
   const [note, setNote] = useState('');
@@ -191,7 +193,7 @@ export function Composer() {
           </span>
         )}
         </div>
-        <MentionPicker target={ref} />
+        <MentionPicker target={ref} shell={() => shellModeRef.current} />
         <SlashPicker target={ref} />
         <ShortcodePicker target={ref} />
         <span className="inline-flex" title={switching ? t('switching') : building ? t('buildingImage') : uploading ? t('uploadWait') : undefined}>
