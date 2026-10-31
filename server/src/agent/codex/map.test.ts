@@ -34,7 +34,7 @@ describe('Codex event normalization', () => {
   it('does not invent compaction token counts or duplicate a boundary', () => {
     const mapper = new CodexMapper();
     expect(mapper.item({ type: 'contextCompaction', id: 'compact' }, false)).toEqual([{ t: 'compacting' }]);
-    expect(mapper.item({ type: 'contextCompaction', id: 'compact' }, true)).toEqual([{ t: 'compacted' }]);
+    expect(mapper.item({ type: 'contextCompaction', id: 'compact' }, true)).toEqual([{ t: 'compacted', boundaryId: 'codex-compact' }]);
     expect(mapper.notification('thread/compacted', {})).toEqual([]);
   });
 
@@ -46,4 +46,22 @@ describe('Codex event normalization', () => {
     ]);
     expect(itemId('../../not-a-path')).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
   });
+});
+
+it('a live spawn acquires final child metadata on the same tool and a completed child can restart', () => {
+  const mapper = new CodexMapper();
+  mapper.item({ type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', prompt: 'Investigate', receiverThreadIds: [] }, false);
+  const end = mapper.item({ type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', prompt: 'Investigate', receiverThreadIds: ['child'], agentsStates: { child: { status: 'running' } } }, true);
+  expect(end).toContainEqual(expect.objectContaining({ t: 'tool-update', id: 'codex-spawn', toolKind: 'agent', childSessionId: 'child' }));
+  mapper.item({ type: 'collabAgentToolCall', id: 'wait', tool: 'wait', receiverThreadIds: ['child'], agentsStates: { child: { status: 'completed' } } }, true);
+  expect(mapper.item({ type: 'collabAgentToolCall', id: 'resume', tool: 'sendInput', receiverThreadIds: ['child'], agentsStates: { child: { status: 'running' } } }, true)).toContainEqual(expect.objectContaining({ t: 'task', id: 'codex-child', phase: 'started' }));
+});
+
+it('live and replay keep the same collab tool input text despite child discovery happening at completion', () => {
+  const start = { type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', prompt: 'Investigate', receiverThreadIds: [] };
+  const end = { ...start, receiverThreadIds: ['child'] };
+  const live = new CodexMapper().item(start, false).find((e) => e.t === 'tool-call');
+  const replay = new CodexMapper().item(end, true).find((e) => e.t === 'tool-call');
+  expect(live?.t === 'tool-call' && live.input).toEqual(replay?.t === 'tool-call' && replay.input);
+  expect(live?.t === 'tool-call' && live.id).toEqual(replay?.t === 'tool-call' && replay.id);
 });

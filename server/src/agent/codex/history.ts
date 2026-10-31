@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import type { HistoryArchive } from '../../archive.ts';
 import path from 'node:path';
 import type { AgentEvent, ImageRef, ServerEvent } from '@nota-bene/shared';
 import { isImageType, MAX_ATTACHMENT_BYTES, type AttachmentStore } from '../../attachments.ts';
@@ -17,6 +18,7 @@ export async function loadCodexHistory(rpc: HistoryRpc, threadId: string, attach
     if (!Array.isArray(page.data)) throw new Error('Codex history returned an invalid page');
     for (const rawTurn of page.data) {
       const turn = record(rawTurn);
+      mapper.notification('turn/started', { turn });
       // Some runtimes return only summary items unless asked for full; never mistake that for full history.
       if (turn.itemsView === 'notLoaded' || turn.itemsView === 'summary') throw new Error('Codex did not return full history items');
       for (const rawItem of array(turn.items)) {
@@ -67,4 +69,31 @@ export async function loadCodexHistory(rpc: HistoryRpc, threadId: string, attach
     seen.add(next);
     cursor = next;
   }
+}
+
+/** Native history retains old turns; the app replay is only the latest segment, with older anchors in /history. */
+export function restoreCodexReplay(archive: HistoryArchive, id: string, events: ServerEvent[], onError?: (e: unknown) => void): ServerEvent[] {
+  const at = events.findLastIndex((e) => e.kind === 'agent' && e.e.t === 'compacted');
+  if (at <= 0) return events;
+  try {
+    const key = (e: ServerEvent): string => {
+      if (e.kind === 'user') return `user:${e.id}`;
+      if (e.kind === 'agent') {
+        const a = e.e;
+        if ('id' in a) return `${a.t}:${a.id}:${'phase' in a ? a.phase : ''}`;
+        if (a.t === 'compacted' && a.boundaryId) return `compacted:${a.boundaryId}`;
+        return JSON.stringify(a);
+      }
+      const { ts: _ts, ...rest } = e as ServerEvent & { ts?: number }; return JSON.stringify(rest);
+    };
+    const stored = archive.events(id), seen = new Set(stored.map(key));
+    let unnamed = stored.filter((e) => e.kind === 'agent' && e.e.t === 'compacted' && !e.e.boundaryId).length;
+    const missing = events.slice(0, at).filter((e) => {
+      if (e.kind === 'agent' && e.e.t === 'compacted' && e.e.boundaryId && unnamed > 0) { unnamed--; seen.add(key(e)); return false; }
+      const k = key(e); if (seen.has(k)) return false; seen.add(k); return true;
+    });
+    // Do not hide older items until their durable archive exists.
+    if (missing.length) archive.append(id, missing);
+    return events.slice(at);
+  } catch (error) { onError?.(error); return events; }
 }

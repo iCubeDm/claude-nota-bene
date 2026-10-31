@@ -49,3 +49,36 @@ it('replays native local image inputs without following a symlink or importing a
     expect(errors).toHaveLength(2);
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });
+
+it('preserves each native compaction boundary across turns', async () => {
+  const rpc = { async request() { return { data: [1, 2].map((n) => ({ id: `t${n}`, items: [{ type: 'contextCompaction', id: `c${n}` }] })) }; } };
+  expect((await loadCodexHistory(rpc, 't', new AttachmentStore({ dir: '/unused' })))).toHaveLength(2);
+});
+
+it('reconciles full native history with existing app archives idempotently and keeps current replay bounded', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-native-archive-'));
+  const { HistoryArchive } = await import('../../archive.ts');
+  const { restoreCodexReplay } = await import('./history.ts');
+  const archive = new HistoryArchive({ dir: temp }); const id = '11111111-0000-4000-8000-000000000001';
+  const message = (name: string) => ({ kind: 'agent' as const, ts: 0, e: { t: 'message' as const, id: name, text: name } });
+  const events = [message('before'), { kind: 'agent' as const, ts: 0, e: { t: 'compacted' as const, boundaryId: 'c1' } }, message('middle'), { kind: 'agent' as const, ts: 0, e: { t: 'compacted' as const, boundaryId: 'c2' } }, message('after')];
+  archive.append(id, [{ ...message('before'), ts: 100 }]);
+  try {
+    expect(restoreCodexReplay(archive, id, events)).toEqual(events.slice(3));
+    expect(archive.count(id)).toBe(2);
+    restoreCodexReplay(archive, id, events); expect(archive.count(id)).toBe(2);
+    const all = [archive.segment(id, 1)!, archive.segment(id, 2)!].flat();
+    expect(all.filter((e) => e.kind === 'agent' && e.e.t === 'message' && e.e.id === 'before')).toHaveLength(1);
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});
+
+it('keeps full native history visible when the app archive cannot be written', async () => {
+  const { restoreCodexReplay } = await import('./history.ts');
+  const { HistoryArchive } = await import('../../archive.ts');
+  const archive = new HistoryArchive({ dir: '/unused' });
+  archive.events = () => []; archive.append = () => { throw new Error('disk full'); };
+  const events = [{ kind: 'agent' as const, ts: 0, e: { t: 'message' as const, id: 'before', text: 'before' } }, { kind: 'agent' as const, ts: 0, e: { t: 'compacted' as const, boundaryId: 'b' } }];
+  const errors: unknown[] = [];
+  expect(restoreCodexReplay(archive, 'id', events, (e) => errors.push(e))).toEqual(events);
+  expect(errors).toHaveLength(1);
+});

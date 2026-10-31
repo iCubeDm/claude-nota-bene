@@ -96,3 +96,10 @@ it('structured answers use original advertised choices, cancel on generation cha
   expect(await old).toBeNull();
   b.answer(oldId, true, { choice: 'yes' }); expect(b.pending()).toBe(0);
 });
+
+it('a native numeric decline choice is announced as denied', async () => {
+  const { b, events, gen } = make();
+  const p = b.interact(gen, 0)({ title: 'Command', choices: [{ id: '0', label: 'accept', allow: true }, { id: '1', label: 'decline', allow: false }] }, {}, new AbortController().signal);
+  const id = (events[0] as { id: string }).id; b.answer(id, true, { choice: '1' }); await p;
+  expect(events.at(-1)).toMatchObject({ kind: 'permission-done', allow: false });
+});

@@ -179,7 +179,7 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
       const i = s.items.findIndex((it) => it.kind === 'tool' && it.id === e.id);
       const cur = s.items[i];
       if (!cur || cur.kind !== 'tool') return s;
-      return { ...s, items: replaceAt(s.items, i, { ...cur, result: { text: e.text, isError: e.isError } }) };
+      return { ...s, items: replaceAt(s.items, i, { ...cur, ...(e.toolKind ? { toolKind: e.toolKind } : {}), ...(e.childSessionId ? { childSessionId: e.childSessionId } : {}), result: { text: e.text, isError: e.isError } }) };
     }
     case 'turn-end': {
       // a forced send interrupts the running turn: whatever ends it shows as interrupted (R-M7-14), except a failure

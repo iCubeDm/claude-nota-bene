@@ -423,3 +423,22 @@ Full feature parity is **not yet achieved**. Current explicit gates:
 
 These are Codex gaps; Claude retains its existing controls. Before considering the
 backends merged, decide supported UX for those workflows or wait for native APIs.
+
+Development checks for this integration:
+
+```sh
+npx tsc -b
+npm test
+npm run build -w web
+npm run e2e
+npm run e2e:codex
+NOTA_BENE_NATIVE_TEST=1 npx vitest run server/src/agent/codex/native.test.ts
+```
+
+The opt-in native contract uses the installed Codex binary with a temporary
+CODEX_HOME, project and local Responses endpoint. It verifies skill discovery,
+streaming, actual command execution, history from another app-server, fork and
+termination of a running terminal when its owning session closes. It makes no
+paid model calls. Native ChatGPT account discovery was checked separately without
+reading credentials; the existing Claude browser suite also remains part of the
+acceptance run.

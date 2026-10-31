@@ -29,7 +29,7 @@ export function policy(mode: Mode, cwd: string, turn = false): Record<string, un
     : { sandbox }) };
 }
 export function models(value: unknown): ModelOption[] {
-  return array(record(value).data).map(record).filter((m) => !m.hidden).map((m) => ({ value: string(m.model) || string(m.id), name: string(m.displayName) || string(m.id), description: string(m.description), efforts: array(m.supportedReasoningEfforts).map((v) => record(v).reasoningEffort).filter((e): e is EffortLevel => EFFORT_LEVELS.includes(e as EffortLevel)) }));
+  return array(record(value).data).map(record).filter((m) => !m.hidden).map((m) => ({ value: string(m.model) || string(m.id), name: string(m.displayName) || string(m.id), description: string(m.description), ...(EFFORT_LEVELS.includes(m.defaultReasoningEffort as EffortLevel) ? { defaultEffort: m.defaultReasoningEffort as EffortLevel } : {}), efforts: array(m.supportedReasoningEfforts).map((v) => record(v).reasoningEffort).filter((e): e is EffortLevel => EFFORT_LEVELS.includes(e as EffortLevel)) }));
 }
 export function limits(value: unknown): NonNullable<Stats['windows']> {
   const r = record(record(value).rateLimits ?? value);
@@ -45,7 +45,7 @@ export async function answerNative(request: RpcRequest, signal: AbortSignal, o: 
   if (/item\/(commandExecution|fileChange)\/requestApproval$/.test(request.method)) {
     const decisions = array(p.availableDecisions).length ? array(p.availableDecisions) : ['accept', 'decline'];
     // Exact advertised decisions, including scoped amendments, stay on the server.
-    const choices = decisions.map((d, i) => ({ id: String(i), label: typeof d === 'string' ? d : JSON.stringify(d) }));
+    const choices = decisions.map((d, i) => ({ id: String(i), label: typeof d === 'string' ? d : JSON.stringify(d), allow: d !== 'decline' && d !== 'cancel' }));
     if (o.interact) {
       const a = await interact({ title: string(p.reason) || string(p.command) || 'Codex approval', choices });
       const index = a && choices.findIndex((c) => c.id === a.choice);

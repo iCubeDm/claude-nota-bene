@@ -55,3 +55,11 @@ describe('Codex JSON-RPC transport', () => {
     await client.close();
   });
 });
+
+it('an aborted call does not wait behind a hung initialization', async () => {
+  const client = rpc({ command: process.execPath, args: ['-e', 'process.stdin.resume()'] });
+  const controller = new AbortController();
+  const result = client.request('echo', {}, { signal: controller.signal }).then(() => 'ok', (e: Error) => e.message);
+  controller.abort();
+  expect(await Promise.race([result, new Promise((r) => setTimeout(() => r('still waiting'), 30))])).toContain('aborted');
+});

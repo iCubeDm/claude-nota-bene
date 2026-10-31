@@ -20,8 +20,8 @@ export function ModePill() {
   const switching = useAppSelector(selectSwitching); // the switch announces the new session's mode
   const caps = useAppSelector(selectCapabilitiesKnown);
   const modes = caps?.modes ?? [];
-  const label = (m: Mode) => caps?.modeDescriptors?.find((d) => d.id === m)?.name ?? t(`mode_${m}`);
-  const description = (m: Mode) => caps?.modeDescriptors?.find((d) => d.id === m)?.description ?? t(`mode_${m}_desc`);
+  const label = (m: Mode) => (caps?.provider !== 'codex' ? caps?.modeDescriptors?.find((d) => d.id === m)?.name : undefined) ?? t(`mode_${m}`);
+  const description = (m: Mode) => (caps?.provider !== 'codex' ? caps?.modeDescriptors?.find((d) => d.id === m)?.description : undefined) ?? t(`mode_${m}_desc`);
   // unknown until the server says; and with fewer than two modes there is nothing to choose
   if (!mode || modes.length < 2) return null;
   return (

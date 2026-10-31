@@ -9,6 +9,8 @@ export function PermissionCard({ item }: { item: Extract<FeedItem, { kind: 'perm
   const [values, setValues] = useState<Record<string, string>>({});
   const prompt = item.prompt;
   useEffect(() => { if (item.answer !== undefined) setValues({}); }, [item.answer]);
+  const choiceLabel = (label: string) => ({ accept: t('allow'), decline: t('deny'), cancel: t('cancel'), acceptForSession: t('allowSession'), 'Allow for this turn': t('allowTurn'), 'Allow for this session': t('allowSession'), 'Deny': t('deny'), 'Cancel': t('cancel'), 'Accept': t('allow'), 'Decline': t('deny'), 'Send answers': t('sendAnswers') })[label] ?? label;
+  const title = prompt?.title === 'Additional Codex permissions' ? t('codexPermissions') : prompt?.title === 'MCP request' ? t('nativeMcpRequest') : prompt?.title;
   const resolved = item.answer !== undefined;
   const body = String(item.input.command ?? item.input.file_path ?? JSON.stringify(item.input, null, 2));
   const btn = 'rounded-lg border border-transparent px-3 py-1 text-[13px] font-medium';
@@ -20,10 +22,10 @@ export function PermissionCard({ item }: { item: Extract<FeedItem, { kind: 'perm
         (resolved || item.archived ? 'border-border-soft opacity-60' : 'border-warn')
       }
     >
-      <b>{prompt?.title ?? t('allowQ', item.toolName)}</b>
+      <b>{title ?? t('allowQ', item.toolName)}</b>
       <pre className="my-1.5 max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-xs">{body}</pre>
       {resolved ? (
-        <span>{t(item.answer ? 'allowed' : 'denied')}</span>
+        <span>{t(item.answer ? prompt?.fields ? 'answerSent' : 'allowed' : 'denied')}</span>
       ) : item.archived ? (
         <span data-archived>{t('askArchived')}</span>
       ) : prompt ? (
@@ -35,7 +37,7 @@ export function PermissionCard({ item }: { item: Extract<FeedItem, { kind: 'perm
             <input aria-label={f.label} type={f.secret ? 'password' : 'text'} autoComplete="off" value={values[f.id] ?? ''} list={f.options?.length ? `options-${item.id}-${f.id}` : undefined} onChange={(e) => setValues({ ...values, [f.id]: e.target.value })} className="mt-1 block w-full rounded border border-border-soft bg-transparent p-2" />
             {f.options?.length ? <datalist id={`options-${item.id}-${f.id}`}>{f.options.map((v) => <option key={v} value={v} />)}</datalist> : null}
           </label>)}
-          <div className="flex flex-wrap gap-2">{prompt.choices.map((c) => <button key={c.id} type="button" className={`${btn} bg-muted`} disabled={!['cancel', 'decline', 'deny'].includes(c.id) && prompt.fields?.some((f) => f.required && !values[f.id]?.trim())} onClick={() => dispatch(answerPermission(item.id, true, { choice: c.id, ...(prompt.fields ? { values } : {}) }))}>{c.label}</button>)}</div>
+          <div className="flex flex-wrap gap-2">{prompt.choices.map((c) => <button key={c.id} type="button" className={`${btn} bg-muted`} disabled={!['cancel', 'decline', 'deny'].includes(c.id) && prompt.fields?.some((f) => f.required && !values[f.id]?.trim())} onClick={() => dispatch(answerPermission(item.id, true, { choice: c.id, ...(prompt.fields ? { values } : {}) }))}>{choiceLabel(c.label)}</button>)}</div>
         </form>
       ) : (
         <>

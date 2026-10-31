@@ -60,6 +60,11 @@ export class HistoryArchive {
     return valid.reduce((m, l) => Math.max(m, l.segment), 0);
   }
 
+  /** All saved segments in chronological order, for native runtimes that also retain precompaction history. */
+  events(sessionId: string): ServerEvent[] {
+    return this.read(sessionId, this.file(sessionId)).valid.sort((a, b) => a.segment - b.segment).flatMap((line) => line.events);
+  }
+
   segment(sessionId: string, n: number): ServerEvent[] | null {
     return this.read(sessionId, this.file(sessionId)).valid.find((l) => l.segment === n)?.events ?? null;
   }

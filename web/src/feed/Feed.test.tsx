@@ -277,3 +277,12 @@ it('native compaction with unknown token count does not display an invented zero
   expect(view.container.textContent).toContain('context compacted');
   expect(view.container.textContent).not.toContain('0 tokens');
 });
+
+it('native completion upgrades the original tool to an agent card without duplicating its anchor', () => {
+  const { store } = setup();
+  act(() => {
+    store.dispatch(serverEvent({ kind: 'agent', ts: 1, e: { t: 'tool-call', id: 'codex-spawn', name: 'spawnAgent', input: { prompt: 'Investigate' }, toolKind: 'other', sub: false } }));
+    store.dispatch(serverEvent({ kind: 'agent', ts: 2, e: { t: 'tool-update', id: 'codex-spawn', toolKind: 'agent', childSessionId: 'child', text: '', isError: false } }));
+  });
+  expect(store.getState().feed.items.filter((e) => e.kind === 'tool' && e.id === 'codex-spawn')).toEqual([expect.objectContaining({ toolKind: 'agent', childSessionId: 'child', input: { prompt: 'Investigate' } })]);
+});

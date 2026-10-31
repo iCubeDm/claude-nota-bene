@@ -53,7 +53,7 @@ export class PermissionBroker {
       const id = randomUUID(); let done = false;
       const finish = (answer: InteractionAnswer | null) => {
         if (done) return; done = true; this.structured.delete(id); signal.removeEventListener('abort', abort);
-        if (g === gen()) this.o.emit({ kind: 'permission-done', id, allow: answer !== null && !['deny', 'decline', 'cancel'].includes(answer.choice) });
+        if (g === gen()) this.o.emit({ kind: 'permission-done', id, allow: answer !== null && prompt.choices.find((c) => c.id === answer.choice)?.allow !== false && !['deny', 'decline', 'cancel'].includes(answer.choice) });
         resolve(answer);
       };
       const abort = () => finish(null);

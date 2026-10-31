@@ -113,7 +113,7 @@ export type EffortLevel = Exclude<AgentEffort, 'none' | 'minimal'>;
  * A model the agent offers. `value` is what is sent back to pick it (an alias such as `sonnet`); `resolved` the full id
  * the agent reports for it once running (`claude-…`), to match the two; `efforts` only for a model that has effort levels.
  */
-export type ModelOption = { value: string; name: string; description: string; resolved?: string; efforts?: AgentEffort[] };
+export type ModelOption = { value: string; name: string; description: string; resolved?: string; efforts?: AgentEffort[]; defaultEffort?: AgentEffort };
 /**
  * A slash command or skill the composer's `/` menu offers (already filtered by the server: nothing bound to a terminal).
  * `hint` is the argument hint (`[name]`), `aliases` other names that run it; `builtin`: the agent's own, not the user's or a plugin's.
@@ -152,7 +152,7 @@ export type Stats = {
 
 export type Interaction = {
   title: string;
-  choices: { id: string; label: string }[];
+  choices: { id: string; label: string; allow?: boolean }[];
   fields?: { id: string; label: string; secret?: boolean; options?: string[]; required?: boolean }[];
   url?: string;
 };

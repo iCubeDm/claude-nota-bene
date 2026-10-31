@@ -76,6 +76,8 @@ it('a read-only install runs: --find / --last answer, a window serves /info and 
     const link = path.join(tmp, 'node_modules', d);
     if (!fs.existsSync(link)) fs.symlinkSync(fileURLToPath(new URL(`../node_modules/${d}`, import.meta.url)), link);
   }
+  expect(fs.readFileSync(path.join(pkg, 'codex/skills/nb/SKILL.md'), 'utf8')).toContain('name: nb');
+  expect(fs.existsSync(path.join(pkg, 'codex/skills/nb/open.mjs'))).toBe(true);
   const before = snapshot(pkg);
 
   expect(run(['--find', project]).status).toBe(1); // no window yet

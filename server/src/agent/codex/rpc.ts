@@ -56,7 +56,15 @@ export class CodexRpc {
   }
 
   async request<T = unknown>(method: string, params: unknown = {}, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<T> {
-    await this.ready;
+    if (options.signal) {
+      const signal = options.signal;
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => { signal.removeEventListener('abort', abort); reject(new Error('Codex request aborted')); };
+        if (signal.aborted) return abort();
+        signal.addEventListener('abort', abort, { once: true });
+        this.ready.then(() => { signal.removeEventListener('abort', abort); resolve(); }, (e) => { signal.removeEventListener('abort', abort); reject(e); });
+      });
+    } else await this.ready;
     return await this.call(method, params, options) as T;
   }
 

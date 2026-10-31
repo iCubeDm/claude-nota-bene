@@ -113,3 +113,39 @@ it('returning to configured restores the native sandbox after an explicit full-a
   expect(rpc.calls.filter((r) => r.method === 'turn/start').at(-1)?.params.sandboxPolicy).toEqual({ type: 'readOnly' });
   await s.close();
 });
+
+it('Stop during startup interrupts the eventual native turn; before readiness it cancels unaccepted input', async () => {
+  const rpc = new Script(); const base = rpc.reply; let accept!: (v: unknown) => void;
+  rpc.reply = (m, p) => m === 'turn/start' ? new Promise((r) => { accept = r; }) : base(m, p);
+  const s = setup(rpc); await s.session.ready; send(s.session, 'starting'); await flush();
+  await s.session.interrupt(); accept({ turn: { id: 'late-turn' } }); await flush();
+  expect(rpc.calls).toContainEqual({ method: 'turn/interrupt', params: { threadId: 'new-thread', turnId: 'late-turn' } });
+  await s.close();
+  const early = setup(); send(early.session, 'early'); await early.session.interrupt(); await early.session.ready; await flush();
+  expect(early.rpc.calls.some((c) => c.method === 'turn/start')).toBe(false);
+  expect(early.events).toContainEqual({ t: 'cancelled', sendId: 'early' }); await early.close();
+});
+
+it('Default effort explicitly restores the selected model default after a sticky High override', async () => {
+  const rpc = new Script(); const base = rpc.reply;
+  rpc.reply = async (m, p) => m === 'model/list' ? { data: [{ model: 'gpt', displayName: 'GPT', defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'high' }, { reasoningEffort: 'medium' }] }] } : base(m, p);
+  const s = setup(rpc); await s.session.ready; await s.session.setEffort('high'); send(s.session, 'high'); await flush();
+  rpc.emit('turn/completed', { turn: { id: 't1', status: 'completed' } }); await flush();
+  await s.session.setEffort(null); send(s.session, 'default'); await flush();
+  expect(rpc.calls.filter((c) => c.method === 'turn/start').at(-1)?.params.effort).toBe('medium'); await s.close();
+});
+
+it('child liveness is read from its owning session, not the separate metadata process', async () => {
+  const owner = new Script(), metadata = new Script();
+  for (const [rpc, status] of [[owner, 'active'], [metadata, 'notLoaded']] as const) {
+    const base = rpc.reply;
+    rpc.reply = async (m, p) => m === 'thread/read' ? { thread: { id: p.threadId, cwd: '/tmp', status: { type: status } } } : m === 'thread/turns/list' ? { data: [] } : base(m, p);
+  }
+  const backend = codexBackend({ connect: (cwd) => cwd ? owner : metadata });
+  const session = backend.start({ cwd: '/tmp', permissionMode: 'codex-configured', ask: async () => false }) as CodexSession;
+  await session.ready;
+  owner.emit('item/completed', { item: { type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', receiverThreadIds: ['child'], agentsStates: { child: { status: 'running' } } } });
+  const { AttachmentStore } = await import('../../attachments.ts');
+  try { expect(await backend.subagent('new-thread', '/tmp', 'codex-spawn', new AttachmentStore({ dir: '/unused' }))).toMatchObject({ running: true }); }
+  finally { await backend.close?.(); }
+});

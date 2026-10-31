@@ -332,6 +332,12 @@ export const en: Dict = {
   effort_high: 'High',
   effort_xhigh: 'Extra high',
 
+  allowSession: 'Allow for this session',
+  allowTurn: 'Allow for this turn',
+  sendAnswers: 'Send answers',
+  answerSent: 'Answer sent',
+  codexPermissions: 'Additional Codex permissions',
+  nativeMcpRequest: 'MCP request',
   effort_none: 'None',
   effort_minimal: 'Minimal',
   'mode_codex-configured': 'Codex config',

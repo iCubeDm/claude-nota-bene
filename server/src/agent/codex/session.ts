@@ -4,7 +4,7 @@ import type { ProviderSession as AgentSession, ProviderStartOptions as StartOpti
 import { answerNative, CODEX_CAPABILITIES, limits, models, policy, type CodexConnection } from './controls.ts';
 import { array, codexInput, CodexMapper, itemId, record, string } from './map.ts';
 
-type Turn = { id?: string; ids: Set<string>; pending: number; end?: Record<string, unknown>; finished: boolean; at: number; done: Promise<void>; resolve(): void };
+type Turn = { interruptRequested?: boolean; interruption?: Promise<void>; id?: string; ids: Set<string>; pending: number; end?: Record<string, unknown>; finished: boolean; at: number; done: Promise<void>; resolve(): void };
 function turn(): Turn { let resolve!: () => void; const done = new Promise<void>((r) => { resolve = r; }); return { ids: new Set(), pending: 0, finished: false, at: Date.now(), done, resolve }; }
 
 /** One owned native process per active conversation. Acceptance is serial; generation work is not. */
@@ -16,6 +16,9 @@ export class CodexSession implements AgentSession {
   private ended = false;
   private failure: Error | undefined;
   private chain = Promise.resolve();
+  private stopGeneration = 0;
+  private configuredModel: string | null = null;
+  private configuredEffort: EffortLevel | null = null;
   private mapper = new CodexMapper();
   private tid = '';
   private mode: Mode;
@@ -64,25 +67,33 @@ export class CodexSession implements AgentSession {
     const account = record(await this.rpc.request('account/read', {}));
     if (account.requiresOpenaiAuth === true && !account.account) throw new Error('Codex: sign in to your ChatGPT account (codex login), then restart this session.');
     if (this.model && !(await this.supportedModels()).some((m) => m.value === this.model)) { this.model = null; this.effort = null; }
+    const requestedModel = this.model;
     const response = record(await this.rpc.request(resume ? fork ? 'thread/fork' : 'thread/resume' : 'thread/start', {
       developerInstructions: 'You are in Nota Bene, a browser chat rendering GitHub-flavored markdown. Use fenced mermaid or SVG diagrams. Show project images/video/audio with Markdown image syntax and project-relative paths. Reference project files with relative paths in inline code so the viewer can open them. The user may send batched inline comments quoting conversation or file fragments: address every item; uncommented material has no objections.',
-      cwd: this.o.cwd, ...(resume ? { threadId: resume } : {}), ...(this.model ? { model: this.model } : {}),
+      cwd: this.o.cwd, ...(resume ? { threadId: resume } : {}),
     }));
     if (this.ended) return;
     this.configuredPolicy = { ...(response.approvalPolicy ? { approvalPolicy: response.approvalPolicy } : {}), ...(response.sandbox ? { sandboxPolicy: response.sandbox } : {}) };
     const thread = record(response.thread); this.tid = string(thread.id);
     if (!this.tid) throw new Error('Codex did not return a thread id');
-    this.model = string(response.model) || this.model;
+    this.configuredModel = string(response.model) || null;
+    this.configuredEffort = typeof response.reasoningEffort === 'string' ? response.reasoningEffort as EffortLevel : null;
+    this.model = requestedModel ?? this.configuredModel;
     this.push({ t: 'init', sessionId: this.tid, ...(this.model ? { model: this.model } : {}), mode: this.mode });
   }
   send(m: Parameters<AgentSession['send']>[0]): void {
     if (this.ended) return;
-    const run = this.chain.then(async () => { await this.ready; if (!this.ended) await this.dispatch(m); });
+    const generation = this.stopGeneration;
+    const run = this.chain.then(async () => {
+      await this.ready; if (this.ended) return;
+      if (generation !== this.stopGeneration) { this.push({ t: 'cancelled', sendId: m.uuid }); return; }
+      await this.dispatch(m);
+    });
     this.chain = run.catch((e) => { this.push({ t: 'turn-end', stop: 'failed', secs: 0, answers: [m.uuid], queued: 0, error: e instanceof Error ? e.message : String(e) }); });
   }
   private async dispatch(m: Parameters<AgentSession['send']>[0]): Promise<void> {
     if (m.priority === 'now' && this.active) {
-      const active = this.active; await this.interrupt();
+      const active = this.active; await this.interruptActive();
       // An interrupt acknowledgement is not completion. Never steer the force-send into that old turn.
       await Promise.race([active.done, new Promise<never>((_, reject) => { const t = setTimeout(() => reject(new Error('Codex has not finished interrupting; retry after it stops.')), 30_000); t.unref(); void active.done.then(() => clearTimeout(t)); })]);
       if (this.ended) return;
@@ -117,13 +128,16 @@ export class CodexSession implements AgentSession {
     try {
       if (/^\/compact(?:\s|$)/.test(m.text)) await this.rpc.request('thread/compact/start', { threadId: this.tid });
       else {
-        const response = record(await this.rpc.request('turn/start', { threadId: this.tid, clientUserMessageId: m.uuid, input, ...(this.mode === 'codex-configured' ? this.configuredPolicy : policy(this.mode, this.o.cwd, true)), ...(this.model ? { model: this.model } : {}), ...(this.effort ? { effort: this.effort } : {}) }));
+        const effort = this.effort ?? (await this.supportedModels()).find((m) => m.value === this.model)?.defaultEffort ?? (this.model === this.configuredModel ? this.configuredEffort : null);
+        const response = record(await this.rpc.request('turn/start', { threadId: this.tid, clientUserMessageId: m.uuid, input, ...(this.mode === 'codex-configured' ? this.configuredPolicy : policy(this.mode, this.o.cwd, true)), ...(this.model ? { model: this.model } : {}), ...(effort ? { effort } : {}) }));
         this.bind(t, string(record(response.turn).id));
       }
     } catch (error) { if (this.active === t) this.active = undefined; t.finished = true; t.resolve(); throw error; }
     finally { t.pending--; this.settle(t); }
   }
-  private bind(t: Turn, id: string) { if (id) { t.id = id; this.turns.set(id, t); } }
+  private bind(t: Turn, id: string) {
+    if (id) { t.id = id; this.turns.set(id, t); if (t.interruptRequested && !t.end) void this.interruptTurn(t).catch((e) => this.fail(e)); }
+  }
   private settle(t: Turn) {
     if (!t.end || t.pending || t.finished) return;
     t.finished = true; if (this.active === t) this.active = undefined;
@@ -158,13 +172,19 @@ export class CodexSession implements AgentSession {
     for (const e of this.mapper.notification(method, p)) this.push(e);
   }
   private cancelAsks() { this.askCtl.abort(); this.askCtl = new AbortController(); }
-  async interrupt(): Promise<void> {
+  async interrupt(): Promise<void> { this.stopGeneration++; await this.interruptActive(); }
+  private async interruptActive(): Promise<void> {
     this.cancelAsks();
-    const t = this.active; if (t?.id && !t.end) await this.rpc.request('turn/interrupt', { threadId: this.tid, turnId: t.id });
+    const t = this.active;
+    if (t && !t.end) { t.interruptRequested = true; if (t.id) await this.interruptTurn(t); }
   }
+  private interruptTurn(t: Turn): Promise<void> {
+    return t.interruption ??= this.rpc.request('turn/interrupt', { threadId: this.tid, turnId: t.id }).then(() => {}, (e) => { if (!t.end) throw e; });
+  }
+  get threadId(): string { return this.tid; }
   async setPermissionMode(mode: Mode): Promise<void> { policy(mode, this.o.cwd); this.mode = mode; }
   async supportedModels(): Promise<ModelOption[]> { return this.modelList ??= models(await this.rpc.request('model/list', {})); }
-  async setModel(model: string | null): Promise<void> { if (model && !(await this.supportedModels()).some((m) => m.value === model)) throw new Error('Unknown Codex model'); this.model = model; }
+  async setModel(model: string | null): Promise<void> { if (model && !(await this.supportedModels()).some((m) => m.value === model)) throw new Error('Unknown Codex model'); this.model = model ?? this.configuredModel; }
   async setEffort(effort: EffortLevel | null): Promise<void> {
     if (effort && !(await this.supportedModels()).find((m) => m.value === this.model)?.efforts?.includes(effort)) throw new Error('Unsupported Codex reasoning effort');
     this.effort = effort;

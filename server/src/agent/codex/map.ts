@@ -38,7 +38,7 @@ function call(item: Record<string, unknown>): Omit<Call, 'id' | 't' | 'sub'> {
     case 'dynamicToolCall': return { name: string(item.tool), toolKind: 'other', input: record(item.arguments) };
     case 'collabAgentToolCall': {
       const child = array(item.receiverThreadIds).find((id) => typeof id === 'string');
-      return { name: string(item.tool), toolKind: child ? 'agent' : 'other', input: { prompt: item.prompt, receiverThreadIds: item.receiverThreadIds }, ...(typeof child === 'string' ? { childSessionId: child } : {}) };
+      return { name: string(item.tool), toolKind: child ? 'agent' : 'other', input: { ...(typeof item.prompt === 'string' ? { prompt: item.prompt } : {}) }, ...(typeof child === 'string' ? { childSessionId: child } : {}) };
     }
     case 'subAgentActivity': return { name: string(item.kind) || 'subagent', toolKind: 'agent', input: { description: item.agentPath }, ...(typeof item.agentThreadId === 'string' ? { childSessionId: item.agentThreadId } : {}) };
     case 'webSearch': return { name: 'web_search', toolKind: 'search', input: { query: item.query } };
@@ -54,7 +54,7 @@ export class CodexMapper {
   private readonly completed = new Set<string>();
   private readonly texts = new Map<string, string>();
   private readonly output = new Map<string, string>();
-  private readonly children = new Set<string>();
+  private readonly children = new Map<string, boolean>();
   private compacted = false;
 
   notification(method: string, params: Record<string, unknown>): AgentEvent[] {
@@ -97,7 +97,7 @@ export class CodexMapper {
       return [{ t: 'message-start' }];
     }
     if (type === 'contextCompaction') {
-      if (done) { if (this.compacted) return []; this.compacted = true; return [{ t: 'compacted' }]; }
+      if (done) { if (this.compacted) return []; this.compacted = true; return [{ t: 'compacted', boundaryId: itemId(rawId) }]; }
       return [{ t: 'compacting' }];
     }
     if (type === 'userMessage' || type === 'hookPrompt' || type === 'reasoning') return [];
@@ -107,13 +107,17 @@ export class CodexMapper {
     if (!this.started.has(rawId)) { this.started.add(rawId); events.push({ t: 'tool-call', id, sub: false, ...info }); }
     if (type === 'collabAgentToolCall') {
       for (const child of array(item.receiverThreadIds).filter((v): v is string => typeof v === 'string')) {
-        if (!this.children.has(child)) {
-          this.children.add(child);
+        const state = record(record(item.agentsStates)[child]);
+        const status = string(state.status);
+        const ended = ['completed', 'errored', 'shutdown', 'interrupted', 'notFound'].includes(status);
+        const was = this.children.get(child);
+        if (was === undefined || (was === false && !ended && (['pendingInit', 'running'].includes(status) || ['sendInput', 'resumeAgent', 'followupTask', 'sendMessage'].includes(string(item.tool))))) {
+          this.children.set(child, true);
           events.push({ t: 'task', id: itemId(child), phase: 'started', type: 'agent', call: id, desc: string(item.prompt) || string(item.tool) });
         }
-        const state = record(record(item.agentsStates)[child]);
-        if (['completed', 'errored', 'shutdown', 'interrupted'].includes(string(state.status))) {
-          events.push({ t: 'task', id: itemId(child), phase: 'done', summary: string(state.message), ...(state.status === 'errored' ? { status: 'failed' as const } : state.status === 'interrupted' ? { status: 'stopped' as const } : {}) });
+        if (ended && this.children.get(child)) {
+          this.children.set(child, false);
+          events.push({ t: 'task', id: itemId(child), phase: 'done', summary: string(state.message), ...(status === 'errored' || status === 'notFound' ? { status: 'failed' as const } : status === 'interrupted' || status === 'shutdown' ? { status: 'stopped' as const } : {}) });
         }
       }
     }
@@ -123,7 +127,7 @@ export class CodexMapper {
         : type === 'fileChange' ? array(item.changes).map((v) => { const change = record(v); return string(change.path) + '\n' + string(change.diff); }).join('\n')
         : type === 'imageGeneration' ? string(item.savedPath) || string(item.failure)
         : resultText(item.result ?? item.contentItems ?? item.output ?? item.agentsStates ?? '');
-      events.push({ t: 'tool-update', id, text: cutTail(text, CAP), isError: ['failed', 'declined', 'errored'].includes(string(item.status)) || item.success === false || !!item.error || (typeof item.exitCode === 'number' && item.exitCode !== 0) });
+      events.push({ t: 'tool-update', id, ...(info.toolKind === 'agent' ? { toolKind: info.toolKind, childSessionId: info.childSessionId } : {}), text: cutTail(text, CAP), isError: ['failed', 'declined', 'errored'].includes(string(item.status)) || item.success === false || !!item.error || (typeof item.exitCode === 'number' && item.exitCode !== 0) });
       this.output.delete(rawId);
     }
     return events;

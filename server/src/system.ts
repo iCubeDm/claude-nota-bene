@@ -325,7 +325,7 @@ export function systemRoutes(o: {
         return;
       }
       if (!only('GET', req, res)) return;
-      json(res, 200, { defaultMode: readPrefs().defaultMode ?? (o.modes?.[0] ?? 'auto') });
+      json(res, 200, { defaultMode: readPrefs().defaultMode ?? (o.modes?.includes('auto') ? 'auto' : o.modes?.[0] ?? 'auto') });
     },
 
     '/system/storage': (req, res) => {

@@ -4,7 +4,9 @@ import type { ProviderBackend as AgentBackend, SessionListEntry } from '../types
 import { CODEX_CAPABILITIES, type CodexConnection } from './controls.ts';
 import { CodexRpc } from './rpc.ts';
 import { CodexSession } from './session.ts';
-import { loadCodexHistory } from './history.ts';
+import { HistoryArchive } from '../../archive.ts';
+import { stateDir } from '../../state.ts';
+import { loadCodexHistory, restoreCodexReplay } from './history.ts';
 import { array, itemId, record, string } from './map.ts';
 const real = (p: string) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 export function codexBackend(options: { connect?: (cwd?: string) => CodexConnection } = {}): AgentBackend {
@@ -21,7 +23,7 @@ export function codexBackend(options: { connect?: (cwd?: string) => CodexConnect
     if (!metadata) { const connection = connect(); metadata = connection; void connection.closed.then(() => { if (metadata === connection) metadata = undefined; }); }
     return metadata;
   };
-  const read = async (id: string) => record(record(await rpc().request('thread/read', { threadId: id, includeTurns: false })).thread);
+  const read = async (id: string, connection = rpc()) => record(record(await connection.request('thread/read', { threadId: id, includeTurns: false })).thread);
   return {
     capabilities: CODEX_CAPABILITIES, nativeSessions: true,
     start(o) { const s = new CodexSession(o, connect(o.cwd)); sessions.add(s); void s.rpc.closed.then(() => sessions.delete(s)); return s; },
@@ -40,16 +42,19 @@ export function codexBackend(options: { connect?: (cwd?: string) => CodexConnect
     async sessionInfo(id, dir) { const t = await read(id); if (!t.cwd || real(string(t.cwd)) !== real(dir)) return null; return { cwd: string(t.cwd), customTitle: string(t.name) || undefined, firstPrompt: string(t.preview) || undefined }; },
     async history(id, cwd, attachments, onError) {
       const t = await read(id); if (!t.cwd || real(string(t.cwd)) !== real(cwd)) throw new Error('Codex conversation belongs to another folder');
-      return remember(id, await loadCodexHistory(rpc(), id, attachments, onError));
+      const events = remember(id, await loadCodexHistory(rpc(), id, attachments, onError));
+      return restoreCodexReplay(new HistoryArchive({ dir: path.join(stateDir(), 'history'), report: onError }), id, events, onError);
     },
     async subagent(sessionId, cwd, call, attachments, onError) {
-      const parent = await read(sessionId); if (!parent.cwd || real(string(parent.cwd)) !== real(cwd)) return null;
+      const owner = [...sessions].find((s) => s.threadId === sessionId);
+      const connection = owner?.rpc ?? rpc();
+      const parent = await read(sessionId, connection); if (!parent.cwd || real(string(parent.cwd)) !== real(cwd)) return null;
       let child = links.get(sessionId)?.get(call) ?? [...sessions].map((s) => s.childFor(call)).find(Boolean);
       if (!child) {
         const queue = [sessionId], seen = new Set<string>();
         while (queue.length && seen.size < 100 && !child) {
           const id = queue.shift()!; if (seen.has(id)) continue; seen.add(id);
-          const events = remember(sessionId, await loadCodexHistory(rpc(), id, attachments, onError));
+          const events = remember(sessionId, await loadCodexHistory(connection, id, attachments, onError));
           for (const e of events) if (e.kind === 'agent' && e.e.t === 'tool-call' && e.e.childSessionId) {
             if (e.e.id === call) child = e.e.childSessionId;
             else queue.push(e.e.childSessionId);
@@ -57,8 +62,8 @@ export function codexBackend(options: { connect?: (cwd?: string) => CodexConnect
         }
       }
       if (!child) return null;
-      const thread = await read(child);
-      return { events: remember(sessionId, await loadCodexHistory(rpc(), child, attachments, onError)), running: record(thread.status).type === 'active', type: 'Codex', description: string(thread.name) || string(thread.preview) || itemId(child) };
+      const thread = await read(child, connection);
+      return { events: remember(sessionId, await loadCodexHistory(connection, child, attachments, onError)), running: record(thread.status).type === 'active', type: 'Codex', description: string(thread.name) || string(thread.preview) || itemId(child) };
     },
   };
 }
