@@ -1,10 +1,17 @@
 # Nota Bene architecture
 
-State as of 2026-10-30, `main`. About 25,000 lines of source excluding tests (server, web, shared, launcher).
+State as of 2026-10-31, release 1.1.0 on `main`.
 
 ## 1. Overview
 
-Nota Bene is a local web application. One **window** is one server process, one project folder, one port from 4777 to 4799 and one Claude Code session. One browser tab works with the window (the owner); other tabs see "the window is already open" and can take it over.
+Nota Bene is a local web application. One **window** is one server process, one project folder, one port from 4777 to 4799 and one agent session (Claude Code or Codex). The provider is fixed at launch; session discovery and persisted state are scoped to it. One browser tab works with the window (the owner); other tabs see "the window is already open" and can take it over.
+
+The diagram below shows the Claude process path. The same SessionManager also
+accepts the Codex backend through `AgentBackend` / `AgentSession`. That adapter owns
+a native `codex app-server` JSON-RPC child, normalizes live events and paginated
+history, and exposes explicit capabilities. Native SDK/RPC shapes stay in adapters.
+Codex state lives under `<base-state>/providers/codex`; Claude keeps the legacy base.
+ACP remains a future backend.
 
 ```mermaid
 flowchart LR

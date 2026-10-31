@@ -2,13 +2,13 @@
 
 # Nota Bene
 
-A browser IDE over [Claude Code](https://claude.com/claude-code), built on the Claude Agent SDK. It is the same agent with your settings, skills and plugins, in a window made for reviewing: select any fragment of a reply or of a file, leave a note in the margin, and send all the notes to the agent as one batch. The window also has a file tree, viewers for code, images, video and audio, and a session picker.
+A browser IDE over [Claude Code](https://claude.com/claude-code) and Codex, using the Claude Agent SDK or the native Codex app-server. It brings your chosen agent into a window made for reviewing: select any fragment of a reply or of a file, leave a note in the margin, and send all the notes to the agent as one batch. The window also has a file tree, viewers for code, images, video and audio, and a session picker.
 
 ![Selecting text in a reply, adding a comment and sending it](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/annotate-text.gif)
 
 ## Install
 
-You need Node.js 22 or newer, and Claude Code installed and logged in. The first run downloads about 330 MB, most of it the Agent SDK's binaries.
+You need Node.js 22 or newer and your chosen agent installed and logged in: Claude Code, or Codex CLI 0.166.0 or newer. The first run downloads about 330 MB, most of it the Agent SDK's binaries.
 
 As a Claude Code plugin (recommended). In Claude Code:
 
@@ -36,11 +36,54 @@ npm i -g nota-bene-ide
 nota-bene
 ```
 
+## Codex / ChatGPT
+
+Codex support uses the installed **Codex CLI 0.166.0 or newer** through its native
+`app-server`. A ChatGPT account signed in with `codex login` is sufficient; Nota Bene
+does not read authentication files or require a separate API key. Existing configured
+API-key accounts also use the native runtime.
+
+Open a provider-bound window with `nota-bene . --agent codex --detach`. The default
+without `--agent` remains Claude. Each provider has independent windows and saved
+settings; both may run in the same project. Models, skills and sessions in a Codex
+window come from Codex. Do not continue the same conversation in another client
+while the window owns it; fork when carrying a CLI/Desktop conversation over.
+
+To expose the skill from a source checkout in Codex CLI and local Desktop, link the skill into
+`~/.agents/skills/nb` (do not overwrite an existing skill):
+
+```sh
+mkdir -p ~/.agents/skills
+ln -s "$PWD/codex/skills/nb" ~/.agents/skills/nb
+```
+
+For an npm install, copy `codex/skills/nb` from the installed `nota-bene-ide` package
+into that skill directory; its helper finds `nota-bene` on PATH. For a global install,
+run the following only if `~/.agents/skills/nb` does not already exist:
+
+```sh
+npm i -g nota-bene-ide@1.1.0
+mkdir -p ~/.agents/skills
+cp -R "$(npm root -g)/nota-bene-ide/codex/skills/nb" ~/.agents/skills/nb
+```
+
+Reload skills or
+restart Codex, then invoke `$nb`, `$nb new`, or `$nb fork` (or select nb in the
+Desktop skill picker). Desktop uses supervised detached lifetime: finishing a chat
+turn does not stop the window. Use Stop in the window to shut it down. CLI can keep
+an owned background process. `fork` needs the actual invoking host's thread id;
+without it the helper fails clearly. An already open window is brought forward,
+without applying a requested new/fork to its conversation.
+
+See [Codex support and limitations](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/guide.md#codex-support) for supported
+behavior and API limitations. The existing Claude adapter and nb skill are
+unchanged. ACP remains a future backend behind the same AgentBackend interface.
+
 ## Supported
 
 | | Status |
 |---|---|
-| Agent | Claude Code |
+| Agents | Claude Code (default), Codex CLI / local Desktop |
 | macOS | tested |
 | Linux | not tested |
 | Windows | not supported (the `/nb` skill is a bash script) |
@@ -66,7 +109,7 @@ and on single frames of a video:
 
 ## Features
 
-- Chat with the Claude Code agent. A message sent while the agent works is injected into the running turn; Cmd/Ctrl+Enter interrupts the agent and sends.
+- Chat with Claude Code or Codex. A message sent while the agent works is injected into the running turn; Cmd/Ctrl+Enter interrupts the agent and sends.
 - Margin comments on any reply, on your own messages and on any open file, sent as one batch. Eleven one-click labels (Looks good, Clarify this, Verify this, and others).
 - Markup on images and video frames with a rectangle, ellipse, pen or arrow, and a comment on the marked frame.
 - File tree and viewers: Markdown, highlighted code, images, video and audio with seeking. Mermaid and SVG diagrams render in the chat.
@@ -81,6 +124,13 @@ and on single frames of a video:
 
 ![The slash menu](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/slash-menu.png)
 
+## Updating to 1.1.0
+
+For the terminal install, run `npm i -g nota-bene-ide@1.1.0`. For the Claude plugin,
+update the marketplace and installed plugin through Claude Code. Close old windows
+and launch again to use the new package. Existing Claude state stays in place; Codex
+uses its own state directory. See [release notes](https://github.com/iCubeDm/nota-bene-ide/blob/main/CHANGELOG.md).
+
 ## Guide
 
 Starting options, every feature with an example, the security model, where state is kept and troubleshooting: [the guide](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/guide.md). How it is built: [architecture](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/architecture.md).
@@ -88,37 +138,3 @@ Starting options, every feature with an example, the security model, where state
 ## Licence
 
 Apache-2.0. See [LICENSE](https://github.com/iCubeDm/nota-bene-ide/blob/main/LICENSE) and [THIRD-PARTY-NOTICES.md](https://github.com/iCubeDm/nota-bene-ide/blob/main/THIRD-PARTY-NOTICES.md).
-
-### Codex / ChatGPT (feature branch)
-
-Codex support uses the installed **Codex CLI 0.166.0 or newer** through its native
-`app-server`. A ChatGPT account signed in with `codex login` is sufficient; Nota Bene
-does not read authentication files or require a separate API key. Existing configured
-API-key accounts also use the native runtime.
-
-Open a provider-bound window with `nota-bene . --agent codex --detach`. The default
-without `--agent` remains Claude. Each provider has independent windows and saved
-settings; both may run in the same project. Models, skills and sessions in a Codex
-window come from Codex. Do not continue the same conversation in another client
-while the window owns it; fork when carrying a CLI/Desktop conversation over.
-
-To expose the skill in Codex CLI and local Desktop, link this checkout's skill into
-`~/.agents/skills/nb` (do not overwrite an existing skill):
-
-```sh
-mkdir -p ~/.agents/skills
-ln -s "$PWD/codex/skills/nb" ~/.agents/skills/nb
-```
-
-For an npm install, copy `codex/skills/nb` from the installed `nota-bene-ide` package
-into that skill directory; its helper finds `nota-bene` on PATH. Reload skills or
-restart Codex, then invoke `$nb`, `$nb new`, or `$nb fork` (or select nb in the
-Desktop skill picker). Desktop uses supervised detached lifetime: finishing a chat
-turn does not stop the window. Use Stop in the window to shut it down. CLI can keep
-an owned background process. `fork` needs the actual invoking host's thread id;
-without it the helper fails clearly. An already open window is brought forward,
-without applying a requested new/fork to its conversation.
-
-See [Codex support and limitations](docs/guide.md#codex-support) for verified
-behavior and remaining parity gates. The existing Claude adapter and nb skill are
-unchanged. ACP remains a future backend behind the same AgentBackend interface.

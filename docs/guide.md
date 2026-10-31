@@ -1,6 +1,6 @@
 # Nota Bene guide
 
-Nota Bene is a browser window over Claude Code. This guide covers starting it, each feature with an example, the security model, where state is kept, and what to do when something goes wrong. For a short introduction see the [README](https://github.com/iCubeDm/nota-bene-ide/blob/main/README.md); for how it is built see [architecture](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/architecture.md).
+Nota Bene is a browser window over Claude Code or Codex. Claude is the default; use `--agent codex` for Codex CLI or local Desktop. This guide covers starting it, each feature with an example, the security model, where state is kept, and what to do when something goes wrong. For a short introduction see the [README](https://github.com/iCubeDm/nota-bene-ide/blob/main/README.md); for how it is built see [architecture](https://github.com/iCubeDm/nota-bene-ide/blob/main/docs/architecture.md).
 
 Contents
 
@@ -47,6 +47,7 @@ npx nota-bene-ide [dir] [options]
 
 | Option | Meaning |
 |---|---|
+| `--agent claude\|codex` | Select the agent for this window (default: Claude). Sessions and state are separate per provider. |
 | `--port N` | Listen on port N. Without it the launcher takes the first free port from 4777 to 4799, skipping 4780 and 4790 to 4795. |
 | `--resume ID` | Open the session with this id instead of the folder's last one. |
 | `--resume ID --fork` | Open that session as a new branch; the original stays as it is. `--fork` needs `--resume`. |
@@ -73,7 +74,7 @@ The launcher supervises the server. When you pick "Restart the server" in the wi
 
 ## One window per folder, one tab per window
 
-A folder has at most one window. Launching again on a folder that is already open (with `/nb` or `nota-bene`) does not start a second server: it brings the existing window to the front. If the window is in the middle of a restart, the launch waits up to 10 seconds for it.
+A folder has at most one window per provider. Claude and Codex can each have a window on the same folder. Launching again on a folder that is already open (with `/nb` or `nota-bene`) does not start a second server for that provider: it brings the existing window to the front. If the window is in the middle of a restart, the launch waits up to 10 seconds for it.
 
 A window also has one owner tab. Open the same address in a second browser tab and that tab shows "The window is already open in another tab". Press **Work here** to take the window over: the first tab then shows "Open in another tab" and stops. A reload of the owner tab within a moment is not counted as a second tab.
 
@@ -241,7 +242,7 @@ The task indicator under the message box counts running subagents and background
 
 ## Sessions and history
 
-**Sessions** in the header opens a picker over every Claude Code session on the machine, grouped by folder, with the current project first and a filter box (title or folder). Pick one to switch the window to it in place, without a reload. If the session is from another folder, the window moves to that project (tree, file access and the agent's working folder). The dialog warns you not to keep the same session open in a terminal `claude` at the same time: the history would get mixed up. **+ new session in this project** starts a fresh one. A new session can only start in the current folder or in a folder that already has sessions.
+**Sessions** in the header opens a picker over the selected provider's sessions on the machine, grouped by folder, with the current project first and a filter box (title or folder). Pick one to switch the window to it in place, without a reload. If the session is from another folder, the window moves to that project (tree, file access and the agent's working folder). The dialog warns you not to keep the same session open in another agent client at the same time: the history would get mixed up. **+ new session in this project** starts a fresh one. A new session can only start in the current folder or in a folder that already has sessions.
 
 Branches of a conversation: `/nb fork` from Claude Code, or `nota-bene --resume ID --fork`, opens a copy of a conversation that continues on its own. The original is untouched.
 
