@@ -10,7 +10,7 @@ Run `node <this-skill-directory>/open.mjs [new|fork] --host desktop|cli` in the 
 For the marketplace plugin (a `plugin.json` exists two directories above this skill), run the helper through the pinned npm launcher instead:
 
 ```sh
-npm exec --yes --package=nota-bene-ide@1.1.0 -- node "<this-skill-directory>/open.mjs" [new|fork] --host desktop|cli
+npm exec --yes --omit=optional --package=nota-bene-ide@1.1.1 -- node "<this-skill-directory>/open.mjs" [new|fork] --host desktop|cli
 ```
 
 Replace the placeholders; omit `[new|fork]` for a normal launch. Keep the same working directory and host lifetime rules below. This downloads the launcher on first use and reuses npm's cache afterward; tell the user the first launch may take a few minutes. No global installation or manual skill copying is required. npm makes `nota-bene` available to the helper on PATH. For a standalone copied skill without a plugin manifest, use the direct `node` command and an installed `nota-bene-ide` launcher.

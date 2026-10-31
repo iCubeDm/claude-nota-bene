@@ -1,6 +1,6 @@
 {
   "name": "nota-bene",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Open Nota Bene, a browser IDE over Claude Code with inline margin comments, on the current folder: /nb, /nb new, /nb fork.",
   "author": { "name": "iCubeDm", "url": "https://github.com/iCubeDm" },
   "repository": "https://github.com/iCubeDm/nota-bene-ide",

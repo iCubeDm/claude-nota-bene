@@ -8,7 +8,7 @@ A browser IDE over [Claude Code](https://claude.com/claude-code) and [Codex](htt
 
 ## Install
 
-You need Node.js 22 or newer and your chosen agent installed and logged in: Claude Code, or Codex CLI 0.166.0 or newer. The first run downloads about 330 MB, most of it the Agent SDK's binaries.
+You need Node.js 22 or newer and your chosen agent installed and logged in: Claude Code, or Codex CLI 0.166.0 or newer. The first run downloads about 330 MB, most of it the Agent SDK's binaries (about 70 MB through the Codex plugin, which skips them).
 
 As a Claude Code plugin (recommended). In Claude Code:
 
@@ -57,13 +57,15 @@ codex plugin add nota-bene@nota-bene
 ```
 
 The plugin provides `$nb`, `$nb new`, and `$nb fork`. On first use it downloads
-`nota-bene-ide@1.1.0` through npm; later launches reuse npm's cache. No global npm
+`nota-bene-ide@1.1.1` (about 70 MB, without the Claude Code binary) through npm; later
+launches reuse npm's cache. No global npm
 install or manual skill copying is needed. Node.js, npm, and a signed-in Codex CLI
 must already be available. This is a repository marketplace for local Codex clients,
 not a listing in the public ChatGPT plugin directory.
 
-Alternatively, install the launcher with `npm i -g nota-bene-ide@1.1.0`, then ask
-Codex to install just the skill:
+Alternatively, install the launcher with `npm i -g nota-bene-ide@1.1.1`, then ask
+Codex to install just the skill. If you only use Codex, add `--omit=optional` to skip
+the Claude Code binary; a Claude window then cannot start from that install.
 
 ```text
 $skill-installer Install the nb skill from https://github.com/iCubeDm/nota-bene-ide/tree/main/codex/skills/nb
@@ -130,9 +132,11 @@ and on single frames of a video:
 
 ![The slash menu](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/slash-menu.png)
 
-## Updating to 1.1.0
+![A Codex window: model, approval card, sandbox profile and account limits](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/codex.png)
 
-For the terminal install, run `npm i -g nota-bene-ide@1.1.0`. For the Claude plugin,
+## Updating to 1.1.1
+
+For the terminal install, run `npm i -g nota-bene-ide@1.1.1`. For the Claude plugin,
 update the marketplace and installed plugin through Claude Code. Close old windows
 and launch again to use the new package. Existing Claude state stays in place; Codex
 uses its own state directory. See [release notes](https://github.com/iCubeDm/nota-bene-ide/blob/main/CHANGELOG.md).

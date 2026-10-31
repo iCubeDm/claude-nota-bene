@@ -32,3 +32,13 @@ it('the installed symlink entry point executes rather than silently exiting', ()
     expect(r.status).toBe(1); expect(r.stderr).toContain('source thread');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+it('every release pin follows package.json', () => {
+  const read = (f: string) => fs.readFileSync(f, 'utf8');
+  const { version } = JSON.parse(read('package.json')) as { version: string };
+  expect((JSON.parse(read('codex/plugin.json')) as { version: string }).version).toBe(version);
+  expect((JSON.parse(read('plugin/.claude-plugin/plugin.json')) as { version: string }).version).toBe(version);
+  expect((JSON.parse(read('package-lock.json')) as { version: string }).version).toBe(version);
+  expect(read('codex/skills/nb/SKILL.md')).toContain(`--package=nota-bene-ide@${version} `);
+  expect(read('server/src/agent/codex/rpc.ts')).toContain(`title: 'Nota Bene', version: '${version}'`);
+  for (const pin of read('README.md').match(/nota-bene-ide@\d+\.\d+\.\d+/g) ?? []) expect(pin).toBe(`nota-bene-ide@${version}`);
+});

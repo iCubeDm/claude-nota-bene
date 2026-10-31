@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 — 2026-10-31
+
+- Refuse a Codex CLI older than 0.166.0 with a clear message instead of a native
+  RPC failure on the first unsupported call.
+- The Codex plugin no longer downloads the Claude Code binary: first use is about
+  70 MB instead of 330 MB.
+- A Claude window started from an install without the Claude Code binary stops with
+  one clear message instead of crashing five times.
+- Name the right agent in the login and About texts of a Codex window.
+- Add continuous integration on macOS and Linux, a check that every release pin
+  follows the package version, and a Codex screenshot in the README.
+
 ## 1.1.0 — 2026-10-31
 
 - Add native Codex integration alongside Claude Code, using Codex CLI 0.166.0+

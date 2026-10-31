@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "nota-bene",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Open Nota Bene from Codex: a browser window for reviewing and supervising agent work with inline comments, files and media.",
   "author": { "name": "iCubeDm", "url": "https://github.com/iCubeDm" },
   "repository": "https://github.com/iCubeDm/nota-bene-ide",

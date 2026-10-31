@@ -40,7 +40,7 @@ export class CodexRpc {
       clearTimeout(this.killTimer); this.closeResolve();
     });
     this.ready = this.call('initialize', {
-      clientInfo: { name: 'nota-bene', title: 'Nota Bene', version: '1.1.0' },
+      clientInfo: { name: 'nota-bene', title: 'Nota Bene', version: '1.1.1' },
       capabilities: { experimentalApi: true },
     }).then((info) => { this.notify('initialized'); return info; });
     void this.ready.catch(() => {}); // ready may reject before the first caller subscribes
