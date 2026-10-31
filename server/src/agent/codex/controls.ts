@@ -7,8 +7,22 @@ export interface CodexConnection {
   request(method: string, params?: unknown, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<unknown>;
   onNotification(handler: (method: string, params: Record<string, unknown>) => void): () => void;
   onRequest(handler: (request: RpcRequest, signal: AbortSignal) => Promise<unknown>): void;
+  /** the native `initialize` result, when the connection has one */
+  readonly ready?: Promise<unknown>;
   readonly closed: Promise<void>;
   close(): Promise<void>;
+}
+
+export const CODEX_MIN_VERSION = '0.166.0';
+
+/** The version in app-server's `userAgent` (`<client>/<x.y.z> ...`) when it is below the minimum. A wording we cannot read passes: only a known old CLI is refused. */
+export function codexTooOld(userAgent: unknown): string | null {
+  const m = /^[^\s/]+\/(\d+)\.(\d+)\.(\d+)/.exec(string(userAgent));
+  if (!m) return null;
+  const min = CODEX_MIN_VERSION.split('.').map(Number);
+  const at = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const i = at.findIndex((n, k) => n !== min[k]);
+  return i >= 0 && at[i]! < min[i]! ? at.join('.') : null;
 }
 export const CODEX_CAPABILITIES: Capabilities = {
   provider: 'codex', compact: true, clear: true, fork: true, usage: true, fileSuggestions: true, idleCompact: true, models: true,

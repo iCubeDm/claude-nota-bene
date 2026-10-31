@@ -7,6 +7,7 @@ import type { CodexConnection } from './controls.ts';
 export class Script implements CodexConnection {
   end!: () => void;
   closed = new Promise<void>((r) => { this.end = r; });
+  ready?: Promise<unknown>;
   listener = (_m: string, _p: Record<string, unknown>) => {};
   handler: Parameters<CodexConnection['onRequest']>[0] = async () => ({});
   calls: { method: string; params: Record<string, unknown> }[] = [];
@@ -87,6 +88,18 @@ describe('Codex session ownership', () => {
     const rpc = new Script(); rpc.reply = async () => ({ account: null, requiresOpenaiAuth: true });
     const s = setup(rpc); await expect(s.session.ready).rejects.toThrow(/sign in/i); await flush();
     expect(rpc.calls.some((x) => x.method === 'thread/start')).toBe(false);
+    await s.close();
+  });
+  it('a Codex CLI older than the minimum fails before any native call, naming both versions', async () => {
+    const rpc = new Script(); rpc.ready = Promise.resolve({ userAgent: 'nota-bene/0.165.9 (Mac OS 15; arm64) (nota-bene; 1)' });
+    const s = setup(rpc); await expect(s.session.ready).rejects.toThrow(/0\.165\.9.*0\.166\.0/); await flush();
+    expect(rpc.calls).toEqual([]);
+    await s.close();
+  });
+  it.each(['nota-bene/0.166.0 (Mac OS 15; arm64)', 'nota-bene/1.0.0-beta.2 (Linux)', 'fixture', undefined])('does not refuse a Codex CLI reporting %s', async (userAgent) => {
+    const rpc = new Script(); rpc.ready = Promise.resolve({ userAgent });
+    const s = setup(rpc); await s.session.ready;
+    expect(rpc.calls.some((x) => x.method === 'thread/start')).toBe(true);
     await s.close();
   });
 });

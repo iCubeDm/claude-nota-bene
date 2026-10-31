@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { type AgentEvent, type AgentEffort as EffortLevel, type AgentMode as Mode, type ModelOption, type SlashCommand, type Stats } from '@nota-bene/shared';
 import type { ProviderSession as AgentSession, ProviderStartOptions as StartOptions } from '../types.ts';
-import { answerNative, CODEX_CAPABILITIES, limits, models, policy, type CodexConnection } from './controls.ts';
+import { answerNative, CODEX_CAPABILITIES, CODEX_MIN_VERSION, codexTooOld, limits, models, policy, type CodexConnection } from './controls.ts';
 import { array, codexInput, CodexMapper, itemId, record, string } from './map.ts';
 
 type Turn = { interruptRequested?: boolean; interruption?: Promise<void>; id?: string; ids: Set<string>; pending: number; end?: Record<string, unknown>; finished: boolean; at: number; done: Promise<void>; resolve(): void };
@@ -64,6 +64,8 @@ export class CodexSession implements AgentSession {
   }
   private fail(e: unknown) { this.failure = e instanceof Error ? e : new Error(String(e)); this.close(); }
   private async open(resume?: string, fork?: boolean): Promise<void> {
+    const old = codexTooOld(record(await this.rpc.ready).userAgent);
+    if (old) throw new Error(`Codex CLI ${old} is too old: Nota Bene needs ${CODEX_MIN_VERSION} or newer. Update Codex, then restart this session.`);
     const account = record(await this.rpc.request('account/read', {}));
     if (account.requiresOpenaiAuth === true && !account.account) throw new Error('Codex: sign in to your ChatGPT account (codex login), then restart this session.');
     if (this.model && !(await this.supportedModels()).some((m) => m.value === this.model)) { this.model = null; this.effort = null; }
