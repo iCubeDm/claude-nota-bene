@@ -88,3 +88,37 @@ Starting options, every feature with an example, the security model, where state
 ## Licence
 
 Apache-2.0. See [LICENSE](https://github.com/iCubeDm/nota-bene-ide/blob/main/LICENSE) and [THIRD-PARTY-NOTICES.md](https://github.com/iCubeDm/nota-bene-ide/blob/main/THIRD-PARTY-NOTICES.md).
+
+### Codex / ChatGPT (feature branch)
+
+Codex support uses the installed **Codex CLI 0.166.0 or newer** through its native
+`app-server`. A ChatGPT account signed in with `codex login` is sufficient; Nota Bene
+does not read authentication files or require a separate API key. Existing configured
+API-key accounts also use the native runtime.
+
+Open a provider-bound window with `nota-bene . --agent codex --detach`. The default
+without `--agent` remains Claude. Each provider has independent windows and saved
+settings; both may run in the same project. Models, skills and sessions in a Codex
+window come from Codex. Do not continue the same conversation in another client
+while the window owns it; fork when carrying a CLI/Desktop conversation over.
+
+To expose the skill in Codex CLI and local Desktop, link this checkout's skill into
+`~/.agents/skills/nb` (do not overwrite an existing skill):
+
+```sh
+mkdir -p ~/.agents/skills
+ln -s "$PWD/codex/skills/nb" ~/.agents/skills/nb
+```
+
+For an npm install, copy `codex/skills/nb` from the installed `nota-bene-ide` package
+into that skill directory; its helper finds `nota-bene` on PATH. Reload skills or
+restart Codex, then invoke `$nb`, `$nb new`, or `$nb fork` (or select nb in the
+Desktop skill picker). Desktop uses supervised detached lifetime: finishing a chat
+turn does not stop the window. Use Stop in the window to shut it down. CLI can keep
+an owned background process. `fork` needs the actual invoking host's thread id;
+without it the helper fails clearly. An already open window is brought forward,
+without applying a requested new/fork to its conversation.
+
+See [Codex support and limitations](docs/guide.md#codex-support) for verified
+behavior and remaining parity gates. The existing Claude adapter and nb skill are
+unchanged. ACP remains a future backend behind the same AgentBackend interface.

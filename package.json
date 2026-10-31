@@ -19,7 +19,8 @@
     "e2e": "playwright test -c e2e/playwright.config.ts",
     "dev": "node scripts/dev.mjs",
     "start": "npm run build -w web && node server/src/main.ts",
-    "dev:open": "node scripts/dev-open.mjs"
+    "dev:open": "node scripts/dev-open.mjs",
+    "e2e:codex": "playwright test -c e2e/codex.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

@@ -45,10 +45,10 @@ export function packageJson() {
     license: 'Apache-2.0',
     type: 'module',
     bin: { [BIN]: 'bin/nota-bene.mjs' },
-    files: ['bin/nota-bene.mjs', 'server/src/main.js', 'server/src/blend', 'web/dist', 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md'],
+    files: ['bin/nota-bene.mjs', 'server/src/main.js', 'server/src/blend', 'web/dist', 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'codex/skills/nb'],
     engines: { node: NODE_RANGE },
     dependencies: runtimeDependencies(),
-    keywords: ['claude', 'claude-code', 'ide', 'agent'],
+    keywords: ['claude', 'claude-code', 'codex', 'ide', 'agent'],
   };
 }
 
@@ -82,6 +82,7 @@ export async function buildPackage({ out = path.join(ROOT, 'pkg'), skipWeb = fal
 
   fs.mkdirSync(path.join(out, 'server/src/blend'), { recursive: true });
   for (const f of ['export.py', 'sandbox.sb']) fs.copyFileSync(path.join(ROOT, 'server/src/blend', f), path.join(out, 'server/src/blend', f));
+  fs.cpSync(path.join(ROOT, 'codex/skills/nb'), path.join(out, 'codex/skills/nb'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'LICENSE'), path.join(out, 'LICENSE'));
   fs.copyFileSync(path.join(ROOT, 'README.md'), path.join(out, 'README.md'));
   fs.copyFileSync(path.join(ROOT, 'THIRD-PARTY-NOTICES.md'), path.join(out, 'THIRD-PARTY-NOTICES.md'));

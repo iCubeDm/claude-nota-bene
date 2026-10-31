@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('..', import.meta.url));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-codex-e2e-'));
+const project = path.join(tmp, 'project'), home = path.join(tmp, 'home');
+fs.mkdirSync(project); fs.mkdirSync(path.join(home, 'providers/codex'), { recursive: true });
+fs.writeFileSync(path.join(project, 'notes.md'), '# Review file\n');
+fs.writeFileSync(path.join(home, 'providers/codex/token'), createHash('sha256').update('nota-bene e2e codex').digest('hex'), { mode: 0o600 });
+const env = { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: createHash('sha256').update('nota-bene e2e nonce codex').digest('hex').slice(0, 32), NOTA_BENE_CODEX: path.join(root, 'server/test/fixtures/codex-app-server.mjs'), NB_CODEX_FIXTURE_CWD: project, NB_CODEX_FIXTURE_STATE: path.join(tmp, 'turns.json') };
+delete env.NOTA_BENE_LAUNCHER_PID; delete env.NOTA_BENE_SUPERVISED;
+const child = spawn(process.execPath, [path.join(root, 'server/src/main.ts'), project, '--agent', 'codex', '--port', '4795'], { env, stdio: 'inherit' });
+child.on('exit', (code) => { fs.rmSync(tmp, { recursive: true, force: true }); process.exit(code ?? 0); });
+for (const s of ['SIGTERM', 'SIGINT']) process.on(s, () => { child.kill('SIGTERM'); });

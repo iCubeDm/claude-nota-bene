@@ -380,3 +380,46 @@ NOTA_BENE_EXPERIMENTAL_3D=1 nota-bene .
 A `.blend` file needs Blender on the machine: the path in `NOTA_BENE_BLENDER`, else `blender` on `PATH`, else `/Applications/Blender.app/Contents/MacOS/Blender`. Blender converts the file in a locked-down mode (and under `sandbox-exec` on macOS), refuses a file that references files outside the project, takes one conversion at a time and gives up after 120 seconds. Models over 256 MB are not shown.
 
 The variable is read when the server starts. If a window for the folder is already open, a new launch only brings that window to the front, and the variable is ignored: the open window keeps the setting it started with. Stop the window first, then launch again.
+
+## Codex support
+
+Select the provider at launch: `nota-bene . --agent codex --detach`. The browser
+stays bound to that vendor. Default launches still use Claude; no transcript
+conversion or cross-provider model switch occurs. Codex state is under the normal
+Nota Bene state root's `providers/codex` directory. Secrets, settings, windows,
+comments and archives are isolated from Claude.
+
+Codex CLI 0.166.0+ is required for the native paginated history and experimental
+terminal APIs. `NOTA_BENE_CODEX` can select a Codex executable. Account sign-in is
+handled by native Codex; the window offers sign-in/retry when needed.
+
+Implemented flows include new/resume/fork/list/switch, streamed replies, command,
+file and MCP tool results, paginated history with stable comment anchors, text and
+image input, file search, skill discovery, model/reasoning selection, interruption,
+manual and idle compaction, clear, context usage and actual account limit windows.
+Child conversations are opened as subagent tabs. Native background terminals can
+be discovered and stopped. Models and permission profiles apply to the next turn.
+The configured profile inherits Codex's actual settings; explicit read-only,
+workspace and full-access profiles are distinct from Claude modes. Full access
+turns off sandboxing and approval prompts. Native advertised approval choices,
+user questions and MCP form requests are answered through the browser.
+
+Unavailable native facts stay unknown: ChatGPT session cost is not reported in
+USD, context usage is empty before native token data, and a compaction without a
+reported pre-token count does not invent one.
+
+Full feature parity is **not yet achieved**. Current explicit gates:
+
+- Codex app-server exposes terminal discovery/termination, but no supported API
+  was found to force an arbitrary foreground tool into the background. The
+  browser does not offer that action for Codex.
+- No supported native next-prompt suggestion stream was verified. Nota Bene does
+  not start additional model calls to fabricate suggestions.
+- The native terminal API does not expose an output-tail read operation. Terminal
+  tasks can be stopped, but the output-tail tab is unavailable for Codex.
+- MCP device verification requires a native host authenticator and is not supported
+  by the browser form bridge. Such requests fail explicitly rather than claiming
+  verification. Ordinary form and URL elicitation are supported.
+
+These are Codex gaps; Claude retains its existing controls. Before considering the
+backends merged, decide supported UX for those workflows or wait for native APIs.
