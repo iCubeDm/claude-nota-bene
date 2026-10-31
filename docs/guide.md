@@ -54,8 +54,8 @@ npx nota-bene-ide [dir] [options]
 | `--new` | Start a fresh session. Cannot be combined with `--resume`. |
 | `--detach` | Start the window on its own and return after printing one line, `opened URL` or `already-open URL`. The log is `$TMPDIR/nota-bene-PORT.log`. |
 | `--no-open` | Do not open the browser. |
-| `--url PORT` | Print the login URL of the window on PORT. Use it to log in a second browser. |
-| `--front PORT` | Bring the window on PORT to the front in the browser, logged in. |
+| `--url PORT` | Print the login URL of the window on PORT. Use it to log in a second browser. For a Codex window add `--agent codex`. |
+| `--front PORT` | Bring the window on PORT to the front in the browser, logged in. For a Codex window add `--agent codex`. |
 
 Without `--detach` the launcher stays in the foreground; Ctrl-C stops the server and closes the window. The first line it prints after any build is `Nota Bene: URL  project: DIR`.
 
@@ -391,7 +391,7 @@ Nota Bene state root's `providers/codex` directory. Secrets, settings, windows,
 comments and archives are isolated from Claude.
 
 Codex CLI 0.166.0+ is required for the native paginated history and experimental
-terminal APIs. `NOTA_BENE_CODEX` can select a Codex executable. Account sign-in is
+terminal APIs; a window started on an older CLI says so and starts no session. `NOTA_BENE_CODEX` can select a Codex executable. Account sign-in is
 handled by native Codex; the window offers sign-in/retry when needed.
 
 Implemented flows include new/resume/fork/list/switch, streamed replies, command,
@@ -422,8 +422,7 @@ Full feature parity is **not yet achieved**. Current explicit gates:
   by the browser form bridge. Such requests fail explicitly rather than claiming
   verification. Ordinary form and URL elicitation are supported.
 
-These are Codex gaps; Claude retains its existing controls. Before considering the
-backends merged, decide supported UX for those workflows or wait for native APIs.
+These are Codex gaps; Claude retains its existing controls.
 
 Development checks for this integration:
 

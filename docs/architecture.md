@@ -1,20 +1,18 @@
 # Nota Bene architecture
 
-State as of 2026-10-31, release 1.1.0 on `main`.
+State as of 2026-10-31, release 1.1.1 on `main`.
 
 ## 1. Overview
 
 Nota Bene is a local web application. One **window** is one server process, one project folder, one port from 4777 to 4799 and one agent session (Claude Code or Codex). The provider is fixed at launch; session discovery and persisted state are scoped to it. One browser tab works with the window (the owner); other tabs see "the window is already open" and can take it over.
 
-The diagram below shows the Claude process path. The same SessionManager also
-accepts the Codex backend through `AgentBackend` / `AgentSession`. That adapter owns
-a native `codex app-server` JSON-RPC child, normalizes live events and paginated
-history, and exposes explicit capabilities. Native SDK/RPC shapes stay in adapters.
-Codex state lives under `<base-state>/providers/codex`; Claude keeps the legacy base.
+Both providers implement the same `AgentBackend` / `AgentSession` contract. The
+server selects one at startup; the browser consumes normalized events and declared
+capabilities. Claude SDK types and Codex RPC frames stay inside their adapters.
 ACP remains a future backend.
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph Browser["Browser (the window's owner tab)"]
     UI["React UI"] --> RS["Redux store"]
     RS <--> WSC["net/socket.ts"]
@@ -29,9 +27,13 @@ flowchart LR
     SH["ShellRunner: ! commands"]
     STORES["CommentStore · AttachmentStore · MarkFiles · prefs · state"]
     FR["fileRoutes · git · system"]
-    SDK["agent/claude/sdk.ts → Claude Agent SDK"]
+    AB["AgentBackend / AgentSession"]
+    SDK["agent/claude: Claude Agent SDK"]
+    CX["agent/codex: session, mapper, controls"]
+    RPC["CodexRpc: JSON-RPC over stdio"]
   end
-  CLI["Claude Code CLI (child process of the SDK)"]
+  CLI["Claude Code CLI (SDK-owned child)"]
+  CODEX["codex app-server (adapter-owned child)"]
   L["bin/nota-bene.mjs: launcher and supervisor"]
   WSC <--> WSS
   HTTPC --> HTTP
@@ -39,7 +41,9 @@ flowchart LR
   SM --> HUB --> WSS
   SM --> ARC
   SM --> SH
-  SM --> SDK --> CLI
+  SM --> AB
+  AB --> SDK --> CLI
+  AB --> CX --> RPC --> CODEX
   HTTP --> FR
   HTTP --> STORES
   L -- "spawn, exit code 75 = restart" --> Server
@@ -49,38 +53,70 @@ flowchart LR
 
 | Package | Contents |
 |---|---|
-| `shared/` | One file, `shared/src/protocol.ts`: the protocol types (`ClientMessage`, `ServerEvent`, `AgentEvent`, `Comment`, `Anchor`, `MediaShape`), the validator `parseClientMessage` and the `PROTOCOL` version. The contract shared by web and server. |
+| `shared/` | The contract shared by web and server. `protocol.ts`: the protocol types (`ClientMessage`, `ServerEvent`, `Comment`, `Anchor`, `MediaShape`, `Capabilities`), the validator `parseClientMessage` and the `PROTOCOL` version. `agent.ts`: the normalized `AgentEvent`. `tasks.ts`: the pure task reducer `reduceTasks`. |
 | `server/` | In a checkout, Node >= 23.6 runs the `.ts` files directly, with no build. The published package ships the server compiled to plain JS (Node >= 22). Dependencies: `@anthropic-ai/claude-agent-sdk` and `ws`, nothing else (no HTTP framework). |
 | `web/` | React 19, Redux Toolkit 2, Radix UI, Tailwind 4, Vite 8. Markdown on `marked` + `dompurify` + `highlight.js` + `mermaid`. Fonts (Inter, Geist Mono) are bundled; the page makes no request to a font service. |
 | `bin/nota-bene.mjs` | The launcher: port choice, folder lock, rebuild of a stale `web/dist`, supervision, and the helpers `--find`, `--last`, `--url`, `--front`. |
+| `codex/` | Codex marketplace plugin (`plugin.json`) and CLI/Desktop skill (`skills/nb/`). `.agents/plugins/marketplace.json` selects this plugin for Codex. |
 | `plugin/skills/nb/` | The `/nb` skill for Claude Code (inside the plugin `plugin/`): `open.sh --plan / --wait / --run`. |
-| `e2e/` | Playwright on a fake agent (`server/src/agent/fake.ts`, `--fake script.json`). |
+| `e2e/` | Playwright on scripted fake agents, plus Codex browser acceptance through a fixture app-server (`codex.config.ts`). |
 
 ## 2. Processes and lifecycle
 
 ```mermaid
 sequenceDiagram
-  participant CC as Claude Code (/nb)
+  participant CC as Invoking CLI or local Desktop
   participant L as Launcher
   participant S as Window server
-  participant A as Agent CLI
-  CC->>L: node bin/nota-bene.mjs dir
-  L->>L: folder lock, free port, build web/dist if stale
+  participant A as Provider runtime
+  CC->>L: nota-bene dir --agent claude or codex
+  L->>L: provider state, folder lock, free port, checkout build if stale
   L->>S: spawn main.ts (NOTA_BENE_LAUNCHER_PID, NOTA_BENE_SUPERVISED=1, NOTA_BENE_NONCE)
   S->>S: windows/PORT.json, resume the last session
-  S->>A: query() through the SDK
+  alt Claude
+    S->>A: SDK query() owns Claude CLI
+  else Codex
+    S->>A: spawn app-server, initialize, thread/start or resume or fork
+  end
   Note over S,L: exit 75 = immediate restart with --continue<br/>0, 130, 143 = stop, anything else = crash: restart after 1 s, give up at 5 in 60 s
   S-->>L: every 2 s compares ppid, launcher gone = exit
 ```
 
 - **Supervision runs both ways.** The launcher restarts the server. The server exits by itself if the launcher is gone (`watchLauncher`). A foreground launcher in turn stops when the shell that started it is gone (`watchParent`), unless it is a `--detach` child. Launcher environment variables that were not inherited from the direct parent are dropped (`dropInheritedLauncherEnv`), so a test server started from inside a window does not think it is supervised.
 - **The launcher's secrets.** The launcher creates a random per-launch nonce and passes it to every server it starts (env `NOTA_BENE_NONCE`). Exit 75 keeps it, so open tabs stay logged in. After a crash it is replaced and the launcher opens a fresh login page. See section 6.
-- **The window registry** `~/.nota-bene/windows/<port>.json` serves "one window per folder" and Settings, Windows. A launch takes a per-folder lock (`locks/<hash>`), then gives way to a window already serving the folder, waiting up to 10 s for one that is in its restart gap.
+- **The window registry** `~/.nota-bene/windows/<port>.json` serves "one window per folder per provider" and Settings, Windows. Codex uses the equivalent registry under `~/.nota-bene/providers/codex/`; locks, tokens and discovery use that same provider scope. A launch takes a per-folder lock (`locks/<hash>`), then gives way to a window already serving the folder, waiting up to 10 s for one that is in its restart gap.
 - **Control between windows** (M6-15). Window A sends `POST /system/windows/action`; its server proxies the request to `127.0.0.1:<port B>/control/<action>` with the token from `<stateDir>/control-token` (mode 600). `/control/*` rejects any request that has an `Origin` header, so only a server can reach it, never a page.
+
+**Invoking-host lifetime.** Claude's `/nb` owns a background launcher tied to its
+calling session. The Codex skill uses an owned background process in CLI, or
+`--detach` from local Desktop. A detached supervisor survives the end of the
+invoking turn; explicit Stop in the window ends it. A window already open for the
+same project and provider is brought forward; a requested new/fork is not applied
+to that existing conversation. Fork requires the invoking host's actual session id.
 
 ### 2.1 Package and the 3D flag
 
-`scripts/build-package.mjs` builds the npm package into `pkg/`. The server and the launcher are bundled by esbuild into JS at the same directory depth as the sources (so the relative `import.meta` paths to `web/dist` and to the blend assets stay correct), `@nota-bene/shared` is inlined, and `web/dist` is built fresh. The installed package has no `web/src` and no `.git`: the launcher never builds, `codeChanged` is always false, and the version comes from `package.json`. The `/nb` skill finds the launcher in a checkout first, otherwise it installs the package `nota-bene-ide@<plugin version>` into the plugin's data folder on the first run. 3D viewing is experimental and off by default (`NOTA_BENE_EXPERIMENTAL_3D=1`): the server announces the flag in `hello.capabilities.model3d`, and before that hello the web treats models as ordinary files.
+`scripts/build-package.mjs` builds the npm package into `pkg/`. The server and the launcher are bundled by esbuild into JS at the same directory depth as the sources (so the relative `import.meta` paths to `web/dist` and to the blend assets stay correct), `@nota-bene/shared` is inlined, and `web/dist` is built fresh. The installed package has no `web/src` and no `.git`: the launcher never builds, `codeChanged` is always false, and the version comes from `package.json`. Claude's `/nb` skill finds the launcher in a checkout first, otherwise it installs the package `nota-bene-ide@<plugin version>` into the plugin's data folder on the first run. 3D viewing is experimental and off by default (`NOTA_BENE_EXPERIMENTAL_3D=1`): the server announces the flag in `hello.capabilities.model3d`, and before that hello the web treats models as ordinary files.
+
+### 2.2 Codex plugin distribution
+
+The repository has separate marketplaces for the two hosts: Claude reads
+`.claude-plugin/marketplace.json` and installs `plugin/`; Codex reads
+`.agents/plugins/marketplace.json` and installs `codex/`. The latter contains a
+portable `plugin.json`, `skills/nb/SKILL.md` and `open.mjs`. The skill runs the helper
+through `npm exec --yes --omit=optional --package=nota-bene-ide@<version> -- node ...`,
+so first use fetches the pinned runtime and later uses npm's cache. `--omit=optional`
+skips the SDK's per-platform Claude binary (about 70 MB instead of 330 MB); the SDK's JS
+stays and loads, and only a Claude session would need the binary. No global npm installation
+or manual skill copy is required. The helper selects `--agent codex`, handles
+CLI/Desktop lifetime and redacts browser login fragments from its output.
+
+The npm archive contains the compiled application and standalone Codex skill;
+the marketplace manifest and bootstrap instructions are distributed separately
+from GitHub. Each `v<version>` tag identifies the exact npm source; repository-only
+plugin/docs additions may follow it on `main`. Publishing a plugin update does not replace
+the immutable npm archive. This repository marketplace is for local clients;
+it is not a listing in the public ChatGPT plugin directory.
 
 ## 3. Server
 
@@ -95,24 +131,33 @@ sequenceDiagram
 | `http.ts` | No framework. Order: Host allowlist, then `/control/` (token, no Origin) or Origin for non-GET, then the open routes (`/auth`, `/hello`), then the auth check for everything else, then prefix routes (`/attach/`, `/marks/`, `/control/`), exact routes, `/info`, and last the static files of `web/dist` with an SPA fallback. |
 | `hub.ts` | `EventHub`: the in-memory event history of the current session. A connecting socket gets `replay` (with `earlier`, the number of archived segments), then live events. `reset()` replaces the history (switch, `/clear`, restart). `cut()` moves everything before a compaction boundary into the archive; some events (sends not yet finished) stay in both the history and the archive. |
 | `archive.ts` | `HistoryArchive`: `history/<sid>.jsonl`, one line per segment (the conversation before a compaction), fsync on write, a broken line is skipped. The route `/history?session=&before=`. |
-| `subagent.ts` | The route `GET /subagent?session=&tool=` (protocol 7): the conversation of the subagent started by the Agent call with tool-use id `tool`. The answer is `{events, running, type, description}`. 400 for an id outside `[A-Za-z0-9_-]` (both ids end up in file paths), 409 for a conversation that is not the current one (as with `/history`), 404 if there is no such subagent. It goes through `AgentBackend.subagent(...)`: the real backend takes the agent id from `agent-<id>.meta.json` (`toolUseId`; this is not an SDK API and is read in one place, `agent/claude/subagents.ts`), with a fallback to the `agentId: …` line in the call's result. Messages come from `getSubagentMessages` through `transcriptToEvents(..., { subagent: true })` (the SDK marks every subagent message with the id of the parent call, so the live mapper would take them for nested ones and drop the text). `running` comes from `finished` / `stoppedByUser` in the meta. |
-| `taskOutput.ts` | The route `GET /task-output?session=&task=` (protocol 8): the tail of the output of a background shell or Monitor task, `{output, totalBytes, truncated, running}` (up to 8 KiB, with escape sequences, which the client cleans). Rules as for `/subagent`: 400 for an id outside `[A-Za-z0-9_-]`, 409 for a conversation that is not the current one, 404 if the server does not know the task (`hub.task(id)`) or it is not a shell one, 502 if the agent did not answer. `running` is read BEFORE the output: `false` means the output was read after the task ended. It goes through `SessionManager.taskOutput` and `AgentSession.taskOutput` (real: the SDK control request `get_task_output`). |
+| `subagent.ts` | The route `GET /subagent?session=&tool=` (protocol 7): the conversation of the subagent started by the Agent call with tool-use id `tool`. The answer is `{events, running, type, description}`. 400 for an id outside `[A-Za-z0-9_-]` (both ids end up in file paths), 409 for a conversation that is not the current one (as with `/history`), 404 if there is no such subagent. It goes through `AgentBackend.subagent(...)`: the Claude backend takes the agent id from `agent-<id>.meta.json` (`toolUseId`; this is not an SDK API and is read in one place, `agent/claude/subagents.ts`), with a fallback to the `agentId: …` line in the call's result. Messages come from `getSubagentMessages` through `transcriptToEvents(..., { subagent: true })` (the SDK marks every subagent message with the id of the parent call, so the live mapper would take them for nested ones and drop the text). `running` comes from `finished` / `stoppedByUser` in the meta. Codex instead resolves native child thread ids and reads their paginated history/status through app-server; it does not inspect Claude files. |
+| `taskOutput.ts` | The route `GET /task-output?session=&task=` (protocol 8): the tail of the output of a background shell or Monitor task, `{output, totalBytes, truncated, running}` (up to 8 KiB, with escape sequences, which the client cleans). Rules as for `/subagent`: 400 for an id outside `[A-Za-z0-9_-]`, 409 for a conversation that is not the current one, 404 if the server does not know the task (`hub.task(id)`) or it is not a shell one, 502 if the agent did not answer. `running` is read BEFORE the output: `false` means the output was read after the task ended. It goes through `SessionManager.taskOutput` and `AgentSession.taskOutput` (Claude: SDK control request `get_task_output`). Codex declares `taskOutput: false`, so the UI does not offer this view for native terminals. |
 | `blend.ts`, `blend/export.py` | The route `GET /model?path=&src=` (`.blend` only, else 400): the file is converted to GLB by the local Blender and served as `model/gltf-binary`. The path, the sandbox and `src=` are the same as for `/file` (`resolveInRoot`; a branch is read as a blob, anything else as a file). **Finding Blender** (`findBlender`): `NOTA_BENE_BLENDER` if set (authoritative: a wrong path means "no Blender", with no fallback to the others), else `blender` on PATH, else `/Applications/Blender.app/Contents/MacOS/Blender`. `/info.blender` says whether one was found. **Safety** (a .blend may come from the agent): always `-b --disable-autoexec --factory-startup --offline-mode -noaudio --python-exit-code 1`, `spawn` with an argument array (no shell), nothing is substituted into Python code: the output path and the allowed roots go after `--` into `sys.argv` of the fixed `blend/export.py`. The child's environment is cut down to PATH, HOME, TMPDIR and LANG (the server's keys and tokens are not passed), and its cwd is a temporary folder. A project file (this checkout or a worktree) is opened by Blender **in place**, so that `//tex.png` finds its neighbours. The hash is computed before and after; if they differ (the file changed), the answer is served but not cached. A branch blob is written to a temporary file. **References outside:** before exporting, `export.py` checks `bpy.utils.blend_paths(absolute=True, packed=False)` (images, libraries, fonts, sounds, movie clips, volumes, cache files, strips; packed data does not count) against the `realpath` of the source root (a branch blob has no roots: only packed data is allowed) and the Blender install folder. It refuses on any `GeometryNodeImport*` node in any group (Import Text, CSV, OBJ, PLY, STL and VDB read an arbitrary file, and the path can be computed) with 422 `{error:'outside-refs', paths}`, and the tab shows the paths. Checked on 5.2.1: `blend_paths` lists sounds, volumes and movie strips; images, clips and fonts cannot be created without an existing file, and their coverage follows from how BPath is built. `/model` refuses a `Sec-Fetch-Site` other than `same-origin` or `none` (it is the first GET that starts a process). The Blender child is tracked: the server's `close()` and the process `exit` event kill it with SIGKILL, and work folders older than an hour are removed on the first run. The static check also covers what `blend_paths` does not list: an on-disk bake in geometry nodes (its meta file names blob files with `../`, so any file is readable; packed bakes are allowed), an external point cache, and every UDIM / UVTILE tile by realpath. **OS sandbox (defence in depth):** on macOS Blender runs under `/usr/bin/sandbox-exec` with the fixed profile `blend/sandbox.sb` (deny default): reads only the system, the Blender install, the realpath of the source root (for a branch blob, the work folder) and the work folder; writes only to the work folder; no network. Paths go in as `-D` parameters, never into the profile text, and the child's `HOME` and `TMPDIR` are the work folder. The static check stays (it gives a clear reason and works without the sandbox); a test switches it off with `skipStaticCheck` (tests only) and shows that the sandbox alone stops a tile leak. Not macOS (or no `sandbox-exec`): Blender runs without it and a warning is written once. If `sandbox-exec` cannot apply (the server itself is inside a sandbox), the conversion fails instead of silently running without it. Residual risk: bugs in Blender's parser inside the sandbox. **Cache** `<NOTA_BENE_HOME>/cache/blend/<key>-<Blender version>.glb` (the version from `Blender --version`, once per binary); a hit answers without starting Blender; the ETag is the hash. **Queue:** one conversion at a time per server, identical requests in flight share one, a 120 s timeout (SIGTERM, SIGKILL after 3 s) gives 504. No Blender gives 501 `{error:'no-blender'}`; a failed export (including an empty result) gives 422 `{error, detail}` with the last lines of Blender's output. The cache key is sha256 of (content hash, `realpath` of the source root, `realpath` of the file's folder): the same bytes in another folder or project are converted and checked again. |
-| `session.ts` | `SessionManager`, a facade (394 lines): `pump()`, the wiring of the parts, and the public methods (`send`, `switchTo`, `restart`, `setMode`, `shellRun`, …). |
+| `session.ts` | `SessionManager`, a facade: `pump()`, the wiring of the parts, and the public methods (`send`, `switchTo`, `restart`, `setMode`, `shellRun`, …). |
 | `session/` | The manager's parts: `phase` (the phase `live / switching / closed`), `turns` (`TurnLedger`: accounting of sends), `permissions` (`PermissionBroker`), `title`, `agentSlot` (the agent and its generation `gen`), `identity` (id, root, model, fork), `mode`, `sendQueue`, `target` (check of a switch target), `archiveCut` (the cut at `compacted`), `history` (loading the feed), `idleWiring`, `images`, `options`, `types`, `commands` (`CommandKeeper`: the slash menu's list) and `shell` / `shellText` (`ShellRunner`: the `! cmd` runs, below). |
 | `agent/types.ts` | The interfaces `AgentBackend` / `AgentSession`, the seam for replacing the agent. The agent produces `AgentEvent`; `capabilities` declare what it can do (modes, commands, fork, idle-compact). |
-| `agent/claude/sdk.ts` | The real backend: `query()` with streaming input (`InputQueue`), `canUseTool` to `PermissionAsk`, the `claude_code` preset prompt plus `APPEND` (mermaid, file paths, comment batches), and `--chrome` so the session has the browser tools. |
+| `agent/claude/sdk.ts` | The Claude backend: `query()` with streaming input (`InputQueue`), `canUseTool` to `PermissionAsk`, the `claude_code` preset prompt plus `APPEND` (mermaid, file paths, comment batches), and `--chrome` so the session has the browser tools. |
 | `agent/claude/map.ts` | Translation of SDK frames into `AgentEvent`: the only place where SDK keys enter the stream. |
 | `agent/claude/commands.ts` | What the `/` menu offers: every command or skill that is not a CLI built-in, plus the built-ins in the allowlist `BUILTIN_OK` (each tried against a real CLI without a terminal), and never a command the CLI tags `terminal_slash_commands`. |
+| `agent/provider.ts` | Validates `claude` / `codex` and derives provider state directories. Claude is the default. |
+| `agent/codex/backend.ts` | Native session listing and cwd validation, account/login, history, subagent lookup, session ownership and a lazy metadata RPC connection. |
+| `agent/codex/rpc.ts` | Owned app-server process (a CLI older than `CODEX_MIN_VERSION`, read from `initialize.userAgent`, is refused before any native call; a `userAgent` it cannot parse passes), newline-delimited JSON-RPC, initialization, request correlation, timeouts/abort, native request withdrawal and process-group cleanup. |
+| `agent/codex/session.ts` | Native thread/turn lifecycle, send/steer/interrupt, clear/compact, skills/models, context/limits and task discovery/stop. |
+| `agent/codex/map.ts`, `history.ts` | One item/id mapping for live and paginated historic events; durable archive reconciliation at compaction. |
+| `agent/codex/controls.ts` | Capabilities, approval/sandbox profiles, native interaction answers, model descriptors and variable-duration usage windows. |
 | `agent/fake.ts` | A scriptable backend for e2e. |
 | `agent/claude/transcript.ts` | Transcript to `ServerEvent[]` for replay; images go to the `AttachmentStore`. |
+| `tmpImage.ts` | The route `GET /tmpimage?path=` on the key tier (never the cookie): an image the agent left in a system temp folder (`/tmp`, `/private/tmp`, `os.tmpdir()`). Images only (png, jpg, jpeg, gif, webp, avif, bmp, svg), by the extension of the path and of its realpath; the realpath must be inside a temp folder and outside the state folders; regular files only, up to 50 MB. Anything else is one 404 body, so the route is no oracle for existence. No listing, no search. The folders reach the page in `hello.tmpDirs`. |
 | `comments.ts` | `CommentStore`: `comments/<sessionId>.json`. A session without an id lives in memory and `adopt()` moves it under the real id. |
 | `attachments.ts` | Content-addressed images (`sha256.ext`) up to 3.75 MiB. `POST /attach`, `GET /attach/<id>`, restoring from the trash. |
 | `marks.ts` | The only write into the project folder: `<root>/.nota-bene/marks/<commentId>/{frame.jpg,layer.png}`, with a self-ignoring `.nota-bene/.gitignore`. Magic-byte check, symlinks refused. |
 | `fileRoutes.ts`, `files.ts`, `git.ts` | `/tree`, `/file` (Range, sandbox headers), `/complete`, `/sources`, `/git-status`. Sources: the current checkout, other worktrees (from disk) and branches (through git blobs). |
 | `system.ts` | Settings: about, prefs, storage (including `history/`) and cleaning into the trash (including stale archives), windows, the control token. |
+| `sessions.ts` | The route `/sessions`, titles, and each Claude session's working folder from the head of its transcript. |
+| `range.ts`, `fuzzy.ts`, `errors.ts`, `codeStamp.ts` | HTTP Range parsing; the fuzzy path score of `/complete`; `reportError` / `guard` (a failure becomes a `server-error` event); "the server's own sources changed since start" for `/info`. |
 | `prefs.ts`, `state.ts`, `windows.ts` | JSON state files (written through tmp + rename). `state.ts` also owns the state folder (created 700) and refuses one owned by another user. |
-| `stats.ts`, `idle.ts` | Context, limits and cost (polling the SDK). Idle compaction: 50 min after a turn, 15 min with no activity, context of 200k tokens or more. |
+| `stats.ts`, `idle.ts` | Context, limits and cost through `AgentSession` (Claude SDK usage or Codex token/rate-limit data; Codex cost is unknown). Idle compaction: 50 min after a turn, 15 min with no activity, context of 200k tokens or more. |
 
 ### 3.2 How SessionManager works
 
@@ -123,11 +168,11 @@ sequenceDiagram
 - **Agent and generation (`AgentSlot`).** The generation `gen` grows at every teardown (switch, close). Everything the old agent may send later (messages, permission requests, answers to mode and title, a deferred send) carries its own `g` and is dropped when `g !== gen`. This is the main defence against events of an old session leaking into a new one.
 - **`SendQueue`** replaced `chain`: sends go to the agent one at a time, so the interrupt of a `force` send arrives after the earlier sends and before it, and a send from a past generation is dropped quietly.
 - **`PermissionBroker`**: a request goes `open → answered | aborted`; an answer to an unknown or closed request is ignored (a second socket, a click after withdrawal).
-- **`pump()`** reads `a.messages`, a stream of `AgentEvent` (SDK frames are translated by `agent/claude/map.ts`):
+- **`pump()`** reads `a.messages`, a stream of `AgentEvent` (Claude SDK frames are translated by `agent/claude/map.ts`; Codex notifications/items by `agent/codex/map.ts`):
   - it reconciles `waiting` with `turn-end` by `answers` and with `cancelled`;
   - it intercepts `reset` (`/clear`);
   - it watches `init` (session id, model, mode, the entry in `sessions.json`) and `compacted`;
-  - everything except `init` and `rate-limit` (which are internal) goes to the hub as `{kind:'agent', e}` (protocol 5).
+  - everything except `init` and `rate-limit` and `commands` (which are handled separately) goes to the hub as `{kind:'agent', e}` (protocol 5).
 - **Cut at compaction (`archiveCut`).** After the `compacted` event, in the same synchronous step where the generation was checked, `hub.cut()` writes the conversation before the boundary to the archive. The replay keeps what follows it, plus sends not yet finished (including the `/compact` itself). A write error is reported and cuts nothing. A conversation with no id of its own (a new session before `init`, a fork before its new id, a session after `/clear`) has no cut, and **a fork never offers its parent's archive**: `SessionIdentity.ownId` is `null` for it, `earlier` in the replay is 0, and `/history` answers 409.
 - **`switchTo`**: check the target (`target`), then teardown (`gen++`, close the agent, wait for the loop to end for at most 5 s), then new state, then `load()` (`hub.reset` + transcript replay + `resumed`), then mode/idle/stats, then the `onSwitch` listeners, then `ensureAgent()`. A new session may only be opened in the current root or in a folder that already has sessions: a local client must not be able to re-root `/file` to `/` or `~`.
 - **`restart`** is `switchTo(sessionId, root, restart=true)`. It is an escape hatch: it is allowed while the agent is busy (the interrupt takes at most 2 s).
@@ -140,15 +185,15 @@ Two channels with a clear split:
 
 | Channel | What goes through it | Why |
 |---|---|---|
-| **WebSocket `/ws`** | Live session state: `agent` (`AgentEvent`), `user`, `permission*`, `session`, `mode`, `stats`, `comments`, `idle-compact`, `commands`, `shell-start` / `shell-out` / `shell-end` / `shell-refused`, `hello{capabilities}`, `replay{earlier}`, `send-refused`, `server-error`; window ownership: `occupied`, `taken-over`, from the client `takeover`, closing with code 4001 | Needs push and ordering of events. There is one receiver, the owner tab. |
-| **HTTP** | Files, tree, search, attachments, media markup, the session list, `/history` (the archive before compactions), `/subagent` (a subagent's conversation), `/task-output` (the tail of a shell task's output), `/model` (.blend to GLB through Blender), Settings, `/info`, `/restart-server` | Request and response, cacheable, Range for video. |
+| **WebSocket `/ws`** | Live session state: `agent` (`AgentEvent`), `user`, `permission*` (including structured interactions), `session`, `mode`, `stats`, `comments`, `idle-compact`, `commands`, `shell-start` / `shell-out` / `shell-end` / `shell-refused`, `hello{capabilities}`, `replay{earlier}`, `send-refused`, `server-error`; window ownership: `occupied`, `taken-over`, from the client `takeover`, closing with code 4001 | Needs push and ordering of events. There is one receiver, the owner tab. |
+| **HTTP** | Files, tree, search, attachments, media markup, temp images (`/tmpimage`), the session list, `/history` (the archive before compactions), `/subagent` (a subagent's conversation), `/task-output` (the tail of a shell task's output), `/model` (.blend to GLB through Blender), Settings, `/agent-account`, `/info`, `/restart-server` | Request and response, cacheable, Range for video. |
 
 Protocol rules:
 
 - `parseClientMessage` validates incoming messages strictly and **rebuilds them only from known fields** (`toComment`, `toAnchor`), so stray keys reach neither the store nor the broadcast.
 - **Transient events** are not kept in the history (`store:false`): `comments`, `stats`, `mode`, `idle-compact`, `commands` and `shell-out` (the output of a `! cmd` run; its `shell-start` and `shell-end` are stored). A connecting socket gets them as separate frames after the replay, and `hello{protocol}` comes last.
 - **Subagents (protocol 7).** A message anchor can name a subagent: `{kind:'message', id, agent?}`, where `agent` is the tool-use id of the Agent call (`isAnchor` / `toSource` let only that field through; the id is checked as a plain id). The client lets you select in a subagent's tab (and sends such comments) only to a server with protocol 7 or later, because an older server would silently lose the field and attribute the comment to the main chat. In the batch the source reads `subagent reply «description»` (no numbers, like a plain `reply`), and for an action `Bash command (npm test) · subagent «description»`; the quote stays the locator. A comment on a conversation that is not loaded shows as orphaned and is not lost; "jump to source" opens the tab and looks for the fragment.
-- **Versioning.** All windows serve one shared `web/dist`, so a reloaded page can be newer than its server. The client sends new message types only to a server that announced the needed `PROTOCOL` (now 11). Protocol 11: the client messages `shell-run {id, cmd}` and `shell-stop {id}`, and the server events `shell-start`, `shell-out`, `shell-end` and `shell-refused`; before it the page keeps a `!` draft a plain message. Protocol 10: the server event `commands` (the slash menu). Protocol 9: the anchor of a media comment can carry `camera {position, target, fov}` (a comment on a view of a 3D model); a server older than 9 would drop the field, so the client offers markup on the model tab only to a server at 9 or later. Protocol 8: the client messages `task-stop {id}` and `task-background {toolUseId}` (a refusal or "nothing to move to the background" arrives as a `server-error` event with `where: 'task'`, that is a toast) and `/task-output`; without it the client shows no Stop / "To background" and does not open a shell task's tab (the buttons are absent, not disabled). Protocol 7: the subagent anchor and `/subagent`. Protocol 6: switching model and effort. Protocol 5: the `agent` stream instead of raw SDK frames, `replay.earlier`, one tab per window (`occupied`, `taken-over`, `takeover`, code 4001, `?tab=` and `?passive=1` in the socket URL), `hello.capabilities`. The reverse skew (page newer than server) is covered by the `default` branches of the reducers, which return the state for an unknown `kind` and `t` instead of failing. The order of a rollout is: restart the server first, then reload the page.
+- **Versioning.** All windows serve one shared `web/dist`, so a reloaded page can be newer than its server. The client sends new message types only to a server that announced the needed `PROTOCOL` (now 12). Protocol 12: provider mode descriptors, structured interaction answers and usage windows with native durations; capability flags control task background/output and suggestions. Protocol 11: the client messages `shell-run {id, cmd}` and `shell-stop {id}`, and the server events `shell-start`, `shell-out`, `shell-end` and `shell-refused`; before it the page keeps a `!` draft a plain message. Protocol 10: the server event `commands` (the slash menu). Protocol 9: the anchor of a media comment can carry `camera {position, target, fov}` (a comment on a view of a 3D model); a server older than 9 would drop the field, so the client offers markup on the model tab only to a server at 9 or later. Protocol 8: the client messages `task-stop {id}` and `task-background {toolUseId}` (a refusal or "nothing to move to the background" arrives as a `server-error` event with `where: 'task'`, that is a toast) and `/task-output`; without it the client shows no Stop / "To background" and does not open a shell task's tab (the buttons are absent, not disabled). Protocol 7: the subagent anchor and `/subagent`. Protocol 6: switching model and effort. Protocol 5: the `agent` stream instead of raw SDK frames, `replay.earlier`, one tab per window (`occupied`, `taken-over`, `takeover`, code 4001, `?tab=` and `?passive=1` in the socket URL), `hello.capabilities`. The reverse skew (page newer than server) is covered by the `default` branches of the reducers, which return the state for an unknown `kind` and `t` instead of failing. The order of a rollout is: restart the server first, then reload the page.
 
 ### 3.4 Stores (server)
 
@@ -158,17 +203,76 @@ Protocol rules:
 ├── control-token          the cross-window token (600)
 ├── open/                  short-lived pages the browser is opened on (600)
 ├── sessions.json          last session per folder
-├── prefs.json             modes[root], idleCompact[root], defaultMode, lang
+├── prefs.json             modes[root], models[root], idleCompact[root], defaultMode, lang
 ├── comments/<sid>.json    a session's comments (pending + sent)
 ├── attachments/<sha>.<ext>, trash/attachments/<stamp>/
 ├── history/<sid>.jsonl    archive of the conversation before each compaction, trash/history/<stamp>/
 ├── cache/blend/<sha>-<version>.glb   result of a .blend conversion (re-creatable; not part of Settings, Storage)
 ├── windows/<port>.json    window registry
-└── locks/<hash>           launch locks
+├── locks/<hash>           launch locks
+└── providers/codex/       Codex-owned copy of the state layout above (no recursive providers/)
 <project>/.nota-bene/marks/<commentId>/{frame.jpg,layer.png}
 ```
 
-The source of the feed is the **Claude Code transcript** (`~/.claude/projects/...`), but the SDK replays a session only from its last compaction. The server keeps the conversation before each compaction itself, in `history/<sid>.jsonl` (`HistoryArchive`; streaming frames are not written). After the last compaction the source is still the transcript. After a restart the feed is rebuilt from the transcript through `backend.history()`, and the number of archived segments arrives in `replay.earlier`.
+The native provider owns the source conversation. For Claude this is its
+transcript under `~/.claude/projects/...`; the SDK replays only since the last
+compaction, so NB preserves earlier segments in `history/<sid>.jsonl`. For Codex,
+`backend.history()` reads full chronological pages through `thread/turns/list`,
+using the same item/id mapping as live events. `restoreCodexReplay()` reconciles
+older native turns with the durable archive before returning only the latest
+segment. If writing the archive fails, history stays visible rather than being
+cut away. Both providers expose earlier segments through `replay.earlier` and
+`/history`; forked sessions never inherit a parent's archive.
+
+`NOTA_BENE_HOME` is the base directory, not always the effective state directory:
+Claude uses the base unchanged; Codex uses `<base>/providers/codex`. Tokens,
+control tokens, windows, locks, last sessions, preferences, comments, attachments
+and archives are isolated by provider. Project markup files remain under the
+project's `.nota-bene/marks/`. Codex configuration and authentication remain owned
+by the installed Codex runtime; NB does not read its credential files.
+
+### 3.5 Codex adapter and native ownership
+
+`codexBackend()` creates a `CodexSession` and owned `CodexRpc` for each active
+conversation. It also creates a lazy metadata app-server for account/session/history
+queries; this is a separate child, not a shared client attached to another host's
+running conversation. Backend shutdown closes both active sessions and metadata.
+
+- **Transport.** `CodexRpc` starts the installed `codex app-server` without a shell,
+  completes `initialize` / `initialized`, and correlates newline-delimited JSON
+  requests with bounded frames, timeouts and cancellation. Native requests can be
+  withdrawn through `serverRequest/resolved`. Closing rejects pending work, aborts
+  open requests and retires the owned process group (TERM, then KILL).
+- **Threads and sends.** New/resume/fork use native thread methods. Normal input
+  starts a turn or steers the active turn. A force-send interrupts and waits for
+  completion before starting its replacement; an interrupt acknowledgement alone
+  is not completion. `/compact` uses `thread/compact/start`; `/clear` cleans native
+  terminals, unsubscribes the old thread and opens a new thread id. The shared
+  generation/turn ledger still guards switching and late events.
+- **Approval and questions.** `answerNative()` maps command/file approval decisions,
+  additional permission scopes, user-input questions and MCP elicitation to the
+  shared `Interaction` model. The browser returns choice ids and field values;
+  native decision objects stay server-side. Withdrawn requests are cancelled.
+  Native MCP device verification requires a host authenticator and is rejected
+  explicitly by this browser integration.
+- **Policy.** `codex-configured` inherits native settings; read-only, workspace and
+  full-access profiles apply explicit approval/sandbox policies to subsequent
+  turns. Models, effort choices, skills and file suggestions come from native APIs.
+- **Tasks and history.** Native collaboration calls carry child thread ids;
+  subagent tabs read those child threads through the same history mapper.
+  Background terminals are discovered through native list APIs; child turns and
+  terminal processes can be stopped. Force-background and terminal output-tail
+  retrieval are unavailable, so their capability flags are false. The shared
+  server's own `! cmd` runner remains available independently.
+- **Usage.** Native token notifications supply context, and account rate-limit
+  windows retain their actual durations. Cost is `null`; prompt suggestions are
+  disabled. A ChatGPT login uses the installed runtime's account without an extra
+  API key. `/agent-account` reads status or starts native login; retry restarts the
+  agent session after authentication.
+
+The session picker lists only the current provider. NB does not provide cross-provider
+resume/conversion or concurrent ownership of one conversation by multiple clients.
+Carry a CLI/Desktop conversation into a separate branch with fork.
 
 ## 4. Web client
 
@@ -251,11 +355,13 @@ App
 | `attachments/image.ts` | `POST /attach`, `GET /attach/<id>` | Image upload; only ids travel over the socket. |
 | `media/markup/createMediaComment.ts` | `POST/DELETE /marks/<id>/<name>` | The frame and layer of media markup. |
 | `files/FileTree.tsx` | `/tree?path&src` | Lazy loading of the tree, up to 8 requests in parallel. |
+| `files/view/useTmpImage.ts` | `GET /tmpimage?path` | A temp image through `apiFetch` into a blob URL, revoked when the tab closes; a missing file shows "no longer exists". |
 | `files/view/ModelBody.tsx` | `GET /model?path&src` (`.blend` only) | The same ArrayBuffer path as `/file`; 501 gives "Blender needed", 422 / 504 show the error text from `{detail}`. |
 | `files/FileView.tsx` | `/file` (HEAD, Range probe, GET) | Viewing; the ETag serves as the version for media anchors. A model (`ModelBody`): one GET as an ArrayBuffer (the size from `content-length`, over 256 MB it is not read), with no HEAD and no probe; a reload on the same ETag does not read the body (it is cancelled after the headers) and does not parse the file again. |
 | `composer/MentionPicker.tsx`, `files/RecentFiles.tsx` | `/complete?q` | The CLI's search (`file_suggestions`) and our own file index in parallel; the results are merged. |
 | `files/sources.ts`, `shell/GitBranch.tsx` | `/sources`, `/git-status` | Branches and worktrees, the branch badge. |
-| `controls/SessionPicker.tsx` | `/sessions` | All Claude Code sessions with their cwd. |
+| `controls/AgentAccount.tsx` | `GET/POST /agent-account` | Codex account status and native sign-in URL; retry restarts the session. |
+| `controls/SessionPicker.tsx` | `/sessions` | Sessions of the window's provider with their cwd; native Codex list or Claude SDK list. |
 | `shell/RestartMenu.tsx`, `controls/slice.ts` | `/info`, `POST /restart-server` | The "Restart the server" item (only under the launcher). |
 | `settings/SettingsView.tsx` | `/system/*` | Windows, storage, defaults, about. |
 | `net/auth.ts` | `POST /auth`, then the key header on every `apiFetch` | Login (section 6). |
@@ -280,8 +386,8 @@ sequenceDiagram
   SV-->>S: comments (to the owner)
   SV->>SM: send()
   SM-->>S: user (echo into the feed)
-  SM->>A: SDKUserMessage (text + pairs of label and image)
-  A-->>SM: stream_event / assistant / result
+  SM->>A: AgentSession.send (text + labeled images)
+  A-->>SM: normalized AgentEvent stream
   SM-->>S: agent events → reduce() → feed
 ```
 
@@ -333,8 +439,9 @@ sequenceDiagram
 - **How a browser logs in.** The launcher opens the browser on a page in `<stateDir>/open/` (mode 600) that redirects to `http://127.0.0.1:PORT/#t=<login>`, so the login is not in `ps`. The page takes the fragment out of the address bar, posts `{login}` to `/auth` and receives the cookie and the key. `nota-bene --url PORT` prints the login URL for a second browser, and `--front PORT` brings the window to the front, logged in. A page without a login (a bookmark, a copied address, a tab of an earlier launch) shows the overlay "This window is not logged in" and stops reconnecting.
 - **The state folder is never served.** `/file`, `/tree`, `/model`, `/complete` and every `src=` source refuse, list and search nothing whose real path is the state folder or inside it (`stateGuard.ts`), so a root that contains it (a session in `$HOME`) does not hand the token to a cookie.
 - **Trust limit and residual risk.** The token file is readable by the same OS user, including the user's own agent. The aim is to keep out other users and other local software that cannot read the file, not the user's own tools. Browsers send cookies to every port on 127.0.0.1, so while a window is live, a local web server that the user visits sees its `nb_<port>` cookie; with it, that server can read project files through `/file` and pasted images through `/attach/<id>`, and nothing else. It cannot open the socket or write, because the key lives in localStorage, which no other origin reads, and the cookie is dead after the next launch. A token that was ever committed to git stays readable in the history after the file is removed, so the state folder is not a place for a repository. Rotating everything means deleting `<stateDir>/token` and restarting the server; a window that was live under the old token can no longer be proved by the helpers and has to be reopened.
+- **`/tmpimage`.** It widens what the server reads beyond the project, so it stays on the key tier and is limited as described in section 3.1. A stray cookie cannot reach it.
 - **`/file` safety.** It serves `.html` and the other text kinds as `text/plain` and everything under a CSP `sandbox`.
-- **Tool permissions.** The client's answer is only `allow: boolean`. The `input` from the client is ignored: the agent gets the original input, and a command cannot be rewritten through the UI.
+- **Tool permissions.** Claude's simple permission answer is `allow: boolean`. Protocol 12 also carries validated structured interaction answers for Codex approvals, questions and MCP forms. Native decision objects and requested permissions remain server-side; the browser selects an advertised choice rather than supplying replacement native policy or tool input.
 - **`! cmd`.** The server runs it with the privileges of the user, in the project folder, without a terminal. It is accepted only from the owner socket, one at a time, and it is not given the token or the launcher's variables.
 - **Paths.**
   - `resolveInRoot` is the project sandbox;
@@ -344,8 +451,9 @@ sequenceDiagram
 
 ## 7. Testing
 
-- **Unit (vitest).** The server is tested through `startServer` on port 0 with a fake backend; the auth tests run with auth on. The web is tested through `makeStore` with `connect` and `pip` replaced.
+- **Unit (vitest).** Worker environments explicitly reset the invoking NB provider and supervision/launcher flags; provider-specific tests select their provider. The server is tested through `startServer` on port 0 with a fake backend; the auth tests run with auth on. The web is tested through `makeStore` with `connect` and `pip` replaced.
 - **E2E (Playwright, ports 4791 to 4795)** on `--fake` scripts, with the media fixtures generated by ffmpeg. The e2e servers are seeded with a known token and nonce.
+- **Codex integration.** RPC fixtures exercise transport, mapping, history, cancellation, policy and child cleanup. `npm run e2e:codex` runs the native-adapter browser fixture separately; `native.test.ts` drives the installed app-server against a local Responses mock without paid model calls. Marketplace smoke tests use isolated `CODEX_HOME`, NB state and a temporary project; npm runtime checks use the published package. Serialize browser suites that share ports.
 - **The `AgentBackend` seam** is the main reason almost everything can be tested without a real CLI.
 
 ## 8. Critical assessment
@@ -361,7 +469,7 @@ Strengths:
 
 Weak points (assessed before M7; what was done is marked):
 
-1. **The web depended on the shape of SDK messages. Done (M7).** The server emits its own `AgentEvent` stream (`agent/claude/map.ts` is the only bridge), `web/src/store/feed.ts` parses it instead of raw `SDKMessage`s, and the agent's abilities are declared by `capabilities`. What remains: `agent/claude/sdk.ts` uses non-public APIs (`q.request({subtype:'file_suggestions'})`, `usage_EXPERIMENTAL_...`), so the SDK is updated by hand and with a run of `server/test/fixtures/real-frames.json`.
+1. **The web depended on the shape of SDK messages. Done (M7).** The server emits its own `AgentEvent` stream (the provider mappers are the bridges), `web/src/store/feed.ts` parses it instead of raw `SDKMessage`s, and the agent's abilities are declared by `capabilities`. Codex now uses its native app-server adapter alongside Claude; ACP is still future work. What remains: `agent/claude/sdk.ts` uses non-public APIs (`q.request({subtype:'file_suggestions'})`, `usage_EXPERIMENTAL_...`), so the SDK is updated by hand and with a run of `server/test/fixtures/real-frames.json`.
 2. **`SessionManager` was an implicit state machine. Done (M7).** A facade and the parts in `session/`: `Phase`, `TurnLedger`, `AgentSlot`, `SendQueue`, `PermissionBroker`; strict transitions where the server takes the step.
 3. **The persistence subscriber in `store.ts` was re-entrant. Done (M7).** Moved to listener middleware (`store/persist.ts`).
 4. **Comments sync as a full set.**
@@ -371,7 +479,10 @@ Weak points (assessed before M7; what was done is marked):
 6. **Large components. Done (M7).** `FileView`, `CommentCard` and `FileTree` were split into compositions (`files/view`, `comments/card`, `files/tree`): loading hooks apart from rendering.
 7. **A shared `web/dist` for all windows** causes version skew between page and server, hence the `PROTOCOL` mechanism. This is a deliberate compromise (one build, instant update by reload). The price is that every new protocol message needs a version check on the client. In the reverse skew (a new page, an old server) unknown `kind` and `t` must not crash the reducers (`default` returns the state), and at a rollout the server is restarted first and the page reloaded second.
 
-## 9. Decisions after the review (2026-10-27)
+## 9. Historical decisions after the review (2026-10-27)
+
+The implementation status is recorded in section 8; the list below preserves the
+original rationale, not a pending work plan.
 
 Order of work: P.3 and P.6 (web only), then P.2, then P.5 on top of the new state machine, then P.4.
 
