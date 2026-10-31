@@ -21,6 +21,8 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y trash-cli
       - run: npm ci
       - run: npx tsc -b
       - run: npm test

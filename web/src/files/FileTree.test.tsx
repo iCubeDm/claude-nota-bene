@@ -192,7 +192,7 @@ it('Expand all opens every folder level by level, skipping node_modules and .git
   expect(screen.queryByRole('button', { name: /^deep\.ts/ })).toBeNull();
 });
 
-it('Expand all stops at the row cap (M6-10)', { timeout: 15000 }, async () => {
+it('Expand all stops at the row cap (M6-10)', { timeout: 40000 }, async () => {
   // 30 folders of 100 files each: the first level shows 30 rows, the second 3030, over the cap; no third round
   fs[''] = Array.from({ length: 30 }, (_, i) => ({ name: `d${String(i).padStart(2, '0')}`, dir: true }));
   for (let i = 0; i < 30; i++) {
@@ -203,8 +203,8 @@ it('Expand all stops at the row cap (M6-10)', { timeout: 15000 }, async () => {
   const store = setup();
   await row('d00');
   fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
-  // ~2000 rows render slowly in jsdom under a full parallel run: a wider wait than the default 1 s
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveAttribute('aria-disabled', 'true'), { timeout: 8000 });
+  // ~2000 rows render slowly in jsdom under a full parallel run or a small CI runner: a much wider wait than the default 1 s
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Expand all' })).not.toHaveAttribute('aria-disabled', 'true'), { timeout: 30000 });
   // 30 + 19 × 101 = 1949 rows; the 20th folder would make 2050: the run ends there, in order
   expect(store.getState().tree.dirs).toEqual(Array.from({ length: 19 }, (_, i) => `d${String(i).padStart(2, '0')}`));
   expect(document.querySelectorAll('#tree-sheet [data-path]').length).toBeLessThanOrEqual(2000);

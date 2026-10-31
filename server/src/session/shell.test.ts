@@ -140,7 +140,7 @@ describe('ShellRunner', () => {
   });
 
   it('stops a run that exceeds the timeout, with the reason', async () => {
-    const r = make({ timeoutMs: 100 });
+    const r = make({ timeoutMs: 1500 }); // a login shell may take a while to reach `echo`
     r.run('r1', 'echo start; sleep 30');
     await until(() => !!ended());
     expect(ended()).toMatchObject({ stop: 'timeout', code: null });
@@ -256,7 +256,7 @@ describe('what the agent is told', () => {
   });
 
   it('a stopped or timed-out run says so, and a switch leaves nothing', async () => {
-    const r = make({ timeoutMs: 100 });
+    const r = make({ timeoutMs: 1500 });
     await runToEnd(r, 'echo partial; sleep 30', 'r1');
     expect(r.take('x')).toContain('<bash-stdout>partial</bash-stdout><bash-stderr>[stopped: it ran longer than 10 minutes]</bash-stderr>');
     const r2 = make();
