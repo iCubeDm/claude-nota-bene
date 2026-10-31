@@ -8,6 +8,8 @@
   70 MB instead of 330 MB.
 - A Claude window started from an install without the Claude Code binary stops with
   one clear message instead of crashing five times.
+- Fix a race in the Claude plugin's first install: several simultaneous `/nb` runs
+  facing a stale lock could install twice or wait a minute.
 - Name the right agent in the login and About texts of a Codex window.
 - Add continuous integration on macOS and Linux, a check that every release pin
   follows the package version, and a Codex screenshot in the README.

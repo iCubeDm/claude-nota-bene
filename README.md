@@ -93,7 +93,7 @@ unchanged. ACP remains a future backend behind the same AgentBackend interface.
 |---|---|
 | Agents | Claude Code (default), Codex CLI / local Desktop |
 | macOS | tested |
-| Linux | not tested |
+| Linux | unit tests pass in CI; not used day to day |
 | Windows | not supported (the `/nb` skill is a bash script) |
 
 ## Quick start

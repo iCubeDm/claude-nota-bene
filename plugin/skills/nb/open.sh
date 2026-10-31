@@ -90,25 +90,32 @@ lock_age() { # seconds since the lock was taken; huge when it carries no timesta
   if [[ "$ts" =~ ^[0-9]+$ ]]; then echo $(( $(date +%s) - ts )); return; fi
   if [ -n "$(find "$1" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then echo 999999; else echo 0; fi
 }
+lock_stale() {
+  local holder age; holder="$(cat "$1/pid" 2>/dev/null)"; age="$(lock_age "$1")"
+  { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && [ "$age" -gt 3 ]; } || [ "$age" -gt "$STALE_SECS" ]
+}
 install_pkg() {
   local lock="$PREFIX/.nb-install.lock" failed="$PREFIX/.nb-install-failed" waited=0 log="$PREFIX/.nb-install.log" rc
   mkdir -p "$PREFIX" 2>/dev/null || { echo "NB: cannot create the plugin data dir $PREFIX."; return 1; }
   ifail() { { echo "$1"; [ -n "${2:-}" ] && tail -n 5 "$2" 2>/dev/null; } | tee "$failed"; rm -rf "$lock" 2>/dev/null; return 1; }
   command -v npm >/dev/null || { echo "$NPM_MISSING" | tee "$failed"; return 1; }
   while true; do
-    # taking the lock = mkdir, then creating the pid file exclusively (noclobber) and finding our own pid in it. A lock another
-    # waiter moved aside, put back or re-created under us fails the write or shows another pid: then it is not ours
+    # taking the lock = mkdir, then creating the pid file exclusively (noclobber) and finding our own pid in it
     if mkdir "$lock" 2>/dev/null; then
       if { set -o noclobber; echo $$ > "$lock/pid"; } 2>/dev/null && [ "$(cat "$lock/pid" 2>/dev/null)" = "$$" ]; then set +o noclobber; break; fi
       set +o noclobber
       sleep 0.2; continue
     fi
-    local holder age; holder="$(cat "$lock/pid" 2>/dev/null)"; age="$(lock_age "$lock")"
-    # reclaim a lock whose holder is gone (dead pid) or that is simply old (a recycled pid, or no timestamp at all); the rename
-    # is atomic, so of several waiters one wins, and a lock that turns out fresh is put back
-    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null && [ "$age" -gt 3 ]; } || [ "$age" -gt "$STALE_SECS" ]; then
-      if mv "$lock" "$lock.old.$$" 2>/dev/null; then
-        if [ "$(lock_age "$lock.old.$$")" -le 3 ]; then mv "$lock.old.$$" "$lock" 2>/dev/null || rm -rf "$lock.old.$$"; else rm -rf "$lock.old.$$"; fi
+    # reclaim a lock whose holder is gone (dead pid) or that is simply old (a recycled pid, or no timestamp at all). One waiter
+    # at a time, and it looks again once it is the only one: a waiter acting on what it read earlier could remove a fresh lock
+    if lock_stale "$lock"; then
+      if mkdir "$lock.reclaim" 2>/dev/null; then
+        if lock_stale "$lock"; then rm -rf "$lock"; fi
+        rmdir "$lock.reclaim" 2>/dev/null
+      else
+        # a reclaimer killed in that short step must not block everyone for good
+        if [ -n "$(find "$lock.reclaim" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rmdir "$lock.reclaim" 2>/dev/null; fi
+        sleep 0.2
       fi
       continue
     fi
