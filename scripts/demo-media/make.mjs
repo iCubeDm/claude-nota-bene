@@ -8,7 +8,8 @@
 // vault, and a demo project it creates at /Users/Shared/demo-project (removed at the end) (a tiny URL shortener, with a generated image and video).
 // If 4790 is busy it waits and retries. Nothing outside /tmp and the output folder is touched.
 //
-// Scenes: annotate-text.gif (hero), annotate-code.gif, annotate-image.gif, annotate-video.gif, overview.png, slash-menu.png.
+// Scenes: annotate-text.gif (hero), annotate-code.gif, annotate-image.gif, annotate-video.gif, overview.png, slash-menu.png,
+// codex.png (a Codex window on the scripted app-server codex-app-server.mjs).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -306,6 +307,19 @@ const scenes = {
     await page.screenshot({ path: path.join(OUT, 'slash-menu.png') });
     await ctx.close();
   },
+
+  async codex(browser) {
+    const { ctx, page } = await openPage(browser);
+    await composer(page).fill('Cap the retries when generating a short code, then run the tests.');
+    await composer(page).press('Enter');
+    await page.locator('[data-kind="permission"]').waitFor();
+    await expand(page, 'src');
+    await page.mouse.move(1100, 900);
+    await sleep(600);
+    await page.evaluate(() => document.getElementById('demo-cursor')?.remove());
+    await page.screenshot({ path: path.join(OUT, 'codex.png') });
+    await ctx.close();
+  },
 };
 
 // ---- drawing on media ----------------------------------------------------------------------------------------------
@@ -363,7 +377,7 @@ let failed = false;
 try {
   for (const [name, run] of Object.entries(scenes)) {
     if (only && !only.includes(name)) continue;
-    const srv = await startServer(work, script, name); // fresh state per scene
+    const srv = await startServer(work, script, name, name === 'codex' ? { codex: path.join(REPO, 'scripts/demo-media/codex-app-server.mjs') } : {}); // fresh state per scene
     try {
       await run(browser);
     } catch (e) {

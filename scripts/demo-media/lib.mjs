@@ -32,7 +32,7 @@ export async function prepare(chromium, work) {
 }
 
 /** Starts a server on 4790 (waits while another agent holds the port) with a fresh state dir. Returns { stop(), home }. */
-export async function startServer(work, script, name) {
+export async function startServer(work, script, name, { codex } = {}) {
   fs.rmSync(path.join(PROJECT, '.nota-bene'), { recursive: true, force: true }); // marks of an earlier scene
   const home = fs.mkdtempSync(path.join(work, `home-${name}-`));
   const vault = fs.mkdtempSync(path.join(work, `vault-${name}-`));
@@ -42,11 +42,12 @@ export async function startServer(work, script, name) {
     console.log(`port ${PORT} busy, waiting…`);
     await sleep(5000);
   }
-  fs.mkdirSync(home, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(home, "token"), TOKEN, { mode: 0o600 });
-  const child = spawn(process.execPath, [path.join(REPO, 'server/src/main.ts'), PROJECT, '--port', String(PORT), '--fake', script], {
+  const state = codex ? path.join(home, 'providers/codex') : home;
+  fs.mkdirSync(state, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(state, "token"), TOKEN, { mode: 0o600 });
+  const child = spawn(process.execPath, [path.join(REPO, 'server/src/main.ts'), PROJECT, '--port', String(PORT), ...(codex ? ['--agent', 'codex'] : ['--fake', script])], {
     cwd: REPO,
-    env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: NONCE, CLAUDE_JOURNAL_VAULT: vault, NOTA_BENE_EXPERIMENTAL_3D: '0' },
+    env: { ...process.env, NOTA_BENE_HOME: home, NOTA_BENE_NONCE: NONCE, CLAUDE_JOURNAL_VAULT: vault, NOTA_BENE_EXPERIMENTAL_3D: '0', ...(codex ? { NOTA_BENE_CODEX: codex } : {}) },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   for (let i = 0; i < 100; i++) {
