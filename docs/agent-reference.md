@@ -52,12 +52,18 @@ comments and archives are isolated. The session picker only lists its provider.
 Codex's native transport, event mapper, paginated history and lifecycle live in
 `server/src/agent/codex/`. Keep native RPC shapes inside that adapter. Its installable
 CLI/Desktop skill is `codex/skills/nb/`; it is separate from Claude's plugin skill.
+The repository marketplace `.agents/plugins/marketplace.json` installs `codex/plugin.json`
+and its skill. Marketplace invocations use the pinned npm runtime through `npm exec`;
+standalone skills use the bundled launcher or PATH. The npm runtime and repository
+plugin are separate distribution artifacts; adding marketplace metadata does not
+replace an already published npm version.
 See the guide's Codex section for API gaps; do not infer parity from the shared UI.
 
 ## Releasing
 
 - Root `package.json` is the version source. Keep its lockfile root entries and
-  `plugin/.claude-plugin/plugin.json` in sync; update Codex client metadata too.
+  `plugin/.claude-plugin/plugin.json`, `codex/plugin.json`, and the npm pin in
+  `codex/skills/nb/SKILL.md` in sync; update Codex client metadata too.
 - Update README, guide and CHANGELOG for user-visible changes. Keep AGENTS.md short;
   CLAUDE.md imports it and this file holds operational detail.
 - Run types and the package/skill/launcher tests. Run browser suites sequentially
@@ -69,6 +75,10 @@ See the guide's Codex section for API gaps; do not infer parity from the shared 
   <archive> --access public --tag latest` only when publication is authorized.
 - Confirm npm identity first; never print credentials. Verify registry version and
   integrity after publication. Build scripts do not publish automatically.
+- Verify Codex marketplace installation in an isolated `CODEX_HOME`, then smoke-test
+  the published npm runtime with the installed skill and a fake Codex backend.
+- Push checked release commits to `origin/main`. Tag the npm source commit, keeping
+  later repository-only plugin/documentation changes distinct from that archive.
 - Do not restart a live NB server as part of building or publishing.
 
 ## Access token

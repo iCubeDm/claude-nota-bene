@@ -1,0 +1,12 @@
+{
+  "name": "nota-bene",
+  "interface": { "displayName": "Nota Bene" },
+  "plugins": [
+    {
+      "name": "nota-bene",
+      "source": { "source": "local", "path": "./codex" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

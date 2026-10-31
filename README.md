@@ -49,38 +49,29 @@ settings; both may run in the same project. Models, skills and sessions in a Cod
 window come from Codex. Do not continue the same conversation in another client
 while the window owns it; fork when carrying a CLI/Desktop conversation over.
 
-To install the skill without copying files manually, first install the launcher:
+Install the Codex plugin from a terminal:
 
 ```sh
-npm i -g nota-bene-ide@1.1.0
+codex plugin marketplace add iCubeDm/nota-bene-ide --ref main
+codex plugin add nota-bene@nota-bene
 ```
 
-Then ask Codex to install the skill from this repository:
+The plugin provides `$nb`, `$nb new`, and `$nb fork`. On first use it downloads
+`nota-bene-ide@1.1.0` through npm; later launches reuse npm's cache. No global npm
+install or manual skill copying is needed. Node.js, npm, and a signed-in Codex CLI
+must already be available. This is a repository marketplace for local Codex clients,
+not a listing in the public ChatGPT plugin directory.
+
+Alternatively, install the launcher with `npm i -g nota-bene-ide@1.1.0`, then ask
+Codex to install just the skill:
 
 ```text
 $skill-installer Install the nb skill from https://github.com/iCubeDm/nota-bene-ide/tree/main/codex/skills/nb
 ```
 
-Use the installed skill on your next turn. The launcher and the skill are separate
-installs; the Claude Code plugin manages the launcher installation automatically.
-
-For a source checkout, you can instead link the skill into
-`~/.agents/skills/nb` (do not overwrite an existing skill):
-
-```sh
-mkdir -p ~/.agents/skills
-ln -s "$PWD/codex/skills/nb" ~/.agents/skills/nb
-```
-
-For an npm install, copy `codex/skills/nb` from the installed `nota-bene-ide` package
-into that skill directory; its helper finds `nota-bene` on PATH. For a global install,
-run the following only if `~/.agents/skills/nb` does not already exist:
-
-```sh
-npm i -g nota-bene-ide@1.1.0
-mkdir -p ~/.agents/skills
-cp -R "$(npm root -g)/nota-bene-ide/codex/skills/nb" ~/.agents/skills/nb
-```
+For source development, link `codex/skills/nb` into `~/.agents/skills/nb` only if
+that destination does not already exist. A standalone copied skill uses the launcher
+bundled in its npm package or the installed `nota-bene` on PATH.
 
 Reload skills or
 restart Codex, then invoke `$nb`, `$nb new`, or `$nb fork` (or select nb in the
