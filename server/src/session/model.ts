@@ -1,5 +1,5 @@
-import type { EffortLevel, ModelOption } from '@nota-bene/shared';
-import type { AgentSession } from '../agent/types.ts';
+import type { AgentEffort as EffortLevel, ModelOption } from '@nota-bene/shared';
+import type { ProviderSession as AgentSession } from '../agent/types.ts';
 import type { EmitInput } from '../hub.ts';
 import { prefsKey, readPrefs, setModelPref } from '../prefs.ts';
 

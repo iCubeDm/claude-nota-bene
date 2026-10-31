@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { EffortLevel, ModelOption } from '@nota-bene/shared';
+import type { AgentEffort as EffortLevel, ModelOption } from '@nota-bene/shared';
 import type { EmitInput } from '../hub.ts';
 import { prefsKey, readPrefs, setModelPref } from '../prefs.ts';
 import { toModelOption } from '../agent/claude/sdk.ts';

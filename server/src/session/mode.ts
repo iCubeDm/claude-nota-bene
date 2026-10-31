@@ -1,4 +1,4 @@
-import type { Mode } from '@nota-bene/shared';
+import type { AgentMode as Mode } from '@nota-bene/shared';
 import type { EmitInput } from '../hub.ts';
 import { prefsKey, readPrefs, setModePref } from '../prefs.ts';
 

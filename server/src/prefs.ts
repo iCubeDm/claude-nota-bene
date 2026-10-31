@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { EFFORT_LEVELS, MODES } from '@nota-bene/shared';
-import type { EffortLevel, Mode, ModelChoice } from '@nota-bene/shared';
+import { EFFORT_LEVELS, ALL_MODES } from '@nota-bene/shared';
+import type { AgentEffort as EffortLevel, AgentMode as Mode, ModelChoice } from '@nota-bene/shared';
 import { stateDir } from './state.ts';
 
 /** `idleCompact[root]`: idle compaction per project dir; absent = on (the default) */
@@ -10,7 +10,7 @@ import { stateDir } from './state.ts';
 export type Prefs = { modes: Record<string, Mode>; models: Record<string, ModelChoice>; lang?: 'ru' | 'en'; idleCompact: Record<string, boolean>; defaultMode?: Mode };
 
 const isEffort = (v: unknown): v is EffortLevel => (EFFORT_LEVELS as readonly unknown[]).includes(v);
-const isMode = (v: unknown): v is Mode => (MODES as readonly unknown[]).includes(v);
+const isMode = (v: unknown): v is Mode => (ALL_MODES as readonly unknown[]).includes(v);
 let reported = false; // a broken file is reported once per process, not on every read
 
 /** Keys are real project dirs, so a symlinked path and its target share one setting. */

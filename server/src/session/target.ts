@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentBackend } from '../agent/types.ts';
+import type { ProviderBackend as AgentBackend } from '../agent/types.ts';
 import { cwdOf } from '../sessions.ts';
 import { SwitchError } from './phase.ts';
 
@@ -16,7 +16,7 @@ export function realOr(p: string): string {
 
 /** Throws a SwitchError for a target that must not be opened; returns the realpath of `dir`. */
 export async function checkTarget(o: {
-  backend: Pick<AgentBackend, 'listSessions' | 'sessionInfo'>; root: string; id: string | null; dir: string; ownSession: boolean;
+  backend: Pick<AgentBackend, 'listSessions' | 'sessionInfo' | 'nativeSessions'>; root: string; id: string | null; dir: string; ownSession: boolean;
 }): Promise<string> {
   const { backend, id, dir } = o;
   let real: string;
@@ -41,7 +41,7 @@ export async function checkTarget(o: {
     }
     const known = new Set<string>();
     for (const x of list) {
-      const cwd = x.cwd || cwdOf(x.sessionId);
+      const cwd = x.cwd || (backend.nativeSessions ? null : cwdOf(x.sessionId));
       if (cwd && !known.has(cwd)) known.add(cwd);
     }
     for (const cwd of known) if (realOr(cwd) === real) return real;
@@ -55,7 +55,7 @@ export async function checkTarget(o: {
   } catch (e) {
     throw new SwitchError('switch', `cannot read session ${id.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const cwd = info ? info.cwd ?? cwdOf(id) : null;
+  const cwd = info ? info.cwd ?? (backend.nativeSessions ? null : cwdOf(id)) : null;
   if (!info || (cwd !== null && realOr(cwd) !== real)) throw new SwitchError('switch', `session ${id.slice(0, 8)} does not belong to ${real}`);
   return real;
 }

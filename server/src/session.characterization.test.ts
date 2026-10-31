@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLAUDE_CAPABILITIES, type AgentEvent, type ServerEvent } from '@nota-bene/shared';
 import { mapFrames } from './agent/claude/map.ts';
 import { fakeBackend } from './agent/fake.ts';
-import type { AgentBackend, AgentSession, PermissionAsk, SessionInfo } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend, ProviderSession as AgentSession, PermissionAsk, SessionInfo } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager, SwitchError } from './session.ts';
 import { lastSession } from './state.ts';

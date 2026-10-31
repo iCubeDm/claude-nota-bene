@@ -35,7 +35,7 @@ export function MarkerLine({ item }: { item: Extract<FeedItem, { kind: 'marker' 
   const at = item.ts === 0 ? '' : timeOf(item.ts);
   return (
     <div data-kind="marker" className={item.what === 'compactFailed' ? `${BASE} whitespace-pre-wrap text-destructive` : LINE}>
-      {item.what === 'compacted' ? t('compacted', fmtK(item.pre ?? 0), at, item.ms ? mmss(item.ms) : '')
+      {item.what === 'compacted' ? item.pre === undefined ? t('compactedUnknown') : t('compacted', fmtK(item.pre), at, item.ms ? mmss(item.ms) : '')
         : item.what === 'compactFailed' ? t('compactFailed', item.error ?? '', at)
         : t('cleared', at)}
     </div>

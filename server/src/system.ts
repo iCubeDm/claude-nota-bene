@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { MODES, type Mode } from '@nota-bene/shared';
+import { MODES, type AgentMode as Mode } from '@nota-bene/shared';
 import { SecretError, stateSecret, verifiedBearer } from './auth.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
@@ -276,6 +276,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 
 export function systemRoutes(o: {
   hub: EventHub;
+  modes?: readonly Mode[];
   /** the current project root (a switch changes it) */
   root: () => string;
   /** this server's port (known after listen) */
@@ -315,7 +316,7 @@ export function systemRoutes(o: {
         void readJson(req).then((b) => {
           const { defaultMode: mode, lang, ifUnset } = b as { defaultMode?: unknown; lang?: unknown; ifUnset?: unknown };
           if (mode === undefined && lang === undefined) return text(res, 400, 'bad defaultMode');
-          if (mode !== undefined && !(MODES as readonly unknown[]).includes(mode)) return text(res, 400, 'bad defaultMode');
+          if (mode !== undefined && !((o.modes ?? MODES) as readonly unknown[]).includes(mode)) return text(res, 400, 'bad defaultMode');
           if (lang !== undefined && lang !== 'ru' && lang !== 'en') return text(res, 400, 'bad lang');
           if (mode !== undefined) setDefaultModePref(mode as Mode);
           if (lang !== undefined) setLangPref(lang, ifUnset === true);
@@ -324,7 +325,7 @@ export function systemRoutes(o: {
         return;
       }
       if (!only('GET', req, res)) return;
-      json(res, 200, { defaultMode: readPrefs().defaultMode ?? 'auto' });
+      json(res, 200, { defaultMode: readPrefs().defaultMode ?? (o.modes?.[0] ?? 'auto') });
     },
 
     '/system/storage': (req, res) => {

@@ -25,7 +25,7 @@ export class CodexRpc {
   constructor(options: RpcOptions = {}) {
     this.options = options;
     this.closed = new Promise((resolve) => { this.closeResolve = resolve; });
-    this.child = spawn(options.command ?? process.env.NOTA_BENE_CODEX ?? 'codex', options.args ?? ['app-server'], {
+    this.child = spawn(options.command ?? process.env.NOTA_BENE_CODEX ?? process.env.CODEX_CLI_PATH ?? 'codex', options.args ?? ['app-server'], {
       cwd: options.cwd, env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32',
     });
     this.child.stdout.on('data', (data: Buffer) => this.receive(data));
@@ -34,7 +34,11 @@ export class CodexRpc {
     this.child.stdin.on('error', () => this.fail(new Error('Codex input stream closed')));
     this.child.on('error', (e: NodeJS.ErrnoException) => this.fail(new Error(`Cannot start Codex (${e.code ?? 'spawn error'}). Install Codex or set NOTA_BENE_CODEX.`)));
     this.child.on('exit', (code, signal) => this.fail(new Error(`Codex exited (${signal ?? code ?? 'unknown'})`)));
-    this.child.on('close', () => { clearTimeout(this.killTimer); this.closeResolve(); });
+    this.child.on('close', () => {
+      // The leader may exit while a tool descendant ignores TERM. Retire the owned group before resolving close.
+      if (process.platform !== 'win32' && this.child.pid) { try { process.kill(-this.child.pid, 'SIGKILL'); } catch { /* group already gone */ } }
+      clearTimeout(this.killTimer); this.closeResolve();
+    });
     this.ready = this.call('initialize', {
       clientInfo: { name: 'nota-bene', title: 'Nota Bene', version: '1.0.0' },
       capabilities: { experimentalApi: true },

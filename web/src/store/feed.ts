@@ -1,12 +1,12 @@
 import { createAction } from '@reduxjs/toolkit';
-import { SHELL_OUTPUT_CAP, cutTail, type ImageRef, type ServerEvent, type ShellStop, type WireAgentEvent } from '@nota-bene/shared';
+import { SHELL_OUTPUT_CAP, cutTail, type Interaction, type ImageRef, type ServerEvent, type ShellStop, type WireAgentEvent } from '@nota-bene/shared';
 
 export type FeedItem =
   /** idle: the server's own /compact after a quiet stretch, shown as a line, not as the user's message */
   | { kind: 'user'; id: string; text: string; ts: number; force?: boolean; duringWork?: boolean; images?: ImageRef[]; idle?: boolean }
   | { kind: 'assistant'; id: string; text: string; final: boolean } // `${uuid}:${blockIndex}`; while streaming `stream:${n}`
   | {
-      kind: 'tool'; id: string; name: string; arg: string; sub: boolean;
+      kind: 'tool'; id: string; name: string; arg: string; sub: boolean; toolKind?: Extract<WireAgentEvent, { t: 'tool-call' }>['toolKind']; childSessionId?: string;
       /** the full tool input; the one-line `arg` is only its summary */
       input: Record<string, unknown>;
       /** from the tool_result with the same tool_use_id; absent while the tool still runs */
@@ -18,7 +18,7 @@ export type FeedItem =
    */
   | { kind: 'marker'; what: 'compacted' | 'compactFailed' | 'cleared'; pre?: number; ms?: number; error?: string; ts: number; key: string }
   | { kind: 'done'; key: string; secs: number; ts: number; status: 'done' | 'interrupted' | 'failed'; error?: string }
-  | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean; archived?: true }
+  | { kind: 'permission'; id: string; toolName: string; input: Record<string, unknown>; answer?: boolean; prompt?: Interaction; archived?: true }
   /**
    * a `! cmd` run (protocol 11): the command, its merged output (the last SHELL_OUTPUT_CAP characters, `truncated` when more
    * came before) and how it ended. `code` null with no `stop`/`error` is a block restored from the transcript (no exit code kept).
@@ -173,7 +173,7 @@ function reduceAgent(s: FeedState, e: WireAgentEvent, ts: number): FeedState {
       return { ...s, items: i >= 0 ? replaceAt(s.items, i, final) : [...s.items, final] };
     }
     case 'tool-call':
-      return { ...s, items: [...s.items, { kind: 'tool', id: e.id, name: e.name, arg: toolArg(e.input), sub: e.sub, input: e.input }] };
+      return { ...s, items: [...s.items, { kind: 'tool', id: e.id, name: e.name, arg: toolArg(e.input), sub: e.sub, input: e.input, ...(e.toolKind ? { toolKind: e.toolKind } : {}), ...(e.childSessionId ? { childSessionId: e.childSessionId } : {}) }] };
     case 'tool-update': {
       // A result whose tool item is not in the feed (should not happen) is ignored.
       const i = s.items.findIndex((it) => it.kind === 'tool' && it.id === e.id);
@@ -268,7 +268,7 @@ export function reduce(s: FeedState, ev: ServerEvent): FeedState {
       return { ...s, items: i >= 0 ? replaceAt(s.items, i, item) : [...s.items, item] };
     }
     case 'permission':
-      return { ...s, items: [...s.items, { kind: 'permission', id: ev.id, toolName: ev.toolName, input: ev.input }] };
+      return { ...s, items: [...s.items, { kind: 'permission', id: ev.id, toolName: ev.toolName, input: ev.input, ...(ev.prompt ? { prompt: ev.prompt } : {}) }] };
     case 'permission-done': {
       const i = s.items.findIndex((it) => it.kind === 'permission' && it.id === ev.id);
       const cur = s.items[i];

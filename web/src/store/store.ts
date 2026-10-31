@@ -217,8 +217,8 @@ export const interrupt = (): AppThunk => (_d, getState, { send }) => {
 /** «Работать здесь»: take the window over from the other tab (R-M7-5/8). */
 export const takeOver = (): AppThunk => (_d, _g, extra) => extra.takeOver();
 
-export const answerPermission = (id: string, allow: boolean): AppThunk => (_d, _g, { send }) => {
-  send({ type: 'permission', id, allow });
+export const answerPermission = (id: string, allow: boolean, response?: import('@nota-bene/shared').InteractionAnswer): AppThunk => (_d, _g, { send }) => {
+  send({ type: 'permission', id, allow, ...(response ? { response } : {}) });
 };
 
 const ARG_CUT = 60;

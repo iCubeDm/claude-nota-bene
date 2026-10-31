@@ -1,5 +1,5 @@
 import { createAction, type PayloadAction, createListenerMiddleware, createSlice } from '@reduxjs/toolkit';
-import { CLAUDE_CAPABILITIES, MODES, type Capabilities, type EffortLevel, type IdleCompact, type Mode, type ModelOption, type SlashCommand } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, MODES, type Capabilities, type AgentEffort as EffortLevel, type IdleCompact, type AgentMode as Mode, type ModelOption, type SlashCommand } from '@nota-bene/shared';
 import { t } from '../i18n/index.ts';
 import { apiFetch } from '../net/auth.ts';
 import { toast } from '../shell/toast.ts';

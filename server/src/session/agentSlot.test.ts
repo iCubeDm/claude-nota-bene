@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentSession } from '../agent/types.ts';
+import type { ProviderSession as AgentSession } from '../agent/types.ts';
 import { AgentSlot } from './agentSlot.ts';
 import type { PhaseKind } from './phase.ts';
 

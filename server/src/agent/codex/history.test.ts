@@ -35,3 +35,17 @@ describe('Codex history', () => {
     await expect(loadCodexHistory(api, 'thread', new AttachmentStore({ dir: '/unused' }))).rejects.toThrow(/cursor/);
   });
 });
+
+it('replays native local image inputs without following a symlink or importing arbitrary files', async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'nb-local-image-'));
+  const image = path.join(temp, 'input.png');
+  fs.writeFileSync(image, Buffer.from('89504e470d0a1a0a00000000', 'hex'));
+  fs.symlinkSync(image, path.join(temp, 'link.png')); fs.writeFileSync(path.join(temp, 'not-image'), 'secret');
+  const errors: unknown[] = [];
+  const rpc = { async request() { return { data: [{ items: [{ type: 'userMessage', id: 'u', content: [{ type: 'localImage', path: image }, { type: 'localImage', path: path.join(temp, 'link.png') }, { type: 'localImage', path: path.join(temp, 'not-image') }] }] }] }; } };
+  try {
+    const history = await loadCodexHistory(rpc, 't', new AttachmentStore({ dir: path.join(temp, 'attachments') }), (e) => errors.push(e));
+    expect(history[0]).toMatchObject({ kind: 'user', images: [{ mediaType: 'image/png' }] });
+    expect(errors).toHaveLength(2);
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});

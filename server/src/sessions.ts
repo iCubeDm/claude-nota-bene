@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentBackend } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend } from './agent/types.ts';
 
 type Titled = { customTitle?: string; summary?: string; firstPrompt?: string };
 
@@ -96,7 +96,7 @@ function realOr(p: string): string {
 
 /** GET /sessions: every project's sessions; the ones without a cwd are dropped (they cannot be resumed in the right folder). */
 export async function listSessionsView(o: {
-  backend: Pick<AgentBackend, 'listSessions'>;
+  backend: Pick<AgentBackend, 'listSessions' | 'nativeSessions'>;
   current: string | null;
   root: string;
   projectsDir?: string;
@@ -104,7 +104,7 @@ export async function listSessionsView(o: {
   const list = await o.backend.listSessions();
   const sessions: SessionsView['sessions'] = [];
   for (const x of list) {
-    const cwd = x.cwd || cwdOf(x.sessionId, o.projectsDir);
+    const cwd = x.cwd || (o.backend.nativeSessions ? null : cwdOf(x.sessionId, o.projectsDir));
     if (!cwd) continue;
     sessions.push({ id: x.sessionId, title: titleOf(x) ?? '', at: x.lastModified, size: x.fileSize ?? 0, cwd: realOr(cwd) });
   }

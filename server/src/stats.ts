@@ -1,5 +1,5 @@
 import type { AgentEvent, Limit, Stats } from '@nota-bene/shared';
-import type { AgentSession } from './agent/types.ts';
+import type { ProviderSession as AgentSession } from './agent/types.ts';
 
 const CONTEXT_TIMEOUT_MS = 10_000;
 const USAGE_TIMEOUT_MS = 15_000;
@@ -99,7 +99,7 @@ export class StatsService {
    * account's and stay. Does not emit (the caller announces the new session's stats itself).
    */
   reset(): void {
-    this.stats = { context: null, cost: null, limits: this.stats.limits };
+    this.stats = { context: null, cost: null, limits: this.stats.limits, ...(this.stats.windows ? { windows: this.stats.windows } : {}) };
     this.lastEmitted = JSON.stringify(this.stats);
   }
 
@@ -175,6 +175,7 @@ export class StatsService {
       if ('v' in usage) {
         next.cost = usage.v.cost;
         next.limits = usage.v.limits;
+        if (usage.v.windows !== undefined) next.windows = usage.v.windows;
       } else {
         if (usage.e instanceof UsageUnavailableError) this.limitsUnavailable = true;
         this.fail('usage', usage.e);

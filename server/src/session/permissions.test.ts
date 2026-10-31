@@ -79,3 +79,20 @@ describe('PermissionBroker', () => {
     expect(events.filter((e) => e.kind === 'permission-done')).toEqual([{ kind: 'permission-done', id, allow: true }]);
   });
 });
+
+it('structured answers use original advertised choices, cancel on generation change and ignore late replies', async () => {
+  const { b, events, gen, bump } = make();
+  const ask = b.interact(gen, 0);
+  const p = ask({ title: 'Question', choices: [{ id: 'send', label: 'Send' }], fields: [{ id: 'x', label: 'Answer', required: true }] }, {}, new AbortController().signal);
+  const id = (events[0] as { id: string }).id;
+  b.answer(id, true, { choice: 'invented', values: { x: 'a' } });
+  expect(b.pending()).toBe(1);
+  b.answer(id, true, { choice: 'send' });
+  expect(b.pending()).toBe(1);
+  b.answer(id, true, { choice: 'send', values: { x: 'answer' } });
+  expect(await p).toEqual({ choice: 'send', values: { x: 'answer' } });
+  const old = ask({ title: 'Old', choices: [{ id: 'yes', label: 'Yes' }] }, {}, new AbortController().signal);
+  const oldId = (events.at(-1) as { id: string }).id; bump(); b.denyAll();
+  expect(await old).toBeNull();
+  b.answer(oldId, true, { choice: 'yes' }); expect(b.pending()).toBe(0);
+});

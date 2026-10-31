@@ -1,5 +1,6 @@
+import { useAppSelector } from '@/store/store.ts';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { MODES, type Mode } from '@nota-bene/shared';
+import { MODES, type AgentMode as Mode } from '@nota-bene/shared';
 import { Button } from '@/components/ui/button.tsx';
 import { apiFetch } from '@/net/auth.ts';
 import { ConfirmDialog } from '@/controls/ConfirmDialog.tsx';
@@ -70,6 +71,7 @@ const Row = ({ label, children }: { label: ReactNode; children: ReactNode }) => 
  * stop for the others), Storage (sizes; moving unreferenced pasted images to the trash), Defaults, About.
  */
 export function SettingsView({ active }: { active: boolean }) {
+  const capabilities = useAppSelector((s) => s.controls.capabilities);
   const t = useT();
   const windows = useLoad<WindowRow[]>('/system/windows', active);
   const storage = useLoad<Storage>('/system/storage', active);
@@ -196,7 +198,7 @@ export function SettingsView({ active }: { active: boolean }) {
             <select aria-label={t('defMode')} value={prefs.data.defaultMode}
               onChange={(e) => void saveMode(e.target.value)}
               className="rounded-md border border-border-soft bg-transparent px-2 py-1 text-[13px] text-foreground">
-              {MODES.map((m) => <option key={m} value={m}>{t(`mode_${m}`)}</option>)}
+              {(capabilities?.modes ?? MODES).map((m) => <option key={m} value={m}>{t(`mode_${m}`)}</option>)}
             </select>
           )}
         </Row>

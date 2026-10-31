@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentSession } from '../agent/types.ts';
+import type { ProviderSession as AgentSession } from '../agent/types.ts';
 import { SendQueue } from './sendQueue.ts';
 
 function make(o: { interrupt?: () => Promise<void>; sendThrows?: boolean; interruptMs?: number } = {}) {

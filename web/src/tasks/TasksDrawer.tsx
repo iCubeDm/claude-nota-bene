@@ -27,6 +27,7 @@ export function TasksDrawer() {
   const t = useT();
   const d = useAppDispatch();
   const open = useAppSelector(selectDrawerOpen);
+  const capabilities = useAppSelector((s) => s.controls.capabilities);
   const rows = useAppSelector(selectTaskRows);
   const running = useAppSelector(selectRunningCount);
   const protocol = useAppSelector((s) => s.controls.protocol);
@@ -77,7 +78,7 @@ export function TasksDrawer() {
           {rows.map(({ id, task, depth }) => {
             const icon = ICON[task.status];
             const meta = [task.type, fmtElapsed((task.end ?? now) - task.start), task.tokens ? `${fmtK(task.tokens)} tok` : '', task.tool].filter(Boolean).join(' · ');
-            const canOpen = (task.kind === 'agent' && task.type !== 'remote_agent' && !!task.call && protocol >= AGENT_PROTOCOL) || (task.kind === 'shell' && protocol >= TASKS_PROTOCOL);
+            const canOpen = (task.kind === 'agent' && task.type !== 'remote_agent' && !!task.call && protocol >= AGENT_PROTOCOL) || (task.kind === 'shell' && protocol >= TASKS_PROTOCOL && capabilities?.taskOutput !== false);
             return (
               <li
                 key={id}

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SecretError, isNonce } from './auth.ts';
 import { fakeFromScript } from './agent/fake.ts';
+import { codexBackend } from './agent/codex/backend.ts';
 import { sdkBackend } from './agent/claude/sdk.ts';
 import { startServer } from './server.ts';
 import { transcriptExists } from './sessions.ts';
@@ -108,7 +109,7 @@ async function main(): Promise<void> {
   process.env.NOTA_BENE_AGENT = args.agent ?? 'claude';
   const backend = args.fake
     ? fakeFromScript(JSON.parse(fs.readFileSync(args.fake, 'utf8')), args.dir)
-    : sdkBackend();
+    : args.agent === 'codex' ? codexBackend() : sdkBackend();
   // the launcher's launch nonce (public, but it stays out of the agent's and the `!` commands' environment all the same)
   const nonce = isNonce(process.env.NOTA_BENE_NONCE) ? process.env.NOTA_BENE_NONCE : undefined;
   delete process.env.NOTA_BENE_NONCE;
@@ -119,7 +120,7 @@ async function main(): Promise<void> {
       cwd: args.dir,
       port: args.port,
       backend,
-      ...launchTarget(args),
+      ...(args.agent === 'codex' ? (args.resume ? { resume: args.resume, ...(args.fork ? { fork: true } : {}) } : !args.new && lastSession(args.dir) ? { resume: lastSession(args.dir)! } : {}) : launchTarget(args)),
       webDist,
       allowedOrigins: args.allowOrigins,
       ...(nonce ? { nonce } : {}),

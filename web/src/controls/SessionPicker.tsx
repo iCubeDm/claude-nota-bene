@@ -56,6 +56,7 @@ export const brief = (status: number | null, body: string): string => {
  */
 export function SessionPicker() {
   const t = useT();
+  const codex = useAppSelector((s) => s.controls.capabilities?.provider === 'codex');
   const dispatch = useAppDispatch();
   const busy = useAppSelector(selectBusy);
   const switching = useAppSelector(selectSwitching);
@@ -127,7 +128,7 @@ export function SessionPicker() {
             ref={trigger}
             type="button"
             id="sessBtn"
-            title={t('sessTip')}
+            title={t(codex ? 'sessTipCodex' : 'sessTip')}
             disabled={off}
             className="inline-flex flex-none items-center gap-1 rounded border border-border-soft px-2 py-px font-mono text-[11px] text-muted-foreground hover:enabled:border-primary hover:enabled:text-foreground disabled:cursor-default disabled:opacity-35"
           >
@@ -203,7 +204,7 @@ export function SessionPicker() {
       {ask && v && (
         <ConfirmDialog
           title={ask.id ? t('openQ', ask.title) : t('newQ')}
-          body={`${ask.dir !== v.root ? t('moveQ', ask.dir) : ''}${t('switchWarn')}`.trim()}
+          body={`${ask.dir !== v.root ? t('moveQ', ask.dir) : ''}${t(codex ? 'switchWarnCodex' : 'switchWarn')}`.trim()}
           confirm={t('switchBtn')}
           onConfirm={() => {
             setAsk(null);

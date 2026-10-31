@@ -1,4 +1,4 @@
-import type { Mode, SlashCommand } from './protocol.ts';
+import type { AgentMode as Mode, SlashCommand } from './protocol.ts';
 
 /**
  * What an agent backend says to the server, whatever agent is behind it (R-M7-13, R-M7-14). Named after ACP's

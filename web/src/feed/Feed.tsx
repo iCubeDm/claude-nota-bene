@@ -151,7 +151,7 @@ export function Feed({ feed, agent, running }: { feed?: FeedState; agent?: strin
         if (it.kind === 'tool') {
           // a run of consecutive actions is drawn once, by its first item; one action alone stays a plain line
           // a subagent's call is a card of its own: it never folds into a run of actions
-          if (isAgentTool(it.name)) return <ToolLine key={`tool:${it.id}`} item={it} />;
+          if (isAgentTool(it.name, it.toolKind)) return <ToolLine key={`tool:${it.id}`} item={it} />;
           if (items[i - 1]?.kind === 'tool' && !isAgentCall(items[i - 1]!)) return null;
           let end = i + 1;
           while (items[end]?.kind === 'tool' && !isAgentCall(items[end]!)) end++;
@@ -202,4 +202,4 @@ export function Feed({ feed, agent, running }: { feed?: FeedState; agent?: strin
   );
 }
 
-const isAgentCall = (it: FeedState['items'][number]): boolean => it.kind === 'tool' && isAgentTool(it.name);
+const isAgentCall = (it: FeedState['items'][number]): boolean => it.kind === 'tool' && isAgentTool(it.name, it.toolKind);

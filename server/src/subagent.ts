@@ -1,7 +1,7 @@
 import type { RequestListener, ServerResponse } from 'node:http';
 import { TOOL_USE_ID } from '@nota-bene/shared';
 import type { AttachmentStore } from './attachments.ts';
-import type { AgentBackend } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend } from './agent/types.ts';
 import { SAFE_SESSION_ID } from './comments.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';

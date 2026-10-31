@@ -1,5 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AgentEvent, ImageRef, ServerEvent } from '@nota-bene/shared';
-import { isImageType, type AttachmentStore } from '../../attachments.ts';
+import { isImageType, MAX_ATTACHMENT_BYTES, type AttachmentStore } from '../../attachments.ts';
 import { array, CodexMapper, itemId, record, string } from './map.ts';
 
 type HistoryRpc = { request(method: string, params: unknown): Promise<unknown> };
@@ -25,9 +27,25 @@ export async function loadCodexHistory(rpc: HistoryRpc, threadId: string, attach
           const texts: string[] = [];
           for (const part of parts) {
             if (part.type === 'text') texts.push(string(part.text));
+            if (part.type === 'localImage') {
+              try {
+                const file = string(part.path); if (!path.isAbsolute(file)) throw new Error('Invalid native image path');
+                const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+                try {
+                  const st = fs.fstatSync(fd); if (!st.isFile() || st.size > MAX_ATTACHMENT_BYTES) throw new Error('Native image is not a bounded regular file');
+                  const bytes = Buffer.alloc(st.size); fs.readSync(fd, bytes, 0, bytes.length, 0);
+                  const type = bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) ? 'image/png'
+                    : bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff ? 'image/jpeg'
+                    : /^GIF8[79]a/.test(bytes.subarray(0, 6).toString('ascii')) ? 'image/gif'
+                    : bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP' ? 'image/webp' : null;
+                  if (!type) throw new Error('Native attachment is not a supported image');
+                  images.push({ id: attachments.put(bytes, type), mediaType: type, label: '[image]' });
+                } finally { fs.closeSync(fd); }
+              } catch (error) { onError?.(error); }
+            }
             if (part.type === 'image') {
               const match = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(string(part.url));
-              if (match && isImageType(match[1])) {
+              if (match && match[2]!.length <= Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4 && isImageType(match[1])) {
                 const label = /^\[[^\]\n]{1,200}\]$/.test(texts.at(-1) ?? '') ? texts.pop()! : '[image]';
                 try { images.push({ id: attachments.put(Buffer.from(match[2]!, 'base64'), match[1]), mediaType: match[1], label }); }
                 catch (error) { onError?.(error); }

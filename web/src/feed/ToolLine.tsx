@@ -187,7 +187,7 @@ export function ToolLine({ item }: { item: Tool }) {
   const comments = useAppSelector((s) => selectToolCommentCounts(s)[key] ?? 0);
   const end = useAppSelector((s) => selectToolAnchorEnds(s)[key] ?? 0);
   const panelId = useId();
-  if (isAgentTool(item.name)) {
+  if (isAgentTool(item.name, item.toolKind)) {
     return (
       <div data-kind="tool">
         <AgentCard item={item} open={open} panelId={panelId} comments={comments} onToggle={() => dispatch(toggleTool(key))} />

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { selectCapabilitiesKnown } from '@/controls/slice.ts';
 import { useT } from '@/i18n/index.ts';
 import { useAppDispatch, useAppSelector } from '@/store/store.ts';
 import { backgroundTask, selectForeground, selectTaskControls, stopTask, type Task } from './slice.ts';
@@ -64,7 +65,8 @@ export function BackgroundButton({ id, task, className = BTN, after }: { id: str
   const d = useAppDispatch();
   const controls = useAppSelector(selectTaskControls);
   const foreground = useForeground(id);
-  if (!controls || !foreground || !task.call) return null;
+  const background = useAppSelector(selectCapabilitiesKnown)?.taskBackground !== false;
+  if (!background || !controls || !foreground || !task.call) return null;
   const call = task.call;
   return (
     <button type="button" data-task-background title={t('taskBackgroundTip')} onClick={() => { d(backgroundTask(call)); after?.(); }} className={className}>

@@ -7,7 +7,7 @@ import { reportError } from './errors.ts';
 import { listDir, listFiles, resolveInRoot } from './files.ts';
 import { blobSize, branchFiles, gitStatus, listSources, readFile, readTree, SourceError, type Source } from './git.ts';
 import { fuzzyScore } from './fuzzy.ts';
-import type { AgentSession } from './agent/types.ts';
+import type { ProviderSession as AgentSession } from './agent/types.ts';
 import { parseRange } from './range.ts';
 import { serveTmpImage } from './tmpImage.ts';
 import { BlendError, type BlendConverter, type BlendInput } from './blend.ts';

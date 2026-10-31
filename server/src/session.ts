@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { AgentEvent, SlashCommand } from '@nota-bene/shared';
 import { HistoryArchive } from './archive.ts';
 import { AttachmentStore } from './attachments.ts';
-import type { AgentBackend, AgentSession } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend, ProviderSession as AgentSession } from './agent/types.ts';
 import { reportError } from './errors.ts';
 import type { EventHub } from './hub.ts';
 import { setIdleCompactPref } from './prefs.ts';
@@ -99,7 +99,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
     onError: (e) => report('stats', e),
   });
   const { idle, state: idleState } = idleCompaction({
-    config: o.idle, offInSettings: o.idleOffInSettings, root: () => who.root, capabilities: backend.capabilities,
+    config: o.idle, offInSettings: backend.nativeSessions ? () => false : o.idleOffInSettings, root: () => who.root, capabilities: backend.capabilities,
     // no agent (it died): starting one only to compact, with nobody watching, is not ours to do
     busy: () => phase.kind !== 'live' || slot.agent === null || busy(),
     contextUsed: () => stats.current().context?.used ?? null,
@@ -108,7 +108,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
 
   /** a new agent in the current mode, model and effort; its model list is asked for once it is up */
   function startAgent(g: number): AgentSession {
-    const a = backend.start({ ...who.startOptions(), permissionMode: modes.mode, ...models.forStart(who.root), ask: permissions.ask(() => slot.gen, g) });
+    const a = backend.start({ ...who.startOptions(), permissionMode: modes.mode, ...models.forStart(who.root), ask: permissions.ask(() => slot.gen, g), interact: permissions.interact(() => slot.gen, g) });
     if (backend.capabilities.models) models.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) report('models', e); });
     cmds.load(a, () => slot.isCurrent(a, g)).catch((e) => { if (g === slot.gen) console.error('[commands]', e); }); // optional: the menu stays closed, typing works, no toast
     return a;
@@ -327,7 +327,7 @@ export async function createSessionManager(o: SessionOptions): Promise<SessionMa
       const g = slot.gen;
       slot.agent?.interrupt().catch((e) => { if (g === slot.gen) report('interrupt', e); });
     },
-    answer: (permissionId, allow) => permissions.answer(permissionId, allow),
+    answer: (permissionId, allow, response) => permissions.answer(permissionId, allow, response),
     mode: () => modes.mode,
     async setMode(next, id) {
       // mid-switch it is not applied: the answer says the mode as it stands, then the switch announces the new session's

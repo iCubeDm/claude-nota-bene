@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { EffortLevel, ModelOption } from '@nota-bene/shared';
+import type { AgentEffort as EffortLevel, ModelOption } from '@nota-bene/shared';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
 import { useT } from '@/i18n/index.ts';

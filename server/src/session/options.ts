@@ -1,4 +1,4 @@
-import type { AgentBackend } from '../agent/types.ts';
+import type { ProviderBackend as AgentBackend } from '../agent/types.ts';
 import type { HistoryArchive } from '../archive.ts';
 import type { AttachmentStore } from '../attachments.ts';
 import type { EventHub } from '../hub.ts';

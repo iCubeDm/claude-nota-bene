@@ -6,7 +6,7 @@ import { CLAUDE_CAPABILITIES, type AgentEvent, type ServerEvent } from '@nota-be
 import { mapFrames } from './agent/claude/map.ts';
 import { fakeBackend } from './agent/fake.ts';
 import type { FakeTurn } from './agent/fake.ts';
-import type { AgentBackend, PermissionAsk } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend, PermissionAsk } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { createSessionManager, trackedCommand } from './session.ts';
 import { lastSession } from './state.ts';

@@ -48,6 +48,7 @@ export function Meters() {
     l.resets_at ? ` · ${t('resets', new Date(l.resets_at).toLocaleString(getLang(), { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : '';
   const L = st.limits;
   const parts = [
+    ...(st.windows ?? []).map((w, i) => <Meter key={`native-${i}`} label={w.minutes == null ? w.label : `${w.minutes % 60 === 0 ? w.minutes / 60 + 'h' : w.minutes + 'm'}`} pct={w.utilization} tip={`${w.label}${resets(w)}`} />),
     st.context && <Meter key="ctx" label={t('ctx')} pct={st.context.pct} tip={t('ctxTip', fmtK(st.context.used), fmtK(st.context.max))} />,
     L?.five_hour && <Meter key="h5" label={t('h5')} pct={L.five_hour.utilization} tip={`${t('h5Tip')}${resets(L.five_hour)}`} />,
     L?.seven_day && <Meter key="week" label={t('week')} pct={L.seven_day.utilization} tip={`${t('weekTip')}${resets(L.seven_day)}`} />,

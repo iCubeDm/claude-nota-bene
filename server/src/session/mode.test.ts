@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Mode } from '@nota-bene/shared';
+import type { AgentMode as Mode } from '@nota-bene/shared';
 import type { EmitInput } from '../hub.ts';
 import { prefsKey, readPrefs, setModePref } from '../prefs.ts';
 import { ModeKeeper } from './mode.ts';

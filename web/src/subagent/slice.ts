@@ -117,7 +117,7 @@ export const OLD_SERVER = 'old-server';
 export const AGENT_PROTOCOL = 7;
 
 /** Any Agent / Task call is a subagent's: `Agent` in current Claude Code, `Task` in older ones. */
-export const isAgentTool = (name: string): boolean => name === 'Agent' || name === 'Task';
+export const isAgentTool = (name: string, toolKind?: string): boolean => toolKind === 'agent' || name === 'Agent' || name === 'Task';
 
 /** Whether the Agent call has its tool_result, looked up in the chat and in every loaded subagent's feed (a nested call is in its parent's). */
 export const selectToolResulted = (s: RootState, tool: string): boolean => {

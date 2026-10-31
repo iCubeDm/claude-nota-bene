@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, ServerEvent, Stats } from '@nota-bene/shared';
-import type { AgentSession } from './agent/types.ts';
+import type { ProviderSession as AgentSession } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { StatsService, UsageUnavailableError, mapContextUsage, mapUsage, resetStatsReports } from './stats.ts';
 

@@ -1,11 +1,14 @@
-import type { AgentEvent, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, SlashCommand, Stats, SubagentView } from '@nota-bene/shared';
+import type { AgentEvent, AgentMode, AgentEffort, Interaction, InteractionAnswer, Capabilities, EffortLevel, ImageType, Mode, ModelOption, ServerEvent, SlashCommand, Stats, SubagentView } from '@nota-bene/shared';
 import type { AttachmentStore } from '../attachments.ts';
 
 export type SendImage = { mediaType: ImageType; data: string /* base64 */; label: string };
 
 export type PermissionAsk = (toolName: string, input: Record<string, unknown>, signal: AbortSignal) => Promise<boolean>;
 
-export interface AgentSession {
+export type InteractAsk = (prompt: Interaction, input: Record<string, unknown>, signal: AbortSignal) => Promise<InteractionAnswer | null>;
+export type StartOptions<M = Mode, E = EffortLevel> = { cwd: string; resume?: string; fork?: boolean; permissionMode: M; model?: string; effort?: E; ask: PermissionAsk; interact?: InteractAsk };
+
+export interface AgentSession<M = Mode, E = EffortLevel> {
   /** What the agent says, already mapped (R-M7-13: no SDK shapes past the backend); ends after close(). */
   readonly messages: AsyncIterable<AgentEvent>;
   send(m: { uuid: string; text: string; priority: 'next' | 'now'; images?: SendImage[] }): void;
@@ -13,7 +16,7 @@ export interface AgentSession {
   /** The CLI's own @ search: project-relative paths, best first. May reject; [] while the CLI is still indexing. */
   fileSuggestions(query: string): Promise<string[]>;
   /** Changes the permission mode of the running CLI; rejects when the CLI refuses. */
-  setPermissionMode(mode: Mode): Promise<void>;
+  setPermissionMode(mode: M): Promise<void>;
   /** The models the agent offers; rejects when the CLI cannot answer. */
   supportedModels(): Promise<ModelOption[]>;
   /** The slash commands and skills of the session as the `/` menu shows them (nothing bound to a terminal; the user's first); rejects when the CLI cannot answer. A later change arrives as a `commands` event. */
@@ -21,11 +24,11 @@ export interface AgentSession {
   /** From the next response on (a running turn goes on); null: the agent's default. Rejects when the CLI refuses. */
   setModel(model: string | null): Promise<void>;
   /** From the next response on; null: the model's default effort. */
-  setEffort(effort: EffortLevel | null): Promise<void>;
+  setEffort(effort: E | null): Promise<void>;
   /** Context window usage; rejects when the CLI cannot answer. */
-  contextUsage(): Promise<{ used: number; max: number; pct: number }>;
+  contextUsage(): Promise<Stats['context']>;
   /** Session cost and plan limits; throws UsageUnavailableError when the SDK has no usage API. */
-  usage(): Promise<{ cost: number | null; limits: Stats['limits'] }>;
+  usage(): Promise<{ cost: number | null; limits: Stats['limits']; windows?: Stats['windows'] }>;
   /** Stops a running task (a task_id); the agent then reports it ended as `stopped`. Rejects when the CLI refuses. */
   stopTask(taskId: string): Promise<void>;
   /**
@@ -46,10 +49,16 @@ export type SessionListEntry = {
 
 export type SessionInfo = { customTitle?: string; summary?: string; firstPrompt?: string; cwd?: string };
 
-export interface AgentBackend {
+export interface AgentBackend<M = Mode, E = EffortLevel> {
   /** what this agent can do; sent in `hello`, enforced by the server (R-M7-15) */
   readonly capabilities: Capabilities;
-  start(o: { cwd: string; resume?: string; /** with resume: branch into a new session id (SDK forkSession) */ fork?: boolean; permissionMode: Mode; /** absent: the agent's default */ model?: string; effort?: EffortLevel; ask: PermissionAsk }): AgentSession;
+  /** Native metadata must not fall back to Claude transcript files. */
+  nativeSessions?: boolean;
+  close?(): Promise<void>;
+  account?(): Promise<{ signedIn: boolean; required: boolean }>;
+  login?(): Promise<{ url: string }>;
+
+  start(o: StartOptions<M, E>): AgentSession<M, E>;
   /** `attachments` receives the images found in the transcript; the events carry ImageRefs only. */
   /** Every project's sessions, newest first (sdk: listSessions({ limit: 300 })). */
   listSessions(): Promise<SessionListEntry[]>;
@@ -65,3 +74,7 @@ export interface AgentBackend {
     /** what the server knows of the call: a live task of this process, and whether its tool_result is in (see EventHub.callState) */ call?: { live: boolean; hasResult: boolean },
   ): Promise<SubagentView | null>;
 }
+
+export type ProviderBackend = AgentBackend<AgentMode, AgentEffort>;
+export type ProviderSession = AgentSession<AgentMode, AgentEffort>;
+export type ProviderStartOptions = StartOptions<AgentMode, AgentEffort>;

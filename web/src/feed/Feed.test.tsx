@@ -260,3 +260,20 @@ it('prepending an earlier segment keeps the live lines (an open group, done, mar
   expect(view.container.querySelectorAll('[data-kind="done"]')[1]).toBe(done);
   expect(view.container.querySelectorAll('[data-kind="marker"]')[1]).toBe(marker);
 });
+
+it('structured questions send actual typed answers and stop accepting input after resolution', () => {
+  const { store, sent } = setup();
+  act(() => { store.dispatch(serverEvent({ kind: 'permission', id: 'native', toolName: 'Codex', input: {}, prompt: { title: 'Pick a colour', choices: [{ id: 'submit', label: 'Send answers' }], fields: [{ id: 'q', label: 'Colour', required: true, options: ['Blue', 'Red'] }] }, ts: 1 })); });
+  fireEvent.change(screen.getByLabelText('Colour'), { target: { value: 'Green' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  expect(sent).toContainEqual({ type: 'permission', id: 'native', allow: true, response: { choice: 'submit', values: { q: 'Green' } } });
+  act(() => { store.dispatch(serverEvent({ kind: 'permission-done', id: 'native', allow: true, ts: 2 })); });
+  expect(screen.queryByLabelText('Colour')).toBeNull();
+});
+
+it('native compaction with unknown token count does not display an invented zero', () => {
+  const { store, view } = setup();
+  act(() => { store.dispatch(serverEvent({ kind: 'agent', e: { t: 'compacted' }, ts: 0 })); });
+  expect(view.container.textContent).toContain('context compacted');
+  expect(view.container.textContent).not.toContain('0 tokens');
+});

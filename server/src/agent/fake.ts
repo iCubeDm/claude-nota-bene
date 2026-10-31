@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type EffortLevel, type Mode, type ModelOption, type ServerEvent, type SlashCommand, type Stats } from '@nota-bene/shared';
+import { CLAUDE_CAPABILITIES, type AgentEvent, type Capabilities, type AgentEffort as EffortLevel, type AgentMode as Mode, type ModelOption, type ServerEvent, type SlashCommand, type Stats } from '@nota-bene/shared';
 import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import { offered, pickCommands, toSlash } from './claude/commands.ts';
 import { isWire, mapFrames, mapSdk, type SDKMessage } from './claude/map.ts';
 import { transcriptToEvents } from './claude/transcript.ts';
-import type { AgentBackend, AgentSession, PermissionAsk } from './types.ts';
+import type { ProviderBackend as AgentBackend, ProviderSession as AgentSession, PermissionAsk } from './types.ts';
 
 export type FakeTurn = {
   text: string;

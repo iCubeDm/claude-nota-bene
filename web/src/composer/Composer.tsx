@@ -1,3 +1,4 @@
+import { AgentAccount } from '@/controls/AgentAccount.tsx';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip.tsx';
@@ -258,7 +259,7 @@ export function Composer() {
           <TooltipContent className="whitespace-pre-line">{t('attach')}</TooltipContent>
         </Tooltip>
         <span className="grow" />
-        <Meters />
+        <AgentAccount /><Meters />
         <CompactClear />
       </div>
     </div>

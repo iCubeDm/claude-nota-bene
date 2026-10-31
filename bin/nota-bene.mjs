@@ -404,7 +404,7 @@ export async function loginTarget(base) {
 
 function last(dir) {
   const id = lastSession(realDir(dir));
-  if (!id || !transcriptExists(id)) return 1;
+  if (!id || (process.env.NOTA_BENE_AGENT !== 'codex' && !transcriptExists(id))) return 1;
   process.stdout.write(`${id}\n`);
   return 0;
 }

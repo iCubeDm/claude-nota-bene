@@ -1,4 +1,4 @@
-import type { AgentSession } from '../agent/types.ts';
+import type { ProviderSession as AgentSession } from '../agent/types.ts';
 import type { PhaseKind } from './phase.ts';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref());

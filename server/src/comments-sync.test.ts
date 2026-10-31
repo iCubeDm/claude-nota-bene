@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import type { Comment, ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
-import type { AgentBackend } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend } from './agent/types.ts';
 import { CommentStore } from './comments.ts';
 import { startServer } from './server.ts';
 

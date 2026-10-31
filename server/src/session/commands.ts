@@ -1,5 +1,5 @@
 import type { SlashCommand } from '@nota-bene/shared';
-import type { AgentSession } from '../agent/types.ts';
+import type { ProviderSession as AgentSession } from '../agent/types.ts';
 import type { EmitInput } from '../hub.ts';
 
 type Agent = Pick<AgentSession, 'supportedCommands'>;

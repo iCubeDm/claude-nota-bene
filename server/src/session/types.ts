@@ -1,4 +1,4 @@
-import type { EffortLevel, IdleCompact, ImageRef, Mode, ModelOption, SlashCommand, Stats } from '@nota-bene/shared';
+import type { AgentEffort as EffortLevel, IdleCompact, ImageRef, AgentMode as Mode, ModelOption, SlashCommand, Stats } from '@nota-bene/shared';
 
 export type SessionManager = {
   /** Returns the reason for a send refused (nothing sent or emitted; the server tells the asking socket): 'switching' during a switch, 'busy' for a /compact or /clear typed while the agent is busy; else null. */
@@ -6,7 +6,7 @@ export type SessionManager = {
   /** What `send` would answer for this text right now, without sending (the server asks before it marks comments sent). */
   refusal(text: string): 'switching' | 'busy' | null;
   interrupt(): void;
-  answer(permissionId: string, allow: boolean): void;
+  answer(permissionId: string, allow: boolean, response?: import('@nota-bene/shared').InteractionAnswer): void;
   mode(): Mode;
   /** Asks the agent, then persists and announces; a refusal is reported and the current mode re-announced. */
   /** answers with one `mode` event carrying `ack: id` (unless a session switch takes over, which announces its own) */

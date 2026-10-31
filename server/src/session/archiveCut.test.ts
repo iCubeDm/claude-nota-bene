@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CLAUDE_CAPABILITIES, type AgentEvent, type ServerEvent } from '@nota-bene/shared';
-import type { AgentBackend } from '../agent/types.ts';
+import type { ProviderBackend as AgentBackend } from '../agent/types.ts';
 import { HistoryArchive } from '../archive.ts';
 import { EventHub } from '../hub.ts';
 import { createSessionManager } from '../session.ts';

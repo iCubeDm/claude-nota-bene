@@ -1,4 +1,4 @@
-import type { AgentSession, SendImage } from '../agent/types.ts';
+import type { ProviderSession as AgentSession, SendImage } from '../agent/types.ts';
 
 type QueueOptions = {
   gen: () => number;

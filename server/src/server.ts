@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { parseClientMessage, PROTOCOL, TAKEN_OVER_CODE } from '@nota-bene/shared';
 import type { ClientMessage, Comment } from '@nota-bene/shared';
-import type { AgentBackend } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend } from './agent/types.ts';
 import { guard, reportError } from './errors.ts';
 import { HistoryArchive, historyRoutes } from './archive.ts';
 import { subagentRoutes } from './subagent.ts';
@@ -220,6 +220,15 @@ export async function startServer(o: {
           isSent: (id) => store.get(manager.info().id).some((c) => c.id === id && c.status === 'sent'),
         }),
         '/sessions': sessionsRoute,
+        '/agent-account': (req, res) => {
+          const run = async () => {
+            if (!o.backend.account) { res.writeHead(404); res.end(); return; }
+            if (req.method !== 'GET' && req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+            const value = req.method === 'POST' ? await o.backend.login?.() : await o.backend.account();
+            res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(value));
+          };
+          void run().catch((e) => { res.writeHead(503, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: e instanceof Error ? e.message : 'Codex unavailable' })); });
+        },
         '/restart-server': (req, res) => {
           if (req.method !== 'POST') {
             res.writeHead(405, { allow: 'POST', 'content-type': 'text/plain; charset=utf-8' });
@@ -236,7 +245,7 @@ export async function startServer(o: {
           res.end('{"ok":true}', () => exitWith(75));
         },
         ...systemRoutes({
-          hub, root, port: () => ownPort, repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..'),
+          hub, root, modes: o.backend.capabilities.modes, port: () => ownPort, repoDir: o.repoDir ?? path.resolve(import.meta.dirname, '..', '..'),
           control: {
             supervised,
             exiting: () => exiting,
@@ -439,7 +448,7 @@ export async function startServer(o: {
           case 'permission':
             // msg.input is deliberately ignored: a client must never rewrite the input of an approved tool call
             // (the WS also accepts origin-less connections). The agent gets the ORIGINAL input back, as in the prototype.
-            manager.answer(msg.id, msg.allow);
+            manager.answer(msg.id, msg.allow, msg.response);
             break;
           case 'command':
             if (!caps[msg.name]) return refuse(`command ${msg.name}`);
@@ -455,6 +464,7 @@ export async function startServer(o: {
             manager.stopTask(msg.id).catch((e) => reportError(hub, 'task', e));
             break;
           case 'task-background':
+            if (caps.taskBackground === false) return refuse('foreground-to-background is unavailable for this provider');
             // false: the call is not a foreground task any more (it ended, or went to the background already)
             manager.backgroundTask(msg.toolUseId).then(
               (moved) => { if (!moved) reportError(hub, 'task', new Error('nothing to move to the background: the task is not running in the foreground')); },
@@ -593,10 +603,11 @@ export async function startServer(o: {
       hubs.delete(hub);
       if (heartbeat) clearInterval(heartbeat);
       manager.close();
+      const backendClose = o.backend.close?.().catch((e) => reportError(hub, 'backend-close', e));
       blend?.dispose();
       for (const c of wss.clients) c.terminate();
       wss.close(() => {
-        server.close(() => resolve());
+        server.close(() => { void Promise.resolve(backendClose).then(() => resolve()); });
         server.closeAllConnections();
       });
     }));

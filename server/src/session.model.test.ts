@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ModelOption, ServerEvent } from '@nota-bene/shared';
 import { fakeBackend } from './agent/fake.ts';
-import type { AgentBackend } from './agent/types.ts';
+import type { ProviderBackend as AgentBackend } from './agent/types.ts';
 import { EventHub } from './hub.ts';
 import { prefsKey, readPrefs, setModelPref } from './prefs.ts';
 import { createSessionManager } from './session.ts';
