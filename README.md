@@ -2,7 +2,7 @@
 
 # Nota Bene
 
-A browser IDE over [Claude Code](https://claude.com/claude-code) and Codex, using the Claude Agent SDK or the native Codex app-server. It brings your chosen agent into a window made for reviewing: select any fragment of a reply or of a file, leave a note in the margin, and send all the notes to the agent as one batch. The window also has a file tree, viewers for code, images, video and audio, and a session picker.
+A browser IDE over [Claude Code](https://claude.com/claude-code) and [Codex](https://openai.com/codex/), using the Claude Agent SDK or the native Codex app-server. It brings your chosen agent into a window made for reviewing and supervision flow: select any fragment of a reply or of a file, leave a note in the margin, and send all the notes to the agent as one batch. The window also has a file tree, viewers for code, images, video and audio, and a session picker.
 
 ![Selecting text in a reply, adding a comment and sending it](https://raw.githubusercontent.com/iCubeDm/nota-bene-ide/main/docs/media/annotate-text.gif)
 
@@ -49,7 +49,22 @@ settings; both may run in the same project. Models, skills and sessions in a Cod
 window come from Codex. Do not continue the same conversation in another client
 while the window owns it; fork when carrying a CLI/Desktop conversation over.
 
-To expose the skill from a source checkout in Codex CLI and local Desktop, link the skill into
+To install the skill without copying files manually, first install the launcher:
+
+```sh
+npm i -g nota-bene-ide@1.1.0
+```
+
+Then ask Codex to install the skill from this repository:
+
+```text
+$skill-installer Install the nb skill from https://github.com/iCubeDm/nota-bene-ide/tree/main/codex/skills/nb
+```
+
+Use the installed skill on your next turn. The launcher and the skill are separate
+installs; the Claude Code plugin manages the launcher installation automatically.
+
+For a source checkout, you can instead link the skill into
 `~/.agents/skills/nb` (do not overwrite an existing skill):
 
 ```sh
