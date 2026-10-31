@@ -13,7 +13,7 @@ export const ru = {
   takenTitle: 'Открыто в другой вкладке',
   workHere: 'Работать здесь',
   loginRequiredTitle: 'Окно не авторизовано',
-  loginRequiredBody: 'Откройте его заново командой nota-bene или через /nb в Claude Code: адрес, который они открывают, содержит вход. Ссылки без него (закладки, скопированного адреса) недостаточно.',
+  loginRequiredBody: 'Откройте его заново командой nota-bene или навыком nb вашего агента (/nb в Claude Code, $nb в Codex): адрес, который они открывают, содержит вход. Ссылки без него (закладки, скопированного адреса) недостаточно.',
   connecting: 'подключение…', // new in M0 (the prototype set the label from markup)
   offline: 'нет связи с сервером…',
   serverError: (w?: string) => `Ошибка сервера${w ? ' · ' + w : ''}`,
@@ -238,6 +238,7 @@ export const ru = {
   aboutState: 'Папка состояния',
   aboutLogs: 'Логи',
   aboutNoLogs: 'в задаче Claude Code, которая запустила это окно',
+  aboutNoLogsCodex: 'в задаче Codex, которая запустила это окно',
   aboutNode: 'Node',
   revealOpened: 'Показать открытый файл',
   collapseAll: 'Свернуть всё',

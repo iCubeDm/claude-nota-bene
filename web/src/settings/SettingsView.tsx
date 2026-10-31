@@ -210,7 +210,7 @@ export function SettingsView({ active }: { active: boolean }) {
           <>
             <Row label={t('aboutVersion')}><span className="font-mono text-xs">{about.data.version}</span></Row>
             <Row label={t('aboutState')}><span className="font-mono text-xs">{short(about.data.stateDir)}</span></Row>
-            <Row label={t('aboutLogs')}>{about.data.logs.length ? <span className="font-mono text-xs">{about.data.logs.map(short).join(', ')}</span> : <span className="text-xs text-muted-foreground">{t('aboutNoLogs')}</span>}</Row>
+            <Row label={t('aboutLogs')}>{about.data.logs.length ? <span className="font-mono text-xs">{about.data.logs.map(short).join(', ')}</span> : <span className="text-xs text-muted-foreground">{t(capabilities?.provider === 'codex' ? 'aboutNoLogsCodex' : 'aboutNoLogs')}</span>}</Row>
             <Row label={t('aboutNode')}><span className="font-mono text-xs">{about.data.node} · pid {about.data.pid}</span></Row>
           </>
         )}

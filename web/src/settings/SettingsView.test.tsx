@@ -2,7 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { Provider } from 'react-redux';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { setLang } from '@/i18n/index.ts';
-import { makeStore } from '@/store/store.ts';
+import { makeStore, serverEvent } from '@/store/store.ts';
+import { CLAUDE_CAPABILITIES } from '@nota-bene/shared';
 import { App } from '@/App.tsx';
 import { selectTabs } from '@/tabs/slice.ts';
 
@@ -126,6 +127,13 @@ it('Defaults: the mode is saved on the server; About shows the version', async (
   expect(screen.getByText(/in the Claude Code task/)).toBeInTheDocument();
   act(() => void fireEvent.change(screen.getByRole('combobox', { name: 'Interface language' }), { target: { value: 'ru' } }));
   expect(await screen.findByText('Окна')).toBeInTheDocument();
+});
+
+it('About names the agent of the window where a log would be', async () => {
+  const store = setup();
+  expect(await screen.findByText(/in the Claude Code task/)).toBeInTheDocument();
+  act(() => void store.dispatch(serverEvent({ kind: 'hello', protocol: 12, capabilities: { ...CLAUDE_CAPABILITIES, provider: 'codex' } })));
+  expect(await screen.findByText(/in the Codex task/)).toBeInTheDocument();
 });
 
 it('the language select follows a change made elsewhere (a hello), with no copy of its own', async () => {
