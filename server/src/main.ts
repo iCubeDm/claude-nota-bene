@@ -82,6 +82,7 @@ export function stateLine(): string {
 
 /** Exit code for a failed listen (port taken): the launcher retries its first start on another port. */
 export const LISTEN_FAILED = 98;
+export const NO_AGENT_BINARY = 76; // bin/nota-bene.mjs: no relaunch
 
 /**
  * The launcher's env vars are ours only if that launcher is our parent right now. Anything started from a shell inside
@@ -171,6 +172,10 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(self
     if (e instanceof SecretError) {
       console.error(`Nota Bene: ${e.message}`); // one clear line, not a stack: the user has to fix a file
       process.exit(1);
+    }
+    if (e instanceof Error && /^Native CLI binary .* not found/.test(e.message)) { // the SDK's word for a missing optional binary
+      console.error('Nota Bene: this install has no Claude Code binary (it was installed with --omit=optional). Reinstall without that flag, or start a Codex window with --agent codex.');
+      process.exit(NO_AGENT_BINARY);
     }
     console.error(e);
     process.exit(1);

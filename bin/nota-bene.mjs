@@ -51,6 +51,7 @@ const DEV_BACKEND_PORT = 4780; // `npm run dev`'s server (scripts/dev.mjs, web/v
 const EXIT_SECRET = 3; // a secret file is refused (loose mode, foreign owner, ...): --find & co. say so instead of "not found"
 const RESTART = 75;
 const LISTEN_FAILED = 98; // server/src/main.ts LISTEN_FAILED
+const NO_AGENT_BINARY = 76; // server/src/main.ts NO_AGENT_BINARY: the server said why, a relaunch cannot help
 const CLEAN_EXITS = new Set([0, 130, 143]);
 const MAX_CRASHES = 5;
 const MAX_RESTARTS = 10;
@@ -709,6 +710,8 @@ async function supervise(o, autoPort, release, state) {
       retried = true;
       continue; // still the first start: the original --resume/--fork/--new apply
     }
+
+    if (code === NO_AGENT_BINARY) return code;
 
     if (code === RESTART) {
       const n = recent(restarts);

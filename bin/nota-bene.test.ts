@@ -253,6 +253,13 @@ describe('nota-bene launcher', () => {
     expect(windows()['4794']).toBeUndefined();
   }, 15000);
 
+  it('an install with no agent binary stops at once, with no relaunch', async () => {
+    const r = launch(['--port', '4794'], { NOTA_BENE_TEST_CRASH: '76' });
+    expect(await r.exited).toBe(76);
+    expect(r.err()).not.toMatch(/relaunching/);
+    expect(windows()['4794']).toBeUndefined();
+  }, 15000);
+
   // what Claude Code sends when the /nb background task is stopped
   // SIGTERM takes the same handler (the parent-shell test below goes through it)
   it('SIGINT stops the child, removes the entry and exits 0 without a relaunch', async () => {
