@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { parseProvider, providerStateDir } from './agent/provider.ts';
 
 /** A secret or the state folder is unusable (wrong owner, loose mode, ...): the user has to act. Never swallowed as "not ours". */
 export class SecretError extends Error {}
@@ -8,8 +9,12 @@ export class SecretError extends Error {}
 const tightened = new Set<string>();
 
 /** The state dir. It holds the access token, so it is private to the user: created 700, and tightened to 700 once per process. */
+export function stateBaseDir(): string {
+  return process.env.NOTA_BENE_HOME ?? path.join(os.homedir(), '.nota-bene');
+}
+
 export function stateDir(): string {
-  const dir = process.env.NOTA_BENE_HOME ?? path.join(os.homedir(), '.nota-bene');
+  const dir = providerStateDir(stateBaseDir(), parseProvider(process.env.NOTA_BENE_AGENT));
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   if (!tightened.has(dir)) {
     if (process.getuid && fs.statSync(dir).uid !== process.getuid()) {

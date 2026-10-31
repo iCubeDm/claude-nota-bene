@@ -7,15 +7,16 @@ import { sdkBackend } from './agent/claude/sdk.ts';
 import { startServer } from './server.ts';
 import { transcriptExists } from './sessions.ts';
 import { lastSession, stateDir } from './state.ts';
+import { parseProvider, type AgentProvider } from './agent/provider.ts';
 
 const USAGE =
-  'Usage: node server/src/main.ts [dir] [--port N] [--resume ID [--fork]] [--new] [--continue] [--fake script.json] [--allow-origin URL]';
+  'Usage: node server/src/main.ts [dir] [--agent claude|codex] [--port N] [--resume ID [--fork]] [--new] [--continue] [--fake script.json] [--allow-origin URL]';
 
 export function parseArgs(
   argv: string[],
   cwd: string,
 ): {
-  dir: string; port: number; resume?: string; fork: boolean; new: boolean; continue: boolean; fake?: string; allowOrigins: string[];
+  dir: string; port: number; resume?: string; fork: boolean; new: boolean; continue: boolean; fake?: string; allowOrigins: string[]; agent?: AgentProvider;
 } {
   let dirArg: string | undefined;
   let port = 4777;
@@ -24,6 +25,7 @@ export function parseArgs(
   let fork = false;
   let fresh = false;
   let fake: string | undefined;
+  let agent: AgentProvider | undefined;
   const allowOrigins: string[] = [];
   const value = (i: number): string => {
     const v = argv[i];
@@ -36,7 +38,8 @@ export function parseArgs(
       const v = value(++i);
       if (!/^\d+$/.test(v) || Number(v) > 65535) throw new Error(`${USAGE}\nInvalid port: ${v}`);
       port = Number(v);
-    } else if (a === '--resume') resume = value(++i);
+    } else if (a === '--agent') agent = parseProvider(value(++i));
+    else if (a === '--resume') resume = value(++i);
     else if (a === '--continue') cont = true;
     else if (a === '--fork') fork = true;
     else if (a === '--new') fresh = true;
@@ -49,7 +52,7 @@ export function parseArgs(
   const dir = fs.realpathSync.native(path.resolve(cwd, dirArg ?? '.'));
   if (fork && resume === undefined) throw new Error(`${USAGE}\n--fork needs --resume`);
   if (fresh && resume !== undefined) throw new Error(`${USAGE}\n--new cannot be combined with --resume`);
-  return { dir, port, resume, fork, new: fresh, continue: cont, fake, allowOrigins };
+  return { dir, port, resume, fork, new: fresh, continue: cont, fake, allowOrigins, ...(agent ? { agent } : {}) };
 }
 
 /**
@@ -102,6 +105,7 @@ async function main(): Promise<void> {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(2);
   }
+  process.env.NOTA_BENE_AGENT = args.agent ?? 'claude';
   const backend = args.fake
     ? fakeFromScript(JSON.parse(fs.readFileSync(args.fake, 'utf8')), args.dir)
     : sdkBackend();

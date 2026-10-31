@@ -177,6 +177,20 @@ const bin = (args: string[], extra: Record<string, string> = {}) =>
   spawnSync(process.execPath, [BIN, ...args], { env: env(extra), encoding: 'utf8', timeout: 10000 });
 
 describe('nota-bene launcher', () => {
+  it('keeps Claude and Codex windows separate in the same project', async () => {
+    const claude = launch(['--port', '4791']);
+    await waitFor(() => windows()['4791']);
+    const codex = launch(['--port', '4792', '--agent', 'codex']);
+    await waitFor(() => fs.existsSync(path.join(home, 'providers', 'codex', 'windows', '4792.json')));
+    expect(codex.out()).not.toContain('already open');
+    expect(bin(['--find', project]).stdout.trim()).toBe('4791');
+    const foundCodex = bin(['--find', project, '--agent', 'codex']);
+    expect({ code: foundCodex.status, error: foundCodex.stderr }).toEqual({ code: 0, error: '' });
+    expect(foundCodex.stdout.trim()).toBe('4792');
+    expect(fs.existsSync(path.join(home, 'providers', 'codex', 'token'))).toBe(true);
+    expect(fs.readFileSync(path.join(home, 'providers', 'codex', 'token'), 'utf8')).not.toBe(tokenOf());
+  }, 15000);
+
   it('starts, /info answers supervised, the registry has the entry with both pids; --find reports it', async () => {
     const r = launch(['--port', '4791']);
     const w = await waitFor(() => windows()['4791']);

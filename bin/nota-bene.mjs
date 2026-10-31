@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { SecretError, accessToken, loginCredential, newNonce, proveListener, stateSecret } from '../server/src/auth.ts';
 import { transcriptExists } from '../server/src/sessions.ts';
 import { lastSession, stateDir } from '../server/src/state.ts';
+import { parseProvider } from '../server/src/agent/provider.ts';
 import {
   liveWindows, pidAlive, probeInfo, readWindows, registerWindow, restartingWindows, unregisterWindow,
 } from '../server/src/windows.ts';
@@ -43,7 +44,7 @@ const SELF = fileURLToPath(import.meta.url);
 // the source checkout runs the server's .ts directly; the published package ships it compiled (Node does not strip types
 // under node_modules) at the same relative place
 const MAIN = path.join(REPO, fs.existsSync(path.join(REPO, 'server/src/main.js')) ? 'server/src/main.js' : 'server/src/main.ts');
-const USAGE = 'Usage: nota-bene [dir] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]\n'
+const USAGE = 'Usage: nota-bene [dir] [--agent claude|codex] [--port N] [--resume ID [--fork]] [--new] [--detach] [--no-open]\n'
   + '       nota-bene --find DIR [--scan] | --last DIR | --url PORT | --front PORT\n'
   + '       nota-bene --help | --version';
 const DEV_BACKEND_PORT = 4780; // `npm run dev`'s server (scripts/dev.mjs, web/vite.config.ts)
@@ -87,7 +88,8 @@ export function parseArgs(argv) {
       const v = value(++i);
       if (!/^\d+$/.test(v) || Number(v) > 65535) throw new Error(`${USAGE}\nInvalid port: ${v}`);
       o.port = Number(v);
-    } else if (a === '--resume') o.resume = value(++i);
+    } else if (a === '--agent') o.agent = parseProvider(value(++i));
+    else if (a === '--resume') o.resume = value(++i);
     else if (a === '--fork') o.fork = true;
     else if (a === '--new') o.new = true;
     else if (a === '--continue') o.continue = true;
@@ -114,6 +116,7 @@ export function parseArgs(argv) {
 /** The server's argv. A relaunch resumes what the window has now (--continue), never the original --resume/--fork/--new. */
 export function serverArgs(o, port, relaunch) {
   const a = [o.dir, '--port', String(port)];
+  if (o.agent) a.push('--agent', o.agent);
   if (relaunch) a.push('--continue');
   else {
     if (o.resume !== undefined) a.push('--resume', o.resume);
@@ -751,6 +754,7 @@ async function main(argv) {
     process.stdout.write(`${packageVersion()}\n`);
     return 0;
   }
+  process.env.NOTA_BENE_AGENT = o.agent ?? 'claude';
   try {
     if (o.find !== undefined) return await find(o.find, o.scan);
     if (o.last !== undefined) return last(o.last);

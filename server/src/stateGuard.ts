@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { stateDir } from './state.ts';
+import { stateBaseDir, stateDir } from './state.ts';
 
 /**
  * Every folder that holds secrets, as real paths: the current state folder and the two default ones (`~/.nota-bene`,
@@ -18,7 +18,7 @@ function realStates(): string[] | null {
   } catch {
     return null;
   }
-  const out = new Set([cur]);
+  const out = new Set([cur, realish(stateBaseDir())]);
   for (const name of ['.nota-bene', '.nota-bene-dev']) out.add(realish(path.join(os.homedir(), name)));
   return [...out];
 }
